@@ -42,7 +42,7 @@ ligas_locales = {
     "🇮🇹 Serie A (Italia)": "soccer_italy_serie_a",
     "🇩🇪 Bundesliga (Alemania)": "soccer_germany_bundesliga",
     "🇫🇷 Ligue 1 (Francia)": "soccer_france_ligue_one",
-    "🇳🇱 Eredivisie (Países Bajos)": "soccer_netherlands_eredivisie"
+    "🇳🇱 Eredivisie (Países Bajos)": "soccer_netherlands_eredivisie" # Corrección de Typo en la clave emoji original
 }
 
 ligas_locales_ordenadas = dict(sorted(ligas_locales.items()))
@@ -70,17 +70,18 @@ if 'parlay_automatico' not in st.session_state:
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
-# --- CACHÉ INTELIGENTE ---
-@st.cache_data(ttl=600)  
+# --- CACHÉ INTELIGENTE MEJORADO ---
+@st.cache_data(ttl=120)  # Reducido a 2 minutos para evitar atascos de datos viejos
 def consultar_api_odds(sport_key, market_key):
     if not sport_key:
         return []
-    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={market_key}&oddsFormat=decimal"
+    # MODIFICACIÓN CRÍTICA: Traemos siempre h2h como respaldo absoluto para Doble Oportunidad y cálculos
+    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={market_key},h2h&oddsFormat=decimal"
     try:
         response = requests.get(url)
         if response.status_code == 200:
             res_json = response.json()
-            if res_json and len(res_json) > 0 and any(p.get('bookmakers') for p in res_json):
+            if res_json and len(res_json) > 0:
                 return res_json
     except Exception:
         pass
@@ -106,7 +107,8 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         fecha_local = fecha_utc - timedelta(hours=5)
         horas_para_partido = (fecha_local - ahora).total_seconds() / 3600
         
-        if horas_para_partido < -5.0 or horas_para_partido > limite_horas:
+        # Filtro flexible para no ocultar partidos del mismo día
+        if horas_para_partido < -3.0 or horas_para_partido > limite_horas:
             continue
             
         bookmakers = partido.get('bookmakers', [])
@@ -118,63 +120,67 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         
         for b in bookmakers:
             b_key = b['key'].lower()
-            if not b.get('markets') or len(b['markets']) == 0: continue
+            if not b.get('markets'): continue
             
-            mercado_recibido = b['markets'][0]['key']
-            outcomes = b['markets'][0]['outcomes']
+            dict_b_markets = {m['key']: m['outcomes'] for m in b['markets']}
             
-            if mercado_recibido == "double_chance" and mercado == "Doble Oportunidad":
-                for o in outcomes:
-                    o_name = o['name']
-                    if o_name in ["home_draw", "home or draw", "1X"]: o_name = "1X (Local o Empate)"
-                    elif o_name in ["away_draw", "away or draw", "X2"]: o_name = "X2 (Visitante o Empate)"
-                    elif o_name in ["home_away", "home or away", "12"]: o_name = "12 (Local o Visitante)"
-                    cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-                    if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
-                    
-            elif mercado_recibido == "btts" and mercado == "Ambos Anotan (BTTS)":
-                for o in outcomes:
-                    o_name = "Sí" if o['name'].lower() in ["yes", "sí", "si"] else "No"
-                    cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-                    if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
-                    
-            elif mercado_recibido == "totals" and "Goles" in mercado:
-                for o in outcomes:
-                    point = o.get('point', 2.5)
-                    o_name = f"Más de {point}" if o['name'].lower() in ["over", "más"] else f"Menos de {point}"
-                    cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-                    if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
-                    
-            elif mercado_recibido == "h2h" and mercado == "1X2 (Ganador)":
-                for o in outcomes:
-                    o_name = "Local" if o['name'] == home else ("Visitante" if o['name'] == away else "Empate")
-                    cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-                    if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
-
-            elif mercado_recibido == "h2h" and mercado in ["Doble Oportunidad", "Ambos Anotan (BTTS)"]:
-                precios_h2h = {o['name']: float(o['price']) for o in outcomes}
-                draw_key = None
-                for k in precios_h2h.keys():
-                    if k not in [home, away]: draw_key = k; break
+            # 1. CASO DOBLE OPORTUNIDAD (Nativo + Simulación Matemática de Respaldo)
+            if mercado == "Doble Oportunidad":
+                if "double_chance" in dict_b_markets:
+                    for o in dict_b_markets["double_chance"]:
+                        o_name = o['name']
+                        if o_name in ["home_draw", "home or draw", "1X", f"{home} or draw"]: o_name = "1X (Local o Empate)"
+                        elif o_name in ["away_draw", "away or draw", "X2", f"{away} or draw"]: o_name = "X2 (Visitante o Empate)"
+                        elif o_name in ["home_away", "home or away", "12", f"{home} or {away}"]: o_name = "12 (Local o Visitante)"
+                        
+                        cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
+                        if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
                 
-                if home in precios_h2h and away in precios_h2h and draw_key is not None:
-                    ph, pd, pa = 1 / precios_h2h[home], 1 / precios_h2h[draw_key], 1 / precios_h2h[away]
-                    margin = ph + pd + pa
-                    ph, pd, pa = ph/margin, pd/margin, pa/margin
+                # Si no existe el mercado double_chance en la respuesta, lo calculamos usando el h2h
+                if (not cuotas_globales) and ("h2h" in dict_b_markets):
+                    outcomes_h2h = dict_b_markets["h2h"]
+                    precios_h2h = {o['name']: float(o['price']) for o in outcomes_h2h}
+                    draw_key = next((k for k in precios_h2h.keys() if k not in [home, away]), None)
                     
-                    if mercado == "Doble Oportunidad":
-                        c_1x, c_x2, c_12 = round(1/max(0.01, ph+pd), 2), round(1/max(0.01, pd+pa), 2), round(1/max(0.01, ph+pa), 2)
+                    if home in precios_h2h and away in precios_h2h and draw_key:
+                        c_home, c_draw, c_away = precios_h2h[home], precios_h2h[draw_key], precios_h2h[away]
+                        
+                        # Fórmulas de conversión estándar para cuotas decimales de Doble Oportunidad
+                        c_1x = round((c_home * c_draw) / (c_home + c_draw), 2)
+                        c_x2 = round((c_away * c_draw) / (c_away + c_draw), 2)
+                        c_12 = round((c_home * c_away) / (c_home + c_away), 2)
+                        
                         cuotas_globales.setdefault("1X (Local o Empate)", []).append((c_1x, b['title']))
                         cuotas_globales.setdefault("X2 (Visitante o Empate)", []).append((c_x2, b['title']))
                         cuotas_globales.setdefault("12 (Local o Visitante)", []).append((c_12, b['title']))
-                        if b_key == "betano": betano_cuotas["1X (Local o Empate)"], betano_cuotas["X2 (Visitante o Empate)"], betano_cuotas["12 (Local o Visitante)"] = c_1x, c_x2, c_12
-                            
-                    elif mercado == "Ambos Anotan (BTTS)":
-                        prob_si = max(0.3, min(0.75, round((0.68 * (ph + pa)), 2)))
-                        c_si, c_no = round(1 / prob_si, 2), round(1 / (1 - prob_si), 2)
-                        cuotas_globales.setdefault("Sí", []).append((c_si, b['title']))
-                        cuotas_globales.setdefault("No", []).append((c_no, b['title']))
-                        if b_key == "betano": betano_cuotas["Sí"], betano_cuotas["No"] = c_si, c_no
+                        if b_key == "betano":
+                            betano_cuotas["1X (Local o Empate)"] = c_1x
+                            betano_cuotas["X2 (Visitante o Empate)"] = c_x2
+                            betano_cuotas["12 (Local o Visitante)"] = c_12
+
+            # 2. CASO AMBOS ANOTAN
+            elif mercado == "Ambos Anotan (BTTS)":
+                if "btts" in dict_b_markets:
+                    for o in dict_b_markets["btts"]:
+                        o_name = "Sí" if o['name'].lower() in ["yes", "sí", "si"] else "No"
+                        cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
+                        if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
+            
+            # 3. CASO TOTALES GOLES
+            elif "Goles" in mercado and "totals" in dict_b_markets:
+                for o in dict_b_markets["totals"]:
+                    point = o.get('point', 2.5)
+                    if point == 2.5:
+                        o_name = "Más de 2.5" if o['name'].lower() in ["over", "más", "mas"] else "Menos de 2.5"
+                        cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
+                        if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
+            
+            # 4. CASO GANADOR DIRECTO 1X2
+            elif mercado == "1X2 (Ganador)" and "h2h" in dict_b_markets:
+                for o in dict_b_markets["h2h"]:
+                    o_name = "Local" if o['name'] == home else ("Visitante" if o['name'] == away else "Empate")
+                    cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
+                    if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
 
         max_cuotas, max_bookies, value_bets = {}, {}, {}
         for opcion, tuplas in cuotas_globales.items():
@@ -236,6 +242,7 @@ with pestana_radar:
 
     if consultar:
         if len(ligas_sels) > 0 and len(mercados_sels) > 0:
+            st.cache_data.clear() # Limpiamos la caché inmediatamente al pulsar para refrescar datos reales
             consolidador = {}
             for liga in ligas_sels:
                 sport_key = todas_las_ligas[liga]
@@ -245,12 +252,14 @@ with pestana_radar:
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
             st.session_state.datos_cargados = consolidador
             st.session_state.parlay_automatico = [] 
+            
+            if not consolidador:
+                st.info("⚠️ No se encontraron partidos activos o cuotas disponibles para los criterios seleccionados en las próximas horas.")
         else:
             st.warning("Elige al menos una liga y un mercado antes de consultar.")
             
     dict_partidos = st.session_state.datos_cargados
 
-    # 📌 CORRECCIÓN AQUÍ: LÓGICA DEL GENERADOR AUTOMÁTICO PARA PARLAY SEGURO (MÁXIMA PROBABILIDAD)
     if generar_auto:
         if not dict_partidos:
             st.error("❌ Primero debes hacer clic en 'Consultar Radar Múltiple' para cargar datos.")
@@ -259,7 +268,6 @@ with pestana_radar:
             for p_id, part in dict_partidos.items():
                 for nombre_m, m_info in part['mercados'].items():
                     for opcion, val_data in m_info['value_bets'].items():
-                        # Metemos todas las opciones disponibles con su probabilidad real calculada
                         bolsa_probabilidades.append({
                             "evento": f"{part['local']} vs {part['visitante']}",
                             "liga": part['liga_origen'],
@@ -270,33 +278,24 @@ with pestana_radar:
                             "prob_real": val_data['prob_real']
                         })
             
-            # Ordenamos de MAYOR a MENOR probabilidad real
             bolsa_probabilidades = sorted(bolsa_probabilidades, key=lambda x: x['prob_real'], reverse=True)
-            
-            if len(bolsa_probabilidades) < num_eventos_auto:
-                k_seleccion = len(bolsa_probabilidades)
-            else:
-                k_seleccion = num_eventos_auto
+            k_seleccion = min(len(bolsa_probabilidades), num_eventos_auto)
                 
             if k_seleccion > 0:
-                # Extraemos los "k" eventos con las probabilidades más altas
                 st.session_state.parlay_automatico = bolsa_probabilidades[:k_seleccion]
             else:
                 st.error("No se encontraron eventos bajo los filtros actuales.")
 
     apuestas_seleccionadas = []
     
-    # SI HAY PARLAY AUTOMÁTICO, SE ASIGNA DIRECTAMENTE A LAS APUESTAS SELECCIONADAS
     if st.session_state.parlay_automatico:
         st.success(f"🎯 Parlay seguro generado con los {len(st.session_state.parlay_automatico)} eventos de mayor probabilidad matemática.")
-        st.info("🤖 **Modo Automático Activado.**")
         apuestas_seleccionadas = st.session_state.parlay_automatico
         
         if st.button("Clear / Salir del modo automático"):
             st.session_state.parlay_automatico = []
             st.rerun()
 
-    # MODO MANUAL: Si no hay automático, lee los checkboxes tradicionales
     if dict_partidos and not st.session_state.parlay_automatico:
         st.subheader(f"📋 Eventos Consolidados Encontrados ({len(dict_partidos)})")
         v_ticket = st.session_state.version_ticket
@@ -315,7 +314,7 @@ with pestana_radar:
                         col_borrar, col_info = st.columns([0.4, 5.6])
                         with col_borrar:
                             if st.button("🗑️", key=f"clear_{part['id']}"):
-                                st.session_state.versiones_partidos[part['id']] += 1
+                                del st.session_state.datos_cargados[part['id']]
                                 st.rerun()
                                 
                         with col_info:
@@ -344,7 +343,11 @@ with pestana_radar:
                                             info_val = m_info['value_bets'][plantilla_opcion]
                                             lbl_val = "🔥 VALOR" if info_val['es_value'] else ""
                                             
-                                            chk = st.checkbox(f"{plantilla_opcion} ({cuota_m}) {lbl_val}", key=f"ap_{part['id']}_{nombre_m.replace(' ','_')}_{plantilla_opcion}_vp{v_partido}_vt{v_ticket}")
+                                            # Modificado el parseo de strings en key para evitar errores de caracteres especiales en Streamlit
+                                            clean_op = plantilla_opcion.replace(' ','_').replace('(','').replace(')','')
+                                            clean_m = nombre_m.replace(' ','_').replace('(','').replace(')','')
+                                            
+                                            chk = st.checkbox(f"{plantilla_opcion} ({cuota_m}) {lbl_val}", key=f"ap_{part['id']}_{clean_m}_{clean_op}_vp{v_partido}_vt{v_ticket}")
                                             c_betano = m_info['betano_cuotas'].get(plantilla_opcion, "N/A")
                                             p_real = info_val['prob_real']
                                             clase_color = "prob-alta" if p_real >= 60 else ("prob-media" if p_real >= 40 else "prob-baja")
@@ -358,7 +361,6 @@ with pestana_radar:
                                                     "seleccion": plantilla_opcion, "cuota": cuota_m, "casa": casa_m
                                                 })
 
-    # --- RENDERIZADO DEL TICKET DE APUESTA (SOPORTA TANTO MANUAL COMO AUTOMÁTICO) ---
     if apuestas_seleccionadas:
         st.markdown("---")
         st.header("🎟️ Configuración de Parlay Global")
@@ -390,22 +392,19 @@ with pestana_radar:
                     st.session_state.historial_apuestas.append({
                         "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
                         "Detalles": f"{len(apuestas_seleccionadas)} mercados combinados",
-                        "Mercado": "Multi-Mercado",
+                        "Market": "Multi-Mercado",
                         "Cuota": cuota_acumulada,
                         "Inversión": monto_inversion,
                         "Estado": "Pendiente",
                         "Ganancia Potencial": ganancia_neta
                     })
                     st.session_state.version_ticket += 1
-                    st.session_state.parlay_automatico = [] 
+                    st.session_state.datos_cargados = {} 
                     st.toast("¡Apuesta registrada exitosamente!", icon="💾")
                     st.rerun()
                     
             with col_btn_ws:
                 st.markdown(f'<a href="https://api.whatsapp.com/send?text={msg_encoded}" target="_blank" style="text-decoration:none;"><button style="border:none; background-color:#25D366; color:white; padding:10px 14px; border-radius:8px; font-size:16px; font-weight:bold; width:100%; height:43px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">📲 Compartir Parlay Completo en WhatsApp</button></a>', unsafe_allow_html=True)
-    else:
-        if not ligas_sels or not mercados_sels:
-            st.info("💡 Selecciona ligas y mercados arriba y pulsa 'Consultar Radar Múltiple'.")
 
 # ==========================================
 # VISTA: PESTAÑA 2 - AUDITORÍA & ROI
@@ -431,7 +430,6 @@ with pestana_historial:
                     st.rerun()
         
         df_actualizado = pd.DataFrame(st.session_state.historial_apuestas)
-        
         total_invertido = df_actualizado['Inversión'].sum()
         ganado_mask = df_actualizado['Estado'] == "Ganado"
         total_retornado = (df_actualizado[ganado_mask]['Inversión'] * df_actualizado[ganado_mask]['Cuota']).sum()
@@ -447,7 +445,6 @@ with pestana_historial:
         kpi2.metric("Balance Neto", f"${round(balance_neto, 2)}", delta=f"{round(roi,2)}% ROI")
         kpi3.metric("Tasa de Acierto", f"{round(tasa_acierto, 1)}%")
         
-        st.markdown("### 📊 Evolución del Negocio (Métrica Monetaria)")
         df_actualizado['Ganancia_Efectiva'] = df_actualizado.apply(lambda r: (r['Inversión']*r['Cuota'] - r['Inversión']) if r['Estado'] == "Ganado" else (-r['Inversión'] if r['Estado'] == "Perdido" else 0), axis=1)
         df_actualizado['Rendimiento Acumulado ($)'] = df_actualizado['Ganancia_Efectiva'].cumsum()
         
