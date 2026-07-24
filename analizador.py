@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+import urllib.parse
 
 # Configuración de página avanzada
 st.set_page_config(page_title="Radar Enterprise Parlay Global", page_icon="⚽", layout="wide")
@@ -60,6 +61,8 @@ if 'ultimas_ligas_seleccionadas' not in st.session_state:
     st.session_state.ultimas_ligas_seleccionadas = []
 if 'datos_cargados' not in st.session_state:
     st.session_state.datos_cargados = []
+if 'partidos_ocultos' not in st.session_state:
+    st.session_state.partidos_ocultos = set()
 
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
@@ -97,6 +100,10 @@ def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
         return lista_limpia
 
     for partido in datos:
+        # Filtro manual: Si el usuario le dio al botón de borrar, no procesar
+        if partido['id'] in st.session_state.partidos_ocultos:
+            continue
+            
         home = partido['home_team']
         away = partido['away_team']
         
@@ -110,7 +117,8 @@ def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
         tiempo_restante = fecha_local - ahora
         horas_para_partido = tiempo_restante.total_seconds() / 3600
         
-        if horas_para_partido < -2.0 or horas_para_partido > limite_horas:
+        # SOLUCIÓN DE TIEMPO: Ampliado a -5.0 horas para que no desaparezca durante el partido
+        if horas_para_partido < -5.0 or horas_para_partido > limite_horas:
             continue
             
         bookmakers = partido.get('bookmakers', [])
@@ -247,7 +255,8 @@ with pestana_radar:
             
     st.markdown("---")
     
-    todos_los_partidos = st.session_state.datos_cargados
+    # Recalcular lista en base a los eliminados
+    todos_los_partidos = [p for p in st.session_state.datos_cargados if p['id'] not in st.session_state.partidos_ocultos]
             
     if not ligas_sels:
         st.info("💡 Por favor, selecciona una o varias ligas del menú de arriba (ej. Uruguay, Argentina, Colombia) y pulsa el botón azul 'Consultar Radar'.")
@@ -285,10 +294,23 @@ with pestana_radar:
                     partidos_filtrados = [p for p in todos_los_partidos if p['liga_origen'] == liga_pestaña]
                     for part in partidos_filtrados:
                         with st.container(border=True):
-                            col_info, col_opciones = st.columns([2, 3])
+                            col_borrar, col_info, col_opciones = st.columns([0.4, 2.1, 3.5])
+                            
+                            with col_borrar:
+                                # FUNCIÓN DE BORRADOR MANUAL
+                                if st.button("🗑️", key=f"del_{part['id']}", help="Eliminar partido del radar"):
+                                    st.session_state.partidos_ocultos.add(part['id'])
+                                    st.rerun()
+                                    
                             with col_info:
                                 st.markdown(f"⚽ **{part['local']} vs {part['visitante']}**")
                                 st.caption(f"📅 Hora Local: {part['fecha_str']}")
+                                
+                                # FUNCIÓN DE COMPARTIR POR WHATSAPP
+                                msg = f"📊 *Radar Enterprise Parlay*\n⚽ {part['local']} vs {part['visitante']}\n📅 {part['fecha_str']}\n🏆 {part['liga_origen']}\n🔍 Mercado: {mercado_sel}"
+                                msg_encoded = urllib.parse.quote(msg)
+                                url_wa = f"https://api.whatsapp.com/send?text={msg_encoded}"
+                                st.markdown(f'<a href="{url_wa}" target="_blank" style="text-decoration:none;"><button style="border:none; background-color:#25D366; color:white; padding:4px 8px; border-radius:4px; font-size:12px; cursor:pointer;">📲 Compartir</button></a>', unsafe_allow_html=True)
                                 
                             with col_opciones:
                                 opciones_disponibles = list(part['max_cuotas'].keys())
@@ -355,7 +377,7 @@ with pestana_radar:
                     st.toast("¡Apuesta registrada exitosamente!", icon="💾")
                     st.rerun()
         else:
-            st.warning("Haz clic en el botón azul superior 'Consultar Radar' para traer los partidos actuales del servidor.")
+            st.warning("Haz clic en el botón azul superior 'Consultar Radar' para traer los partidos actuales del servidor o limpia los filtros manuales.")
 
 # ==========================================
 # VISTA: PESTAÑA 2 - AUDITORÍA & ROI
@@ -396,7 +418,6 @@ with pestana_historial:
         df_actualizado['Ganancia_Efectiva'] = df_actualizado.apply(lambda r: (r['Inversión']*r['Cuota'] - r['Inversión']) if r['Estado'] == "Ganado" else (-r['Inversión'] if r['Estado'] == "Perdido" else 0), axis=1)
         df_actualizado['Rendimiento Acumulado ($)'] = df_actualizado['Ganancia_Efectiva'].cumsum()
         
-        # SOLUCIÓN COMPATIBILIDAD PYTHON 3.14: Muestra la tabla de crecimiento directamente sin romper el script
         st.dataframe(df_actualizado[['Fecha', 'Detalles', 'Inversión', 'Estado', 'Rendimiento Acumulado ($)']], use_container_width=True)
                 
         st.markdown("### 📋 Registro Total de Operaciones")
