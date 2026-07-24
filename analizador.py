@@ -76,12 +76,8 @@ def consultar_api_odds(sport_key, market_key):
     if not sport_key:
         return []
         
-    if market_key != "h2h":
-        api_market = f"h2h,{market_key}"
-    else:
-        api_market = "h2h"
-        
-    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={api_market}&oddsFormat=decimal"
+    # Consultamos puramente el mercado individual requerido sin concatenaciones complejas
+    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url)
         if response.status_code == 429:
@@ -102,7 +98,7 @@ def consultar_api_odds(sport_key, market_key):
 
 # --- PROCESADOR MULTI-MERCADO ---
 def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
-    ahora_utc = datetime.now(timezone.utc) # Corrección de zona horaria nativa
+    ahora_utc = datetime.now(timezone.utc) 
     if not datos or not isinstance(datos, list):
         return
 
@@ -111,7 +107,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         home = partido['home_team']
         away = partido['away_team']
         
-        # Leemos la fecha manteniendo la referencia UTC de la API Z
         try:
             fecha_utc = datetime.fromisoformat(partido['commence_time'].replace('Z', '+00:00'))
         except ValueError:
@@ -119,7 +114,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             
         horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
         
-        # Filtro de tiempo flexible (si el partido está en juego o dentro del rango)
         if horas_para_partido < -3.0 or horas_para_partido > limite_horas:
             continue
             
@@ -369,7 +363,7 @@ with pestana_radar:
                                                     "seleccion": plantilla_opcion, "cuota": cuota_m, "casa": casa_m
                                                 })
 
-    # SECCIÓN DE BOLETO / PARLAY
+# --- SECCIÓN DE BOLETO / PARLAY ---
     if apuestas_seleccionadas:
         st.markdown("---")
         st.header("🎟️ Configuración de Parlay Global")
