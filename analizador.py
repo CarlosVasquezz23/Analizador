@@ -64,13 +64,14 @@ if 'datos_cargados' not in st.session_state:
     st.session_state.datos_cargados = {}
 if 'versiones_partidos' not in st.session_state:
     st.session_state.versiones_partidos = {}
-if 'parlay_automatico' not in st.session_state:
-    st.session_state.parlay_automatico = []
+# Cambiamos parlay_automatico por un set que guarde las llaves de los checkboxes elegidos
+if 'claves_auto' not in st.session_state:
+    st.session_state.claves_auto = set()
 
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
-# --- CACHÉ INTELIGENTE MEJORADO ---
+# --- CACHÉ INTELIGENTE CON DIAGNÓSTICO EN TIEMPO REAL ---
 @st.cache_data(ttl=120)  
 def consultar_api_odds(sport_key, market_key):
     if not sport_key:
@@ -78,17 +79,26 @@ def consultar_api_odds(sport_key, market_key):
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={market_key},h2h&oddsFormat=decimal"
     try:
         response = requests.get(url)
-        if response.status_code == 200:
-            res_json = response.json()
-            if res_json and len(res_json) > 0:
-                return res_json
-    except Exception:
-        pass
+        
+        if response.status_code == 429:
+            st.error("❌ ¡Límite de créditos mensuales agotado en The Odds API! Genera una nueva API Key.")
+            return []
+        elif response.status_code == 401:
+            st.error("❌ API Key inválida o mal configurada. Revisa los accesos del proveedor.")
+            return []
+        elif response.status_code != 200:
+            st.error(f"⚠️ Error devuelto por el servidor (Código {response.status_code}): {response.text}")
+            return []
+            
+        res_json = response.json()
+        if res_json and len(res_json) > 0:
+            return res_json
+    except Exception as e:
+        st.error(f"💥 Error crítico de conexión a la API: {str(e)}")
     return []
 
 # --- PROCESADOR MULTI-MERCADO AGRUPADO ---
 def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
-    # CORRECCIÓN DE ZONA HORARIA: Comparamos el servidor usando UTC estricto
     ahora_utc = datetime.utcnow()
     if not datos or not isinstance(datos, list):
         return
@@ -104,16 +114,11 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         except ValueError:
             continue
             
-        # Calculamos el tiempo faltante usando UTC absoluto (Corrige el error de partidos vacíos en la nube)
         horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
-        
-        # Filtro flexible para no ocultar partidos del mismo día o futuros lejanos
         if horas_para_partido < -3.0 or horas_para_partido > limite_horas:
             continue
             
-        # Transformamos a horario local (-5) exclusivamente para pintar en la interfaz de usuario
         fecha_local = fecha_utc - timedelta(hours=5)
-            
         bookmakers = partido.get('bookmakers', [])
         if not bookmakers:
             continue
@@ -127,7 +132,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             
             dict_b_markets = {m['key']: m['outcomes'] for m in b['markets']}
             
-            # 1. CASO DOBLE OPORTUNIDAD (Nativo + Simulación Matemática de Respaldo)
             if mercado == "Doble Oportunidad":
                 if "double_chance" in dict_b_markets:
                     for o in dict_b_markets["double_chance"]:
@@ -139,7 +143,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                         cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                         if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
                 
-                # Si no existe el mercado double_chance en la respuesta, lo calculamos usando el h2h
                 if (not cuotas_globales) and ("h2h" in dict_b_markets):
                     outcomes_h2h = dict_b_markets["h2h"]
                     precios_h2h = {o['name']: float(o['price']) for o in outcomes_h2h}
@@ -147,8 +150,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                     
                     if home in precios_h2h and away in precios_h2h and draw_key:
                         c_home, c_draw, c_away = precios_h2h[home], precios_h2h[draw_key], precios_h2h[away]
-                        
-                        # Fórmulas de conversión estándar para cuotas decimales de Doble Oportunidad
                         c_1x = round((c_home * c_draw) / (c_home + c_draw), 2)
                         c_x2 = round((c_away * c_draw) / (c_away + c_draw), 2)
                         c_12 = round((c_home * c_away) / (c_home + c_away), 2)
@@ -161,7 +162,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                             betano_cuotas["X2 (Visitante o Empate)"] = c_x2
                             betano_cuotas["12 (Local o Visitante)"] = c_12
 
-            # 2. CASO AMBOS ANOTAN
             elif mercado == "Ambos Anotan (BTTS)":
                 if "btts" in dict_b_markets:
                     for o in dict_b_markets["btts"]:
@@ -169,7 +169,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                         cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                         if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
             
-            # 3. CASO TOTALES GOLES
             elif "Goles" in mercado and "totals" in dict_b_markets:
                 for o in dict_b_markets["totals"]:
                     point = o.get('point', 2.5)
@@ -178,7 +177,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                         cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                         if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
             
-            # 4. CASO GANADOR DIRECTO 1X2
             elif mercado == "1X2 (Ganador)" and "h2h" in dict_b_markets:
                 for o in dict_b_markets["h2h"]:
                     o_name = "Local" if o['name'] == home else ("Visitante" if o['name'] == away else "Empate")
@@ -241,7 +239,7 @@ with pestana_radar:
         consultar = st.button("🔍 Consultar Radar Múltiple", type="primary", use_container_width=True)
     with c_btn2:
         num_eventos_auto = st.slider("Eventos para el Generador Automático:", min_value=2, max_value=6, value=3)
-        generar_auto = st.button("🎲 ¡Generar Parlay Seguro Automático!", use_container_width=True)
+        generar_auto = st.button("🎲 ¡Pre-seleccionar Muestras Probables!", use_container_width=True)
 
     if consultar:
         if len(ligas_sels) > 0 and len(mercados_sels) > 0:
@@ -250,18 +248,11 @@ with pestana_radar:
             for liga in ligas_sels:
                 sport_key = todas_las_ligas[liga]
                 for m_sel in mercados_sels:
-                    # CORRECCIÓN PARA EVITAR ERROR 422:
-                    # Si se selecciona Doble Oportunidad, se consulta "h2h" a la API
-                    # El script simulará y convertirá los datos automáticamente.
-                    if m_sel == "Doble Oportunidad":
-                        mercado_api = "h2h"
-                    else:
-                        mercado_api = diccionario_mercados[m_sel]
-                        
-                    raw_data = consultar_api_odds(sport_key, market_key=mercado_api)
+                    market_api = diccionario_mercados[m_sel]
+                    raw_data = consultar_api_odds(sport_key, market_key=market_api)
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
             st.session_state.datos_cargados = consolidador
-            st.session_state.parlay_automatico = [] 
+            st.session_state.claves_auto = set() # Limpia las selecciones automáticas previas
             
             if not consolidador:
                 st.info("⚠️ No se encontraron partidos activos o cuotas disponibles para los criterios seleccionados en las próximas horas.")
@@ -270,6 +261,7 @@ with pestana_radar:
             
     dict_partidos = st.session_state.datos_cargados
 
+    # LÓGICA DE PRE-SELECCIÓN AUTOMÁTICA
     if generar_auto:
         if not dict_partidos:
             st.error("❌ Primero debes hacer clic en 'Consultar Radar Múltiple' para cargar datos.")
@@ -278,13 +270,14 @@ with pestana_radar:
             for p_id, part in dict_partidos.items():
                 for nombre_m, m_info in part['mercados'].items():
                     for opcion, val_data in m_info['value_bets'].items():
+                        clean_op = opcion.replace(' ','_').replace('(','').replace(')','')
+                        clean_m = nombre_m.replace(' ','_').replace('(','').replace(')','')
+                        
+                        # Generamos la clave única que tendrá el checkbox abajo
+                        clave_chk = f"ap_{part['id']}_{clean_m}_{clean_op}"
+                        
                         bolsa_probabilidades.append({
-                            "evento": f"{part['local']} vs {part['visitante']}",
-                            "liga": part['liga_origen'],
-                            "mercado": nombre_m,
-                            "seleccion": opcion,
-                            "cuota": m_info['max_cuotas'][opcion],
-                            "casa": m_info['max_bookies'][opcion],
+                            "clave": clave_chk,
                             "prob_real": val_data['prob_real']
                         })
             
@@ -292,21 +285,22 @@ with pestana_radar:
             k_seleccion = min(len(bolsa_probabilidades), num_eventos_auto)
                 
             if k_seleccion > 0:
-                st.session_state.parlay_automatico = bolsa_probabilidades[:k_seleccion]
+                # Guardamos las claves en el estado para que se marquen solas
+                st.session_state.claves_auto = set([x['clave'] for x in bolsa_probabilidades[:k_seleccion]])
+                st.success(f"🎯 Se han marcado automáticamente los {k_seleccion} eventos más probables. ¡Puedes modificarlos o añadir más abajo!")
             else:
                 st.error("No se encontraron eventos bajo los filtros actuales.")
 
     apuestas_seleccionadas = []
     
-    if st.session_state.parlay_automatico:
-        st.success(f"🎯 Parlay seguro generado con los {len(st.session_state.parlay_automatico)} eventos de mayor probabilidad matemática.")
-        apuestas_seleccionadas = st.session_state.parlay_automatico
-        
-        if st.button("Clear / Salir del modo automático"):
-            st.session_state.parlay_automatico = []
+    # Botón para limpiar de golpe las selecciones en pantalla
+    if st.session_state.claves_auto or dict_partidos:
+        if st.button("🧹 Limpiar todas las casillas marcadas"):
+            st.session_state.claves_auto = set()
+            st.session_state.version_ticket += 1 # Fuerza el refresco completo de widgets
             st.rerun()
 
-    if dict_partidos and not st.session_state.parlay_automatico:
+    if dict_partidos:
         st.subheader(f"📋 Eventos Consolidados Encontrados ({len(dict_partidos)})")
         v_ticket = st.session_state.version_ticket
         ligas_con_datos = list(set([p['liga_origen'] for p in dict_partidos.values()]))
@@ -356,7 +350,17 @@ with pestana_radar:
                                             clean_op = plantilla_opcion.replace(' ','_').replace('(','').replace(')','')
                                             clean_m = nombre_m.replace(' ','_').replace('(','').replace(')','')
                                             
-                                            chk = st.checkbox(f"{plantilla_opcion} ({cuota_m}) {lbl_val}", key=f"ap_{part['id']}_{clean_m}_{clean_op}_vp{v_partido}_vt{v_ticket}")
+                                            clave_base = f"ap_{part['id']}_{clean_m}_{clean_op}"
+                                            
+                                            # Condición clave: Si la ID fue autogenerada, el valor inicial será True
+                                            marcado_inicial = clave_base in st.session_state.claves_auto
+                                            
+                                            chk = st.checkbox(
+                                                f"{plantilla_opcion} ({cuota_m}) {lbl_val}", 
+                                                value=marcado_inicial,
+                                                key=f"{clave_base}_vp{v_partido}_vt{v_ticket}"
+                                            )
+                                            
                                             facing_betano = m_info['betano_cuotas'].get(plantilla_opcion, "N/A")
                                             p_real = info_val['prob_real']
                                             clase_color = "prob-alta" if p_real >= 60 else ("prob-media" if p_real >= 40 else "prob-baja")
@@ -370,6 +374,7 @@ with pestana_radar:
                                                     "seleccion": plantilla_opcion, "cuota": cuota_m, "casa": casa_m
                                                 })
 
+    # SECCIÓN DE BOLETO / PARLAY (Integra dinámicamente lo manual y lo automático)
     if apuestas_seleccionadas:
         st.markdown("---")
         st.header("🎟️ Configuración de Parlay Global")
@@ -409,6 +414,7 @@ with pestana_radar:
                     })
                     st.session_state.version_ticket += 1
                     st.session_state.datos_cargados = {} 
+                    st.session_state.claves_auto = set()
                     st.toast("¡Apuesta registrada exitosamente!", icon="💾")
                     st.rerun()
                     
