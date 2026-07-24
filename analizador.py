@@ -282,8 +282,8 @@ with pestana_radar:
 
     with col_m:
         mercados_sels = st.multiselect("Mercados de Análisis:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
-        if any(m in mercados_sels for m in ["Doble Oportunidad", "Ambos Anotan (BTTS)"]):
-            st.caption("⚠️ Estos mercados consultan la API 1 vez por cada partido (más gasto de créditos).")
+        if "Ambos Anotan (BTTS)" in mercados_sels:
+            st.caption("⚠️ BTTS consulta la API 1 vez por cada partido (más gasto de créditos). Doble Oportunidad es gratis, se calcula matemáticamente.")
 
     with col_t:
         tiempo_sel = st.selectbox("Rango Temporal:", ["24 Horas", "48 Horas", "72 Horas"], index=1)
@@ -306,13 +306,20 @@ with pestana_radar:
             st.cache_data.clear()
             consolidador = {}
 
-            # Separamos los mercados en dos grupos porque usan endpoints
-            # DISTINTOS de The Odds API:
+            # Separamos los mercados en tres grupos porque cada uno se
+            # resuelve de forma distinta con The Odds API:
             # - "featured" (h2h, totals): endpoint masivo, 1 sola llamada por liga.
-            # - "adicionales" (double_chance, btts): la API solo los expone en
-            #   el endpoint por evento, así que hay que llamar 1 vez por partido.
+            # - "Doble Oportunidad": NO se pide nunca a la API (la API ni
+            #   siquiera lo expone en el endpoint masivo - error 422). Se
+            #   calcula matemáticamente a partir del mismo h2h masivo, que
+            #   ya tenemos gratis. Cero llamadas extra.
+            # - "Ambos Anotan (BTTS)": no existe fórmula matemática para
+            #   derivarlo del h2h (no hay relación fija entre ganar/empatar
+            #   y que ambos anoten), así que es la ÚNICA que sí requiere
+            #   llamar al endpoint por evento (1 llamada por partido).
             mercados_featured = [m for m in mercados_sels if diccionario_mercados[m] in ("h2h", "totals")]
-            mercados_adicionales = [m for m in mercados_sels if diccionario_mercados[m] in ("double_chance", "btts")]
+            pidio_doble_oportunidad = "Doble Oportunidad" in mercados_sels
+            pidio_btts = "Ambos Anotan (BTTS)" in mercados_sels
 
             for liga in ligas_sels:
                 sport_key = todas_las_ligas[liga]
@@ -323,30 +330,22 @@ with pestana_radar:
                     raw_data = consultar_api_odds(sport_key, market_key=market_api)
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
 
-                # --- 2) MERCADOS ADICIONALES: endpoint por evento (1 llamada x partido) ---
-                if mercados_adicionales:
-                    # Traemos la lista base de partidos vía h2h (barato) solo
-                    # para saber qué eventos existen y filtrarlos por fecha
-                    # ANTES de gastar créditos llamando evento por evento.
-                    base_data = consultar_api_odds(sport_key, market_key="h2h")
-                    eventos_filtrados = filtrar_partidos_por_fecha(base_data, limite_h)
+                # --- 2) DOBLE OPORTUNIDAD: gratis, calculada desde h2h masivo ---
+                if pidio_doble_oportunidad:
+                    # st.cache_data evita que esto duplique la llamada si
+                    # "1X2 (Ganador)" también fue seleccionado arriba.
+                    base_h2h = consultar_api_odds(sport_key, market_key="h2h")
+                    procesar_e_inyectar_mercado(base_h2h, "Doble Oportunidad", limite_h, liga, consolidador)
 
-                    # Siempre incluimos "h2h" en la llamada por evento para
-                    # que el fallback matemático de Doble Oportunidad tenga
-                    # datos con qué calcular cuando la casa no lo ofrezca nativo.
-                    claves_markets = ["h2h"]
-                    if "Doble Oportunidad" in mercados_adicionales:
-                        claves_markets.append("double_chance")
-                    if "Ambos Anotan (BTTS)" in mercados_adicionales:
-                        claves_markets.append("btts")
-                    markets_str = ",".join(claves_markets)
-
+                # --- 3) BTTS: única que gasta créditos extra (1 llamada x partido) ---
+                if pidio_btts:
+                    base_para_filtrar = consultar_api_odds(sport_key, market_key="h2h")
+                    eventos_filtrados = filtrar_partidos_por_fecha(base_para_filtrar, limite_h)
                     for partido_base in eventos_filtrados:
                         event_id = partido_base['id']
-                        datos_evento = consultar_api_odds_evento(sport_key, event_id, markets_str)
+                        datos_evento = consultar_api_odds_evento(sport_key, event_id, "btts")
                         if datos_evento:
-                            for m_sel in mercados_adicionales:
-                                procesar_e_inyectar_mercado([datos_evento], m_sel, limite_h, liga, consolidador)
+                            procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
 
             st.session_state.datos_cargados = consolidador
             st.session_state.claves_auto = set()
