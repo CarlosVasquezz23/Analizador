@@ -19,7 +19,7 @@ st.markdown("""
 # --- TU CONFIGURACIÓN ---
 API_KEY = "e6414a3efabaf34994030cd0a8ea88b1"
 
-# --- ESTRUCTURAS DE DATOS (CATÁLOGO COMPLETO Y BLINDADO) ---
+# --- ESTRUCTURAS DE DATOS ---
 ligas_top = {
     "🇪🇺 Champions League (Europa)": "soccer_uefa_champions_league",
     "🏆 Copa Libertadores (CONMEBOL)": "soccer_conmebol_copa_distribuidores",
@@ -47,6 +47,14 @@ ligas_locales = {
 ligas_locales_ordenadas = dict(sorted(ligas_locales.items()))
 todas_las_ligas = {**ligas_top, **ligas_locales_ordenadas}
 
+# Mapeo de mercados múltiples
+diccionario_mercados = {
+    "1X2 (Ganador)": "h2h",
+    "Doble Oportunidad": "double_chance",
+    "Ambos Anotan (BTTS)": "btts",
+    "Goles Más/Menos 2.5": "totals"
+}
+
 # --- INICIALIZACIÓN DE ESTADOS ---
 if 'historial_apuestas' not in st.session_state:
     st.session_state.historial_apuestas = []
@@ -62,7 +70,7 @@ if 'versiones_partidos' not in st.session_state:
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
-# --- CACHÉ INTELIGENTE CON RESPALDO ---
+# --- CACHÉ INTELIGENTE ---
 @st.cache_data(ttl=600)  
 def consultar_api_odds(sport_key, market_key):
     if not sport_key:
@@ -77,7 +85,6 @@ def consultar_api_odds(sport_key, market_key):
     except Exception:
         pass
         
-    # Fallback forzado a H2H si falla el mercado alternativo
     url_fallback = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets=h2h&oddsFormat=decimal"
     try:
         resp = requests.get(url_fallback)
@@ -87,7 +94,7 @@ def consultar_api_odds(sport_key, market_key):
         pass
     return []
 
-# --- PROCESADOR INTEGRADO COMPLETO ---
+# --- PROCESADOR INTEGRADO MULTI-MERCADO ---
 def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
     lista_limpia = []
     ahora = datetime.now()
@@ -126,7 +133,6 @@ def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
             mercado_recibido = b['markets'][0]['key']
             outcomes = b['markets'][0]['outcomes']
             
-            # Procesamiento de Mercados Nativos de la API
             if mercado_recibido == "double_chance" and mercado == "Doble Oportunidad":
                 for o in outcomes:
                     o_name = o['name']
@@ -155,10 +161,8 @@ def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
                     cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                     if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
 
-            # Fallback y cálculo sintético a partir de H2H (Corrección de Nombres de Empate)
             elif mercado_recibido == "h2h" and mercado in ["Doble Oportunidad", "Ambos Anotan (BTTS)"]:
                 precios_h2h = {o['name']: float(o['price']) for o in outcomes}
-                
                 draw_key = None
                 for k in precios_h2h.keys():
                     if k not in [home, away]:
@@ -174,7 +178,6 @@ def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
                         c_1x = round(1 / max(0.01, (ph + pd)), 2)
                         c_x2 = round(1 / max(0.01, (pd + pa)), 2)
                         c_12 = round(1 / max(0.01, (ph + pa)), 2)
-                        
                         cuotas_globales.setdefault("1X (Local o Empate)", []).append((c_1x, b['title']))
                         cuotas_globales.setdefault("X2 (Visitante o Empate)", []).append((c_x2, b['title']))
                         cuotas_globales.setdefault("12 (Local o Visitante)", []).append((c_12, b['title']))
@@ -184,19 +187,16 @@ def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
                     elif mercado == "Ambos Anotan (BTTS)":
                         prob_si = max(0.3, min(0.75, round((0.68 * (ph + pa)), 2)))
                         c_si, c_no = round(1 / prob_si, 2), round(1 / (1 - prob_si), 2)
-                        
                         cuotas_globales.setdefault("Sí", []).append((c_si, b['title']))
                         cuotas_globales.setdefault("No", []).append((c_no, b['title']))
                         if b_key == "betano":
                             betano_cuotas["Sí"], betano_cuotas["No"] = c_si, c_no
 
         max_cuotas, max_bookies, value_bets = {}, {}, {}
-        
         for opcion, tuplas in cuotas_globales.items():
             precios = [t[0] for t in tuplas]
             cuota_promedio = sum(precios) / len(precios) if precios else 1.0
             probabilidad_mercado = 1 / cuota_promedio
-            
             cuota_maxima = max(precios)
             idx_max = precios.index(cuota_maxima)
             bookie_maximo = tuplas[idx_max][1]
@@ -213,7 +213,9 @@ def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
         
         if max_cuotas:
             lista_limpia.append({
-                "id": partido['id'], "liga_origen": nombre_liga,
+                "id": f"{partido['id']}_{mercado.replace(' ', '_')}", # ID único por partido y mercado
+                "partido_base_id": partido['id'],
+                "liga_origen": nombre_liga,
                 "fecha_str": fecha_local.strftime("%d/%m/%Y - %H:%M"),
                 "local": home, "visitante": away, "mercado": mercado,
                 "max_cuotas": max_cuotas, "max_bookies": max_bookies,
@@ -228,13 +230,13 @@ def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
 with pestana_radar:
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
     
-    col_l, col_m, col_t, col_inv = st.columns([2, 1, 1, 1])
+    col_l, col_m, col_t, col_inv = st.columns([2, 1.5, 1, 1])
     with col_l:
-        ligas_sels = st.multiselect("Selecciona los Torneos a Analizar en simultáneo:", list(todas_las_ligas.keys()), default=[])
+        ligas_sels = st.multiselect("Selecciona los Torneos a Analizar:", list(todas_las_ligas.keys()), default=[])
             
     with col_m:
-        mercado_sel = st.selectbox("Mercado de Análisis:", ["1X2 (Ganador)", "Doble Oportunidad", "Ambos Anotan (BTTS)", "Goles Más/Menos 2.5"], index=0)
-        mercado_api = "h2h" if "1X2" in mercado_sel else ("double_chance" if "Doble" in mercado_sel else ("btts" if "Ambos" in mercado_sel else "totals"))
+        # CORREGIDO: Ahora es multiselect para permitir múltiples opciones en simultáneo
+        mercados_sels = st.multiselect("Mercados de Análisis:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
         
     with col_t:
         tiempo_sel = st.selectbox("Rango Temporal:", ["24 Horas", "48 Horas", "72 Horas"], index=1)
@@ -244,25 +246,27 @@ with pestana_radar:
         monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0)
         
     st.markdown(" ")
-    if st.button("🔍 Consultar Radar (Gasta 1 Crédito por Liga)", type="primary", use_container_width=True):
-        if len(ligas_sels) > 0:
+    if st.button("🔍 Consultar Radar Múltiple", type="primary", use_container_width=True):
+        if len(ligas_sels) > 0 and len(mercados_sels) > 0:
             partidos_acumulados = []
             for liga in ligas_sels:
                 sport_key = todas_las_ligas[liga]
-                raw_data = consultar_api_odds(sport_key, market_key=mercado_api)
-                partidos_liga = procesar_datos_mercado(raw_data, mercado_sel, limite_h, liga)
-                partidos_acumulados.extend(partidos_liga)
+                for m_sel in mercados_sels:
+                    mercado_api = diccionario_mercados[m_sel]
+                    raw_data = consultar_api_odds(sport_key, market_key=mercado_api)
+                    partidos_liga = procesar_datos_mercado(raw_data, m_sel, limite_h, liga)
+                    partidos_acumulados.extend(partidos_liga)
             st.session_state.datos_cargados = partidos_acumulados
             st.session_state.sugerencias_ids = {}
         else:
-            st.warning("Elige al menos una liga antes de consultar.")
+            st.warning("Elige al menos una liga y un mercado antes de consultar.")
             
     st.markdown("---")
     
     todos_los_partidos = st.session_state.datos_cargados
             
-    if not ligas_sels:
-        st.info("💡 Por favor, selecciona una o varias ligas del menú de arriba (ej. Uruguay, Argentina, Colombia) y pulsa el botón azul 'Consultar Radar'.")
+    if not ligas_sels or not mercados_sels:
+        st.info("💡 Selecciona ligas y mercados arriba y pulsa 'Consultar Radar Múltiple'.")
     else:
         if todos_los_partidos:
             with st.expander("🤖 Asistente Multi-Torneo: Auto-Parlay Inteligente", expanded=True):
@@ -305,7 +309,7 @@ with pestana_radar:
                             col_borrar, col_info, col_opciones = st.columns([0.4, 2.1, 3.5])
                             
                             with col_borrar:
-                                if st.button("🗑️", key=f"clear_{part['id']}", help="Deseleccionar opciones de este partido"):
+                                if st.button("🗑️", key=f"clear_{part['id']}", help="Limpiar opciones"):
                                     st.session_state.versiones_partidos[part['id']] += 1
                                     if part['id'] in st.session_state.sugerencias_ids:
                                         del st.session_state.sugerencias_ids[part['id']]
@@ -313,15 +317,14 @@ with pestana_radar:
                                     
                             with col_info:
                                 st.markdown(f"⚽ **{part['local']} vs {part['visitante']}**")
-                                st.caption(f"📅 Hora Local: {part['fecha_str']}")
-                                msg_encoded = urllib.parse.quote(f"⚽ {part['local']} vs {part['visitante']} - {part['liga_origen']}")
-                                st.markdown(f'<a href="https://api.whatsapp.com/send?text={msg_encoded}" target="_blank" style="text-decoration:none;"><button style="border:none; background-color:#25D366; color:white; padding:4px 8px; border-radius:4px; font-size:12px; cursor:pointer;">📲 Compartir</button></a>', unsafe_allow_html=True)
+                                st.caption(f"📊 Mercado: `{part['mercado']}`")
+                                st.caption(f"📅 Hora: {part['fecha_str']}")
                                 
                             with col_opciones:
                                 opciones_disponibles = list(part['max_cuotas'].keys())
-                                if mercado_sel == "1X2 (Ganador)": orden_estricto = ["Local", "Empate", "Visitante"]
-                                elif mercado_sel == "Doble Oportunidad": orden_estricto = ["1X (Local o Empate)", "12 (Local o Visitante)", "X2 (Visitante o Empate)"]
-                                elif mercado_sel == "Ambos Anotan (BTTS)": orden_estricto = ["Sí", "No"]
+                                if part['mercado'] == "1X2 (Ganador)": orden_estricto = ["Local", "Empate", "Visitante"]
+                                elif part['mercado'] == "Doble Oportunidad": orden_estricto = ["1X (Local o Empate)", "12 (Local o Visitante)", "X2 (Visitante o Empate)"]
+                                elif part['mercado'] == "Ambos Anotan (BTTS)": orden_estricto = ["Sí", "No"]
                                 else: orden_estricto = sorted(opciones_disponibles, key=lambda x: 0 if "Más" in x else 1)
                                 
                                 sub_cols = st.columns(len(orden_estricto))
@@ -349,38 +352,52 @@ with pestana_radar:
                                                     "seleccion": plantilla_opcion, "cuota": cuota_m, "casa": casa_m, "prob_real": p_real
                                                 })
                                             
+            # --- COMPARTIR PARLAY COMPLETO EN WHATSAPP ---
             if apuestas_seleccionadas:
                 st.markdown("---")
                 st.header("🎟️ Configuración de Parlay Global")
                 
                 cuota_acumulada = 1.0
+                texto_whatsapp = "🚀 *TICKET PARLAY ENVIADO DESDE RADAR GLOBAL* 🚀\n\n"
+                
                 for ap in apuestas_seleccionadas:
                     cuota_acumulada *= ap['cuota']
-                    st.markdown(f"✔️ **{ap['evento']}** ({ap['liga']}) ➔ `{ap['seleccion']}` | Cuota: **{ap['cuota']}**")
+                    st.markdown(f"✔️ **{ap['evento']}** ({ap['liga']}) ➔ `{ap['seleccion']}` | Mercado: *{ap['mercado']}* | Cuota: **{ap['cuota']}**")
+                    texto_whatsapp += f"⚽ *{ap['evento']}*\n🏆 {ap['liga']}\n🎯 {ap['mercado']}: *{ap['seleccion']}* (x{ap['cuota']}) - 🏢 {ap['casa']}\n\n"
                     
                 ganancia_estimada = cuota_acumulada * monto_inversion
+                ganancia_neta = ganancia_estimada - monto_inversion
+                
+                texto_whatsapp += f"📊 *RESUMEN DEL PARLAY*\n🔹 Eventos combinados: {len(apuestas_seleccionadas)}\n📈 Cuota Final total: *x{round(cuota_acumulada, 2)}*\n💵 Inversión: *${round(monto_inversion, 2)}*\n💰 Ganancia Neta Potencial: *${round(ganancia_neta, 2)}*"
+                msg_encoded = urllib.parse.quote(texto_whatsapp)
                 
                 c_m1, c_m2, c_m3 = st.columns(3)
                 c_m1.metric("Cuota Final", f"{round(cuota_acumulada, 2)}")
                 c_m2.metric("Retorno Total", f"${round(ganancia_estimada, 2)}")
-                c_m3.metric("Ganancia Neta", f"${round(ganancia_estimada - monto_inversion, 2)}")
+                c_m3.metric("Ganancia Neta", f"${round(ganancia_neta, 2)}")
                 
-                if st.button("💾 Registrar y Enviar Apuesta al Historial", type="primary", use_container_width=True):
-                    st.session_state.historial_apuestas.append({
-                        "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                        "Detalles": f"{len(apuestas_seleccionadas)} eventos combinados",
-                        "Mercado": apuestas_seleccionadas[0]['mercado'],
-                        "Cuota": cuota_acumulada,
-                        "Inversión": monto_inversion,
-                        "Estado": "Pendiente",
-                        "Ganancia Potencial": ganancia_estimada - monto_inversion
-                    })
-                    st.session_state.sugerencias_ids = {}
-                    st.session_state.version_ticket += 1
-                    st.toast("¡Apuesta registrada exitosamente!", icon="💾")
-                    st.rerun()
+                col_btn_reg, col_btn_ws = st.columns([1, 1])
+                with col_btn_reg:
+                    if st.button("💾 Registrar y Enviar Apuesta al Historial", type="primary", use_container_width=True):
+                        st.session_state.historial_apuestas.append({
+                            "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                            "Detalles": f"{len(apuestas_seleccionadas)} mercados combinados",
+                            "Mercado": "Multi-Mercado",
+                            "Cuota": cuota_acumulada,
+                            "Inversión": monto_inversion,
+                            "Estado": "Pendiente",
+                            "Ganancia Potencial": ganancia_neta
+                        })
+                        st.session_state.sugerencias_ids = {}
+                        st.session_state.version_ticket += 1
+                        st.toast("¡Apuesta registrada exitosamente!", icon="💾")
+                        st.rerun()
+                        
+                with col_btn_ws:
+                    # CORREGIDO: Botón verde para mandar el Parlay COMPLETO unificado
+                    st.markdown(f'<a href="https://api.whatsapp.com/send?text={msg_encoded}" target="_blank" style="text-decoration:none;"><button style="border:none; background-color:#25D366; color:white; padding:10px 14px; border-radius:8px; font-size:16px; font-weight:bold; width:100%; height:43px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">📲 Compartir Parlay Completo en WhatsApp</button></a>', unsafe_allow_html=True)
         else:
-            st.warning("Haz clic en el botón azul superior 'Consultar Radar' para traer los partidos actuales del servidor.")
+            st.warning("Haz clic en 'Consultar Radar Múltiple' para cargar la información.")
 
 # ==========================================
 # VISTA: PESTAÑA 2 - AUDITORÍA & ROI
@@ -395,10 +412,15 @@ with pestana_historial:
         for idx, fila in df_historial.iterrows():
             col_d, col_est = st.columns([3, 1])
             with col_d:
-                st.write(f"🆔 **Ticket #{idx+1}** ({fila['Fecha']}) | Inversión: ${fila['Inversión']} | Cuota: x{round(fila['Cuota'],2)}")
+                st.write(f"🆔 **Ticket #{idx+1}** ({fila['Fecha']}) | Inversión: ${fila['Inversión']} | Cuota: x{round(fila['Cuota'],2)} | {fila['Detalles']}")
             with col_est:
-                nuevo_estado = st.selectbox("Resultado:", ["Pendiente", "Ganado", "Perdido"], index=["Pendiente", "Ganado", "Perdido"].index(fila['Estado']), key=f"estado_{idx}")
-                st.session_state.historial_apuestas[idx]['Estado'] = nuevo_estado
+                opciones_resultado = ["Pendiente", "Ganado", "Perdido"]
+                index_actual = opciones_resultado.index(fila['Estado'])
+                
+                nuevo_estado = st.selectbox("Resultado:", opciones_resultado, index=index_actual, key=f"estado_{idx}")
+                if nuevo_estado != fila['Estado']:
+                    st.session_state.historial_apuestas[idx]['Estado'] = nuevo_estado
+                    st.rerun()
         
         df_actualizado = pd.DataFrame(st.session_state.historial_apuestas)
         
