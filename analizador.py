@@ -70,7 +70,7 @@ if 'claves_auto' not in st.session_state:
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
-# --- CACHÉ INTELIGENTE COREGIDO ---
+# --- CACHÉ INTELIGENTE CORREGIDO ---
 @st.cache_data(ttl=120)  
 def consultar_api_odds(sport_key, market_key):
     if not sport_key:
@@ -253,6 +253,7 @@ with pestana_radar:
                 sport_key = todas_las_ligas[liga]
                 for m_sel in mercados_sels:
                     market_api = diccionario_mercados[m_sel]
+                    # CORRECCIÓN AQUÍ: Se cambió market_key por market_api para coincidir con la definición de la función
                     raw_data = consultar_api_odds(sport_key, market_key=market_api)
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
             st.session_state.datos_cargados = consolidador
