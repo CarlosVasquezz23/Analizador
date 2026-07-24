@@ -13,6 +13,7 @@ st.markdown("""
     .prob-alta { color: #2ecc71; font-weight: bold; }
     .prob-media { color: #f1c40f; font-weight: bold; }
     .prob-baja { color: #e74c3c; font-weight: bold; }
+    .match-header { font-size: 16px; font-weight: bold; margin-bottom: 2px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -47,7 +48,6 @@ ligas_locales = {
 ligas_locales_ordenadas = dict(sorted(ligas_locales.items()))
 todas_las_ligas = {**ligas_top, **ligas_locales_ordenadas}
 
-# Mapeo de mercados múltiples
 diccionario_mercados = {
     "1X2 (Ganador)": "h2h",
     "Doble Oportunidad": "double_chance",
@@ -63,7 +63,7 @@ if 'version_ticket' not in st.session_state:
 if 'sugerencias_ids' not in st.session_state:
     st.session_state.sugerencias_ids = {}
 if 'datos_cargados' not in st.session_state:
-    st.session_state.datos_cargados = []
+    st.session_state.datos_cargados = {}
 if 'versiones_partidos' not in st.session_state:
     st.session_state.versiones_partidos = {}
 
@@ -84,25 +84,16 @@ def consultar_api_odds(sport_key, market_key):
                 return res_json
     except Exception:
         pass
-        
-    url_fallback = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets=h2h&oddsFormat=decimal"
-    try:
-        resp = requests.get(url_fallback)
-        if resp.status_code == 200:
-            return resp.json()
-    except Exception:
-        pass
     return []
 
-# --- PROCESADOR INTEGRADO MULTI-MERCADO ---
-def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
-    lista_limpia = []
+# --- PROCESADOR MULTI-MERCADO AGRUPADO ---
+def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
     ahora = datetime.now()
-    
     if not datos or not isinstance(datos, list):
-        return lista_limpia
+        return
 
     for partido in datos:
+        partido_id = partido['id']
         home = partido['home_team']
         away = partido['away_team']
         
@@ -113,8 +104,7 @@ def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
             continue
             
         fecha_local = fecha_utc - timedelta(hours=5)
-        tiempo_restante = fecha_local - ahora
-        horas_para_partido = tiempo_restante.total_seconds() / 3600
+        horas_para_partido = (fecha_local - ahora).total_seconds() / 3600
         
         if horas_para_partido < -5.0 or horas_para_partido > limite_horas:
             continue
@@ -161,13 +151,12 @@ def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
                     cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                     if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
 
+            # Fallback analítico basado en 1X2 si el mercado principal no viene
             elif mercado_recibido == "h2h" and mercado in ["Doble Oportunidad", "Ambos Anotan (BTTS)"]:
                 precios_h2h = {o['name']: float(o['price']) for o in outcomes}
                 draw_key = None
                 for k in precios_h2h.keys():
-                    if k not in [home, away]:
-                        draw_key = k
-                        break
+                    if k not in [home, away]: draw_key = k; break
                 
                 if home in precios_h2h and away in precios_h2h and draw_key is not None:
                     ph, pd, pa = 1 / precios_h2h[home], 1 / precios_h2h[draw_key], 1 / precios_h2h[away]
@@ -175,22 +164,18 @@ def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
                     ph, pd, pa = ph/margin, pd/margin, pa/margin
                     
                     if mercado == "Doble Oportunidad":
-                        c_1x = round(1 / max(0.01, (ph + pd)), 2)
-                        c_x2 = round(1 / max(0.01, (pd + pa)), 2)
-                        c_12 = round(1 / max(0.01, (ph + pa)), 2)
+                        c_1x, c_x2, c_12 = round(1/max(0.01, ph+pd), 2), round(1/max(0.01, pd+pa), 2), round(1/max(0.01, ph+pa), 2)
                         cuotas_globales.setdefault("1X (Local o Empate)", []).append((c_1x, b['title']))
                         cuotas_globales.setdefault("X2 (Visitante o Empate)", []).append((c_x2, b['title']))
                         cuotas_globales.setdefault("12 (Local o Visitante)", []).append((c_12, b['title']))
-                        if b_key == "betano":
-                            betano_cuotas["1X (Local o Empate)"], betano_cuotas["X2 (Visitante o Empate)"], betano_cuotas["12 (Local o Visitante)"] = c_1x, c_x2, c_12
+                        if b_key == "betano": betano_cuotas["1X (Local o Empate)"], betano_cuotas["X2 (Visitante o Empate)"], betano_cuotas["12 (Local o Visitante)"] = c_1x, c_x2, c_12
                             
                     elif mercado == "Ambos Anotan (BTTS)":
                         prob_si = max(0.3, min(0.75, round((0.68 * (ph + pa)), 2)))
                         c_si, c_no = round(1 / prob_si, 2), round(1 / (1 - prob_si), 2)
                         cuotas_globales.setdefault("Sí", []).append((c_si, b['title']))
                         cuotas_globales.setdefault("No", []).append((c_no, b['title']))
-                        if b_key == "betano":
-                            betano_cuotas["Sí"], betano_cuotas["No"] = c_si, c_no
+                        if b_key == "betano": betano_cuotas["Sí"], betano_cuotas["No"] = c_si, c_no
 
         max_cuotas, max_bookies, value_bets = {}, {}, {}
         for opcion, tuplas in cuotas_globales.items():
@@ -198,31 +183,30 @@ def procesar_datos_mercado(datos, mercado, limite_horas, nombre_liga):
             cuota_promedio = sum(precios) / len(precios) if precios else 1.0
             probabilidad_mercado = 1 / cuota_promedio
             cuota_maxima = max(precios)
-            idx_max = precios.index(cuota_maxima)
-            bookie_maximo = tuplas[idx_max][1]
+            bookie_maximo = tuplas[precios.index(cuota_maxima)][1]
             
             max_cuotas[opcion] = cuota_maxima
             max_bookies[opcion] = bookie_maximo
-            
             ev = (cuota_maxima * probabilidad_mercado) - 1
-            value_bets[opcion] = {
-                "ev": ev,
-                "prob_real": probabilidad_mercado * 100,
-                "es_value": ev > 0.01  
-            }
+            value_bets[opcion] = {"ev": ev, "prob_real": probabilidad_mercado * 100, "es_value": ev > 0.01}
         
         if max_cuotas:
-            lista_limpia.append({
-                "id": f"{partido['id']}_{mercado.replace(' ', '_')}", # ID único por partido y mercado
-                "partido_base_id": partido['id'],
-                "liga_origen": nombre_liga,
-                "fecha_str": fecha_local.strftime("%d/%m/%Y - %H:%M"),
-                "local": home, "visitante": away, "mercado": mercado,
-                "max_cuotas": max_cuotas, "max_bookies": max_bookies,
-                "betano_cuotas": betano_cuotas, "value_bets": value_bets
-            })
-            
-    return lista_limpia
+            # Si el partido no existe en el consolidador, lo creamos
+            if partido_id not in diccionario_consolidador:
+                diccionario_consolidador[partido_id] = {
+                    "id": partido_id,
+                    "liga_origen": nombre_liga,
+                    "fecha_str": fecha_local.strftime("%d/%m/%Y - %H:%M"),
+                    "local": home, "visitante": away,
+                    "mercados": {}
+                }
+            # Guardamos la info estructurada por nombre de mercado
+            diccionario_consolidador[partido_id]["mercados"][mercado] = {
+                "max_cuotas": max_cuotas,
+                "max_bookies": max_bookies,
+                "betano_cuotas": betano_cuotas,
+                "value_bets": value_bets
+            }
 
 # ==========================================
 # VISTA: PESTAÑA 1 - RADAR Y APUESTAS
@@ -235,7 +219,6 @@ with pestana_radar:
         ligas_sels = st.multiselect("Selecciona los Torneos a Analizar:", list(todas_las_ligas.keys()), default=[])
             
     with col_m:
-        # CORREGIDO: Ahora es multiselect para permitir múltiples opciones en simultáneo
         mercados_sels = st.multiselect("Mercados de Análisis:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
         
     with col_t:
@@ -248,111 +231,95 @@ with pestana_radar:
     st.markdown(" ")
     if st.button("🔍 Consultar Radar Múltiple", type="primary", use_container_width=True):
         if len(ligas_sels) > 0 and len(mercados_sels) > 0:
-            partidos_acumulados = []
+            consolidador = {}
             for liga in ligas_sels:
                 sport_key = todas_las_ligas[liga]
                 for m_sel in mercados_sels:
                     mercado_api = diccionario_mercados[m_sel]
                     raw_data = consultar_api_odds(sport_key, market_key=mercado_api)
-                    partidos_liga = procesar_datos_mercado(raw_data, m_sel, limite_h, liga)
-                    partidos_acumulados.extend(partidos_liga)
-            st.session_state.datos_cargados = partidos_acumulados
+                    procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
+            st.session_state.datos_cargados = consolidador
             st.session_state.sugerencias_ids = {}
         else:
             st.warning("Elige al menos una liga y un mercado antes de consultar.")
             
     st.markdown("---")
     
-    todos_los_partidos = st.session_state.datos_cargados
+    dict_partidos = st.session_state.datos_cargados
             
     if not ligas_sels or not mercados_sels:
         st.info("💡 Selecciona ligas y mercados arriba y pulsa 'Consultar Radar Múltiple'.")
     else:
-        if todos_los_partidos:
-            with st.expander("🤖 Asistente Multi-Torneo: Auto-Parlay Inteligente", expanded=True):
-                if st.button("⚡ Autogenerar Parlay Óptimo Cruzado", use_container_width=True):
-                    candidatos_parlay = []
-                    for part in todos_los_partidos:
-                        for opcion, info in part['value_bets'].items():
-                            if info['ev'] > 0.005 and info['prob_real'] >= 35.0:
-                                candidatos_parlay.append({"partido_id": part['id'], "opcion": opcion, "prob_real": info['prob_real']})
-                    
-                    if candidatos_parlay:
-                        candidatos_parlay = sorted(candidatos_parlay, key=lambda x: x['prob_real'], reverse=True)
-                        sugeridos = {}
-                        for item in candidatos_parlay[:4]:
-                            if item['partido_id'] not in sugeridos:
-                                sugeridos[item['partido_id']] = item['opcion']
-                        st.session_state.sugerencias_ids = sugeridos
-                        st.session_state.version_ticket += 1
-                        st.toast("🎯 ¡Parlay óptimo pre-seleccionado con éxito!", icon="⚡")
-                        st.rerun()
-        
         apuestas_seleccionadas = []
-        if todos_los_partidos:
-            st.subheader(f"📋 Eventos Consolidados Encontrados ({len(todos_los_partidos)})")
+        if dict_partidos:
+            st.subheader(f"📋 Eventos Consolidados Encontrados ({len(dict_partidos)})")
             v_ticket = st.session_state.version_ticket
             
-            ligas_con_datos = list(set([p['liga_origen'] for p in todos_los_partidos]))
+            # Obtener ligas únicas
+            ligas_con_datos = list(set([p['liga_origen'] for p in dict_partidos.values()]))
             pestanas_ligas = st.tabs(ligas_con_datos)
             
             for p_idx, liga_pestaña in enumerate(ligas_con_datos):
                 with pestanas_ligas[p_idx]:
-                    partidos_filtrados = [p for p in todos_los_partidos if p['liga_origen'] == liga_pestaña]
+                    partidos_filtrados = [p for p in dict_partidos.values() if p['liga_origen'] == liga_pestaña]
+                    
                     for part in partidos_filtrados:
                         if part['id'] not in st.session_state.versiones_partidos:
                             st.session_state.versiones_partidos[part['id']] = 0
-                            
                         v_partido = st.session_state.versiones_partidos[part['id']]
                         
+                        # CONTENEDOR DE PARTIDO ÚNICO
                         with st.container(border=True):
-                            col_borrar, col_info, col_opciones = st.columns([0.4, 2.1, 3.5])
-                            
+                            col_borrar, col_info = st.columns([0.4, 5.6])
                             with col_borrar:
-                                if st.button("🗑️", key=f"clear_{part['id']}", help="Limpiar opciones"):
+                                if st.button("🗑️", key=f"clear_{part['id']}", help="Limpiar todas las selecciones de este partido"):
                                     st.session_state.versiones_partidos[part['id']] += 1
-                                    if part['id'] in st.session_state.sugerencias_ids:
-                                        del st.session_state.sugerencias_ids[part['id']]
                                     st.rerun()
                                     
                             with col_info:
-                                st.markdown(f"⚽ **{part['local']} vs {part['visitante']}**")
-                                st.caption(f"📊 Mercado: `{part['mercado']}`")
-                                st.caption(f"📅 Hora: {part['fecha_str']}")
-                                
-                            with col_opciones:
-                                opciones_disponibles = list(part['max_cuotas'].keys())
-                                if part['mercado'] == "1X2 (Ganador)": orden_estricto = ["Local", "Empate", "Visitante"]
-                                elif part['mercado'] == "Doble Oportunidad": orden_estricto = ["1X (Local o Empate)", "12 (Local o Visitante)", "X2 (Visitante o Empate)"]
-                                elif part['mercado'] == "Ambos Anotan (BTTS)": orden_estricto = ["Sí", "No"]
-                                else: orden_estricto = sorted(opciones_disponibles, key=lambda x: 0 if "Más" in x else 1)
-                                
-                                sub_cols = st.columns(len(orden_estricto))
-                                for idx, plantilla_opcion in enumerate(orden_estricto):
-                                    with sub_cols[idx]:
-                                        if plantilla_opcion in opciones_disponibles:
-                                            cuota_m = part['max_cuotas'][plantilla_opcion]
-                                            casa_m = part['max_bookies'][plantilla_opcion]
-                                            info_val = part['value_bets'][plantilla_opcion]
+                                st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
+                                st.caption(f"📅 Hora Local: {part['fecha_str']}")
+                            
+                            # Sub-pestañas internas por cada mercado disponible para ESTE partido
+                            mercados_del_partido = list(part['mercados'].keys())
+                            sub_tabs_mercados = st.tabs(mercados_del_partido)
+                            
+                            for m_idx, nombre_m in enumerate(mercados_del_partido):
+                                with sub_tabs_mercados[m_idx]:
+                                    m_info = part['mercados'][nombre_m]
+                                    opciones_disponibles = list(m_info['max_cuotas'].keys())
+                                    
+                                    if nombre_m == "1X2 (Ganador)": orden_estricto = ["Local", "Empate", "Visitante"]
+                                    elif nombre_m == "Doble Oportunidad": orden_estricto = ["1X (Local o Empate)", "12 (Local o Visitante)", "X2 (Visitante o Empate)"]
+                                    elif nombre_m == "Ambos Anotan (BTTS)": orden_estricto = ["Sí", "No"]
+                                    else: orden_estricto = sorted(opciones_disponibles, key=lambda x: 0 if "Más" in x else 1)
+                                    
+                                    sub_cols = st.columns(len(orden_estricto))
+                                    for idx, plantilla_opcion in enumerate(orden_estricto):
+                                        with sub_cols[idx]:
+                                            if plantilla_opcion in opciones_disponibles:
+                                                cuota_m = m_info['max_cuotas'][plantilla_opcion]
+                                                casa_m = m_info['max_bookies'][plantilla_opcion]
+                                                info_val = m_info['value_bets'][plantilla_opcion]
+                                                
+                                                lbl_val = "🔥 VALOR" if info_val['es_value'] else ""
+                                                
+                                                # Checkbox único combinando ID de partido, Mercado y Opción
+                                                chk = st.checkbox(f"{plantilla_opcion} ({cuota_m}) {lbl_val}", key=f"ap_{part['id']}_{nombre_m.replace(' ','_')}_{plantilla_opcion}_vp{v_partido}_vt{v_ticket}")
+                                                c_betano = m_info['betano_cuotas'].get(plantilla_opcion, "N/A")
+                                                p_real = info_val['prob_real']
+                                                clase_color = "prob-alta" if p_real >= 60 else ("prob-media" if p_real >= 40 else "prob-baja")
+                                                
+                                                st.markdown(f"<small>🏠 {casa_m} | Betano: {c_betano}<br>🎯 Prob: <span class='{clase_color}'>{round(p_real,1)}%</span></small>", unsafe_allow_html=True)
+                                                
+                                                if chk:
+                                                    apuestas_seleccionadas.append({
+                                                        "evento": f"{part['local']} vs {part['visitante']}",
+                                                        "liga": part['liga_origen'], "mercado": nombre_m,
+                                                        "seleccion": plantilla_opcion, "cuota": cuota_m, "casa": casa_m
+                                                    })
                                             
-                                            sugerido_por_ia = st.session_state.sugerencias_ids.get(part['id']) == plantilla_opcion
-                                            lbl_val = "🔥 VALOR" if info_val['es_value'] else ""
-                                            
-                                            chk = st.checkbox(f"{plantilla_opcion} ({cuota_m}) {lbl_val}", value=sugerido_por_ia, key=f"ap_{part['id']}_{plantilla_opcion}_vp{v_partido}_vt{v_ticket}")
-                                            c_betano = part['betano_cuotas'].get(plantilla_opcion, "N/A")
-                                            p_real = info_val['prob_real']
-                                            clase_color = "prob-alta" if p_real >= 60 else ("prob-media" if p_real >= 40 else "prob-baja")
-                                            
-                                            st.markdown(f"<small>🏠 {casa_m}<br>(Betano: {c_betano})<br>🎯 Prob: <span class='{clase_color}'>{round(p_real,1)}%</span></small>", unsafe_allow_html=True)
-                                            
-                                            if chk:
-                                                apuestas_seleccionadas.append({
-                                                    "id_partido": part['id'], "evento": f"{part['local']} vs {part['visitante']}",
-                                                    "liga": part['liga_origen'], "mercado": part['mercado'],
-                                                    "seleccion": plantilla_opcion, "cuota": cuota_m, "casa": casa_m, "prob_real": p_real
-                                                })
-                                            
-            # --- COMPARTIR PARLAY COMPLETO EN WHATSAPP ---
+            # --- SECCIÓN DEL PARLAY GLOBAL UNIFICADO ---
             if apuestas_seleccionadas:
                 st.markdown("---")
                 st.header("🎟️ Configuración de Parlay Global")
@@ -362,7 +329,7 @@ with pestana_radar:
                 
                 for ap in apuestas_seleccionadas:
                     cuota_acumulada *= ap['cuota']
-                    st.markdown(f"✔️ **{ap['evento']}** ({ap['liga']}) ➔ `{ap['seleccion']}` | Mercado: *{ap['mercado']}* | Cuota: **{ap['cuota']}**")
+                    st.markdown(f"✔️ **{ap['evento']}** ({ap['liga']}) ➔ `{ap['seleccion']}` | *{ap['mercado']}* | Cuota: **{ap['cuota']}**")
                     texto_whatsapp += f"⚽ *{ap['evento']}*\n🏆 {ap['liga']}\n🎯 {ap['mercado']}: *{ap['seleccion']}* (x{ap['cuota']}) - 🏢 {ap['casa']}\n\n"
                     
                 ganancia_estimada = cuota_acumulada * monto_inversion
@@ -388,16 +355,14 @@ with pestana_radar:
                             "Estado": "Pendiente",
                             "Ganancia Potencial": ganancia_neta
                         })
-                        st.session_state.sugerencias_ids = {}
                         st.session_state.version_ticket += 1
                         st.toast("¡Apuesta registrada exitosamente!", icon="💾")
                         st.rerun()
                         
                 with col_btn_ws:
-                    # CORREGIDO: Botón verde para mandar el Parlay COMPLETO unificado
                     st.markdown(f'<a href="https://api.whatsapp.com/send?text={msg_encoded}" target="_blank" style="text-decoration:none;"><button style="border:none; background-color:#25D366; color:white; padding:10px 14px; border-radius:8px; font-size:16px; font-weight:bold; width:100%; height:43px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">📲 Compartir Parlay Completo en WhatsApp</button></a>', unsafe_allow_html=True)
         else:
-            st.warning("Haz clic en 'Consultar Radar Múltiple' para cargar la información.")
+            st.warning("Haz clic en 'Consultar Radar Múltiple' para traer los partidos actuales del servidor.")
 
 # ==========================================
 # VISTA: PESTAÑA 2 - AUDITORÍA & ROI
@@ -444,10 +409,6 @@ with pestana_historial:
         df_actualizado['Rendimiento Acumulado ($)'] = df_actualizado['Ganancia_Efectiva'].cumsum()
         
         st.dataframe(df_actualizado[['Fecha', 'Detalles', 'Inversión', 'Estado', 'Rendimiento Acumulado ($)']], use_container_width=True)
-                
-        st.markdown("### 📋 Registro Total de Operaciones")
-        st.dataframe(df_actualizado, use_container_width=True)
-        
         csv_data = df_actualizado.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Descargar Bitácora Completa (CSV)", data=csv_data, file_name=f"Reporte_Apuestas.csv", mime='text/csv', use_container_width=True)
     else:
