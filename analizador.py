@@ -3,7 +3,6 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 import urllib.parse
-import random
 
 # Configuración de página avanzada
 st.set_page_config(page_title="Radar Enterprise Parlay Global", page_icon="⚽", layout="wide")
@@ -233,7 +232,7 @@ with pestana_radar:
         consultar = st.button("🔍 Consultar Radar Múltiple", type="primary", use_container_width=True)
     with c_btn2:
         num_eventos_auto = st.slider("Eventos para el Generador Automático:", min_value=2, max_value=6, value=3)
-        generar_auto = st.button("🎲 ¡Generar Parlay de Valor Automático!", use_container_width=True)
+        generar_auto = st.button("🎲 ¡Generar Parlay Seguro Automático!", use_container_width=True)
 
     if consultar:
         if len(ligas_sels) > 0 and len(mercados_sels) > 0:
@@ -251,40 +250,45 @@ with pestana_radar:
             
     dict_partidos = st.session_state.datos_cargados
 
-    # LÓGICA DEL GENERADOR AUTOMÁTICO
+    # 📌 CORRECCIÓN AQUÍ: LÓGICA DEL GENERADOR AUTOMÁTICO PARA PARLAY SEGURO (MÁXIMA PROBABILIDAD)
     if generar_auto:
         if not dict_partidos:
             st.error("❌ Primero debes hacer clic en 'Consultar Radar Múltiple' para cargar datos.")
         else:
-            bolsa_valuebets = []
+            bolsa_probabilidades = []
             for p_id, part in dict_partidos.items():
                 for nombre_m, m_info in part['mercados'].items():
                     for opcion, val_data in m_info['value_bets'].items():
-                        if val_data['es_value']: 
-                            bolsa_valuebets.append({
-                                "evento": f"{part['local']} vs {part['visitante']}",
-                                "liga": part['liga_origen'],
-                                "mercado": nombre_m,
-                                "seleccion": opcion,
-                                "cuota": m_info['max_cuotas'][opcion],
-                                "casa": m_info['max_bookies'][opcion]
-                            })
+                        # Metemos todas las opciones disponibles con su probabilidad real calculada
+                        bolsa_probabilidades.append({
+                            "evento": f"{part['local']} vs {part['visitante']}",
+                            "liga": part['liga_origen'],
+                            "mercado": nombre_m,
+                            "seleccion": opcion,
+                            "cuota": m_info['max_cuotas'][opcion],
+                            "casa": m_info['max_bookies'][opcion],
+                            "prob_real": val_data['prob_real']
+                        })
             
-            if len(bolsa_valuebets) < num_eventos_auto:
-                k_seleccion = len(bolsa_valuebets)
+            # Ordenamos de MAYOR a MENOR probabilidad real
+            bolsa_probabilidades = sorted(bolsa_probabilidades, key=lambda x: x['prob_real'], reverse=True)
+            
+            if len(bolsa_probabilidades) < num_eventos_auto:
+                k_seleccion = len(bolsa_probabilidades)
             else:
                 k_seleccion = num_eventos_auto
                 
             if k_seleccion > 0:
-                st.session_state.parlay_automatico = random.sample(bolsa_valuebets, k_seleccion)
+                # Extraemos los "k" eventos con las probabilidades más altas
+                st.session_state.parlay_automatico = bolsa_probabilidades[:k_seleccion]
             else:
-                st.error("No se encontraron Valuebets con EV positivo bajo los filtros actuales.")
+                st.error("No se encontraron eventos bajo los filtros actuales.")
 
     apuestas_seleccionadas = []
     
     # SI HAY PARLAY AUTOMÁTICO, SE ASIGNA DIRECTAMENTE A LAS APUESTAS SELECCIONADAS
     if st.session_state.parlay_automatico:
-        st.success(f"🎯 Parlay sugerido generado con {len(st.session_state.parlay_automatico)} Valuebets de alto valor esperado.")
+        st.success(f"🎯 Parlay seguro generado con los {len(st.session_state.parlay_automatico)} eventos de mayor probabilidad matemática.")
         st.info("🤖 **Modo Automático Activado.**")
         apuestas_seleccionadas = st.session_state.parlay_automatico
         
