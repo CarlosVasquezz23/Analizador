@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import urllib.parse
 
 # Configuración de página avanzada
@@ -76,7 +76,6 @@ def consultar_api_odds(sport_key, market_key):
     if not sport_key:
         return []
         
-    # Forzamos a la API a devolver h2h junto con el mercado extra para que el procesador no pierda consistencia
     if market_key != "h2h":
         api_market = f"h2h,{market_key}"
     else:
@@ -103,7 +102,7 @@ def consultar_api_odds(sport_key, market_key):
 
 # --- PROCESADOR MULTI-MERCADO ---
 def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
-    ahora_utc = datetime.utcnow()
+    ahora_utc = datetime.now(timezone.utc) # Corrección de zona horaria nativa
     if not datos or not isinstance(datos, list):
         return
 
@@ -112,13 +111,15 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         home = partido['home_team']
         away = partido['away_team']
         
-        fecha_str_limpia = partido['commence_time'].replace('Z', '').split('.')[0]
+        # Leemos la fecha manteniendo la referencia UTC de la API Z
         try:
-            fecha_utc = datetime.strptime(fecha_str_limpia, "%Y-%m-%dT%H:%M:%S")
+            fecha_utc = datetime.fromisoformat(partido['commence_time'].replace('Z', '+00:00'))
         except ValueError:
             continue
             
         horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
+        
+        # Filtro de tiempo flexible (si el partido está en juego o dentro del rango)
         if horas_para_partido < -3.0 or horas_para_partido > limite_horas:
             continue
             
@@ -253,7 +254,6 @@ with pestana_radar:
                 sport_key = todas_las_ligas[liga]
                 for m_sel in mercados_sels:
                     market_api = diccionario_mercados[m_sel]
-                    # CORRECCIÓN AQUÍ: Se cambió market_key por market_api para coincidir con la definición de la función
                     raw_data = consultar_api_odds(sport_key, market_key=market_api)
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
             st.session_state.datos_cargados = consolidador
@@ -261,7 +261,7 @@ with pestana_radar:
             st.session_state.version_ticket += 1
             
             if not consolidador:
-                st.info("⚠️ No se encontraron partidos activos o cuotas disponibles.")
+                st.info("⚠️ No se encontraron partidos activos o cuotas disponibles en el rango de horas seleccionado.")
         else:
             st.warning("Elige al menos una liga y un mercado antes de consultar.")
             
