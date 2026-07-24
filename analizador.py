@@ -70,7 +70,7 @@ if 'parlay_automatico' not in st.session_state:
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
-# --- CACHÉ INTELIGENTE MEJORADO ---
+# --- CACHÉ INTELIGENTE CON DIAGNÓSTICO EN TIEMPO REAL ---
 @st.cache_data(ttl=120)  
 def consultar_api_odds(sport_key, market_key):
     if not sport_key:
@@ -78,12 +78,23 @@ def consultar_api_odds(sport_key, market_key):
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={market_key},h2h&oddsFormat=decimal"
     try:
         response = requests.get(url)
-        if response.status_code == 200:
-            res_json = response.json()
-            if res_json and len(res_json) > 0:
-                return res_json
-    except Exception:
-        pass
+        
+        # Sistema de alertas internas para detectar interrupciones de servicio abruptas
+        if response.status_code == 429:
+            st.error("❌ ¡Límite de créditos mensuales agotado en The Odds API! Genera una nueva API Key.")
+            return []
+        elif response.status_code == 401:
+            st.error("❌ API Key inválida o mal configurada. Revisa los accesos del proveedor.")
+            return []
+        elif response.status_code != 200:
+            st.error(f"⚠️ Error devuelto por el servidor (Código {response.status_code}): {response.text}")
+            return []
+            
+        res_json = response.json()
+        if res_json and len(res_json) > 0:
+            return res_json
+    except Exception as e:
+        st.error(f"💥 Error crítico de conexión a la API: {str(e)}")
     return []
 
 # --- PROCESADOR MULTI-MERCADO AGRUPADO ---
@@ -250,8 +261,8 @@ with pestana_radar:
             for liga in ligas_sels:
                 sport_key = todas_las_ligas[liga]
                 for m_sel in mercados_sels:
-                    mercado_api = diccionario_mercados[m_sel]
-                    raw_data = consultar_api_odds(sport_key, market_key=mercado_api)
+                    market_api = diccionario_mercados[m_sel]
+                    raw_data = consultar_api_odds(sport_key, market_key=market_api)
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
             st.session_state.datos_cargados = consolidador
             st.session_state.parlay_automatico = [] 
