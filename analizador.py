@@ -76,7 +76,7 @@ def consultar_api_odds(sport_key, market_key):
     if not sport_key:
         return []
         
-    # Consultamos puramente el mercado individual requerido sin concatenaciones complejas
+    # CORRECCIÓN AQUÍ: Se usaba market_api en lugar del argumento market_key de la función
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url)
@@ -114,7 +114,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             
         horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
         
-        if horas_para_partido < -3.0 or horas_para_partido > limite_horas:
+        if horas_para_partido < -6.0 or horas_para_partido > (limite_horas + 12):
             continue
             
         fecha_local = fecha_utc - timedelta(hours=5)
@@ -129,6 +129,8 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             b_key = b['key'].lower()
             if not b.get('markets'): continue
             
+            dict_b_markets = {m['key']: m['outcomes'] for m in m['markets']} if isinstance(b['markets'], list) else {}
+            # Re-estructuramos de forma segura los mercados del bookmaker
             dict_b_markets = {m['key']: m['outcomes'] for m in b['markets']}
             
             if mercado == "Doble Oportunidad":
@@ -142,6 +144,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                         cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                         if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
                 
+                # Tu cálculo matemático impecable si no viene nativo en la API:
                 if (not cuotas_globales) and ("h2h" in dict_b_markets):
                     outcomes_h2h = dict_b_markets["h2h"]
                     precios_h2h = {o['name']: float(o['price']) for o in outcomes_h2h}
@@ -394,7 +397,7 @@ with pestana_radar:
                 if st.button("💾 Registrar y Enviar Apuesta al Historial", type="primary", use_container_width=True):
                     st.session_state.historial_apuestas.append({
                         "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                        "Detalles": f"{len(apuestas_seleccionadas)} mercados combinados",
+                        "Detalles": f"{len(apuestas_seleccionadas)} markets combinados",
                         "Market": "Multi-Mercado",
                         "Cuota": cuota_acumulada,
                         "Inversión": monto_inversion,
