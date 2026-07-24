@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 import urllib.parse
+import random
 
 # Configuración de página avanzada
 st.set_page_config(page_title="Radar Enterprise Parlay Global", page_icon="⚽", layout="wide")
@@ -66,6 +67,8 @@ if 'datos_cargados' not in st.session_state:
     st.session_state.datos_cargados = {}
 if 'versiones_partidos' not in st.session_state:
     st.session_state.versiones_partidos = {}
+if 'parlay_automatico' not in st.session_state:
+    st.session_state.parlay_automatico = []
 
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
@@ -151,7 +154,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                     cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                     if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
 
-            # Fallback analítico basado en 1X2 si el mercado principal no viene
             elif mercado_recibido == "h2h" and mercado in ["Doble Oportunidad", "Ambos Anotan (BTTS)"]:
                 precios_h2h = {o['name']: float(o['price']) for o in outcomes}
                 draw_key = None
@@ -191,7 +193,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             value_bets[opcion] = {"ev": ev, "prob_real": probabilidad_mercado * 100, "es_value": ev > 0.01}
         
         if max_cuotas:
-            # Si el partido no existe en el consolidador, lo creamos
             if partido_id not in diccionario_consolidador:
                 diccionario_consolidador[partido_id] = {
                     "id": partido_id,
@@ -200,7 +201,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                     "local": home, "visitante": away,
                     "mercados": {}
                 }
-            # Guardamos la info estructurada por nombre de mercado
             diccionario_consolidador[partido_id]["mercados"][mercado] = {
                 "max_cuotas": max_cuotas,
                 "max_bookies": max_bookies,
@@ -229,7 +229,17 @@ with pestana_radar:
         monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0)
         
     st.markdown(" ")
-    if st.button("🔍 Consultar Radar Múltiple", type="primary", use_container_width=True):
+    
+    # Botones principales
+    c_btn1, c_btn2 = st.columns(2)
+    
+    with c_btn1:
+        consultar = st.button("🔍 Consultar Radar Múltiple", type="primary", use_container_width=True)
+    with c_btn2:
+        num_eventos_auto = st.slider("Eventos para el Generador Automático:", min_value=2, max_value=6, value=3)
+        generar_auto = st.button("🎲 ¡Generar Parlay de Valor Automático!", use_container_width=True)
+
+    if consultar:
         if len(ligas_sels) > 0 and len(mercados_sels) > 0:
             consolidador = {}
             for liga in ligas_sels:
@@ -239,23 +249,64 @@ with pestana_radar:
                     raw_data = consultar_api_odds(sport_key, market_key=mercado_api)
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
             st.session_state.datos_cargados = consolidador
-            st.session_state.sugerencias_ids = {}
+            st.session_state.parlay_automatico = [] # Limpiar automático al consultar de nuevo
         else:
             st.warning("Elige al menos una liga y un mercado antes de consultar.")
             
+    dict_partidos = st.session_state.datos_cargados
+
+    # LÓGICA DEL GENERADOR AUTOMÁTICO
+    if generar_auto:
+        if not dict_partidos:
+            st.error("❌ Primero debes hacer clic en 'Consultar Radar Múltiple' para cargar datos.")
+        else:
+            # Filtrar todas las opciones individuales que sean Valuebets genuinas
+            bolsa_valuebets = []
+            for p_id, part in dict_partidos.items():
+                for nombre_m, m_info in part['mercados'].items():
+                    for opcion, val_data in m_info['value_bets'].items():
+                        if val_data['es_value']: # Solo los que tienen 🔥 VALOR
+                            bolsa_valuebets.append({
+                                "evento": f"{part['local']} vs {part['visitante']}",
+                                "liga": part['liga_origen'],
+                                "mercado": nombre_m,
+                                "seleccion": opcion,
+                                "cuota": m_info['max_cuotas'][opcion],
+                                "casa": m_info['max_bookies'][opcion]
+                            })
+            
+            if len(bolsa_valuebets) < num_eventos_auto:
+                st.warning(f"Se encontraron solo {len(bolsa_valuebets)} Valuebets. Reduciendo el tamaño del parlay.")
+                k_seleccion = len(bolsa_valuebets)
+            else:
+                k_seleccion = num_eventos_auto
+                
+            if k_seleccion > 0:
+                st.session_state.parlay_automatico = random.sample(bolsa_valuebets, k_seleccion)
+                st.success(f"🎯 Parlay sugerido generado con {k_seleccion} Valuebets de alto valor esperado.")
+            else:
+                st.error("No se encontraron Valuebets con EV positivo bajo los filtros actuales.")
+
     st.markdown("---")
     
-    dict_partidos = st.session_state.datos_cargados
-            
+    apuestas_seleccionadas = []
+    
+    # Si hay un parlay automático activo, toma precedencia o se muestra de forma destacada
+    if st.session_state.parlay_automatico:
+        st.info("🤖 **Modo Automático Activado:** Modifica las opciones abajo si deseas cambiar algo o usa el ticket generado.")
+        apuestas_seleccionadas = st.session_state.parlay_automatico
+        
+        if st.button("Clear / Salir del modo automático"):
+            st.session_state.parlay_automatico = []
+            st.rerun()
+
     if not ligas_sels or not mercados_sels:
         st.info("💡 Selecciona ligas y mercados arriba y pulsa 'Consultar Radar Múltiple'.")
     else:
-        apuestas_seleccionadas = []
-        if dict_partidos:
+        if dict_partidos and not st.session_state.parlay_automatico:
             st.subheader(f"📋 Eventos Consolidados Encontrados ({len(dict_partidos)})")
             v_ticket = st.session_state.version_ticket
             
-            # Obtener ligas únicas
             ligas_con_datos = list(set([p['liga_origen'] for p in dict_partidos.values()]))
             pestanas_ligas = st.tabs(ligas_con_datos)
             
@@ -268,7 +319,6 @@ with pestana_radar:
                             st.session_state.versiones_partidos[part['id']] = 0
                         v_partido = st.session_state.versiones_partidos[part['id']]
                         
-                        # CONTENEDOR DE PARTIDO ÚNICO
                         with st.container(border=True):
                             col_borrar, col_info = st.columns([0.4, 5.6])
                             with col_borrar:
@@ -280,7 +330,6 @@ with pestana_radar:
                                 st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
                                 st.caption(f"📅 Hora Local: {part['fecha_str']}")
                             
-                            # Sub-pestañas internas por cada mercado disponible para ESTE partido
                             mercados_del_partido = list(part['mercados'].keys())
                             sub_tabs_mercados = st.tabs(mercados_del_partido)
                             
@@ -304,7 +353,6 @@ with pestana_radar:
                                                 
                                                 lbl_val = "🔥 VALOR" if info_val['es_value'] else ""
                                                 
-                                                # Checkbox único combinando ID de partido, Mercado y Opción
                                                 chk = st.checkbox(f"{plantilla_opcion} ({cuota_m}) {lbl_val}", key=f"ap_{part['id']}_{nombre_m.replace(' ','_')}_{plantilla_opcion}_vp{v_partido}_vt{v_ticket}")
                                                 c_betano = m_info['betano_cuotas'].get(plantilla_opcion, "N/A")
                                                 p_real = info_val['prob_real']
@@ -356,13 +404,15 @@ with pestana_radar:
                             "Ganancia Potencial": ganancia_neta
                         })
                         st.session_state.version_ticket += 1
+                        st.session_state.parlay_automatico = [] # Limpiar
                         st.toast("¡Apuesta registrada exitosamente!", icon="💾")
                         st.rerun()
                         
                 with col_btn_ws:
                     st.markdown(f'<a href="https://api.whatsapp.com/send?text={msg_encoded}" target="_blank" style="text-decoration:none;"><button style="border:none; background-color:#25D366; color:white; padding:10px 14px; border-radius:8px; font-size:16px; font-weight:bold; width:100%; height:43px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">📲 Compartir Parlay Completo en WhatsApp</button></a>', unsafe_allow_html=True)
         else:
-            st.warning("Haz clic en 'Consultar Radar Múltiple' para traer los partidos actuales del servidor.")
+            if not st.session_state.parlay_automatico:
+                st.warning("Haz clic en 'Consultar Radar Múltiple' para traer los partidos actuales del servidor.")
 
 # ==========================================
 # VISTA: PESTAÑA 2 - AUDITORÍA & ROI
