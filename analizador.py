@@ -70,7 +70,7 @@ if 'claves_auto' not in st.session_state:
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
-# --- CACHÉ INTELIGENTE (CORREGIDO PARA TRAER H2H SIEMPRE COMO RESPALDO DE IDENTIDAD) ---
+# --- CACHÉ INTELIGENTE COREGIDO ---
 @st.cache_data(ttl=120)  
 def consultar_api_odds(sport_key, market_key):
     if not sport_key:
