@@ -413,7 +413,10 @@ with pestana_radar:
                         "Ganancia Potencial": ganancia_neta
                     })
                     st.session_state.version_ticket += 1
-                    st.session_state.datos_cargados = {} 
+                    
+                    # CORREGIDO: Línea de borrado de datos comentada para que el parley no desaparezca de la pantalla
+                    # st.session_state.datos_cargados = {} 
+                    
                     st.session_state.claves_auto = set()
                     st.toast("¡Apuesta registrada exitosamente!", icon="💾")
                     st.rerun()
