@@ -264,6 +264,25 @@ with pestana_radar:
                     # "double_chance" de forma nativa.
                     if m_sel == "Doble Oportunidad":
                         market_api = "h2h,double_chance"
+
+                    # --- BLOQUE TEMPORAL DE DIAGNÓSTICO — bórralo después de probar ---
+                    url_debug = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={market_api}&oddsFormat=decimal"
+                    try:
+                        resp_debug = requests.get(url_debug)
+                        with st.expander(f"🔎 DEBUG → Liga: {liga} | Mercado: {m_sel} | Status: {resp_debug.status_code}"):
+                            if resp_debug.status_code != 200:
+                                st.error(f"Respuesta cruda de error: {resp_debug.text}")
+                            else:
+                                data_debug = resp_debug.json()
+                                if data_debug:
+                                    st.write(f"✅ {len(data_debug)} partidos recibidos. Ejemplo del primero:")
+                                    st.json(data_debug[0])
+                                else:
+                                    st.warning("⚠️ La API respondió 200 pero con una lista vacía [] (sin partidos en el rango de fechas o sin cobertura de bookmakers).")
+                    except Exception as e:
+                        st.error(f"Error en la llamada de diagnóstico: {e}")
+                    # --- FIN BLOQUE TEMPORAL DE DIAGNÓSTICO ---
+
                     raw_data = consultar_api_odds(sport_key, market_key=market_api)
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
             st.session_state.datos_cargados = consolidador
