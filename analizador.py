@@ -42,7 +42,7 @@ ligas_locales = {
     "🇮🇹 Serie A (Italia)": "soccer_italy_serie_a",
     "🇩🇪 Bundesliga (Alemania)": "soccer_germany_bundesliga",
     "🇫🇷 Ligue 1 (Francia)": "soccer_france_ligue_one",
-    "🇳🇱 Eredivisie (Países Bajos)": "soccer_netherlands_eredivisie" # Corrección de Typo en la clave emoji original
+    "🇳🇱 Eredivisie (Países Bajos)": "soccer_netherlands_eredivisie" 
 }
 
 ligas_locales_ordenadas = dict(sorted(ligas_locales.items()))
@@ -71,11 +71,10 @@ if 'parlay_automatico' not in st.session_state:
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
 # --- CACHÉ INTELIGENTE MEJORADO ---
-@st.cache_data(ttl=120)  # Reducido a 2 minutos para evitar atascos de datos viejos
+@st.cache_data(ttl=120)  
 def consultar_api_odds(sport_key, market_key):
     if not sport_key:
         return []
-    # MODIFICACIÓN CRÍTICA: Traemos siempre h2h como respaldo absoluto para Doble Oportunidad y cálculos
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={market_key},h2h&oddsFormat=decimal"
     try:
         response = requests.get(url)
@@ -89,7 +88,8 @@ def consultar_api_odds(sport_key, market_key):
 
 # --- PROCESADOR MULTI-MERCADO AGRUPADO ---
 def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
-    ahora = datetime.now()
+    # CORRECCIÓN DE ZONA HORARIA: Comparamos el servidor usando UTC estricto
+    ahora_utc = datetime.utcnow()
     if not datos or not isinstance(datos, list):
         return
 
@@ -104,12 +104,15 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         except ValueError:
             continue
             
-        fecha_local = fecha_utc - timedelta(hours=5)
-        horas_para_partido = (fecha_local - ahora).total_seconds() / 3600
+        # Calculamos el tiempo faltante usando UTC absoluto (Corrige el error de partidos vacíos en la nube)
+        horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
         
-        # Filtro flexible para no ocultar partidos del mismo día
+        # Filtro flexible para no ocultar partidos del mismo día o futuros lejanos
         if horas_para_partido < -3.0 or horas_para_partido > limite_horas:
             continue
+            
+        # Transformamos a horario local (-5) exclusivamente para pintar en la interfaz de usuario
+        fecha_local = fecha_utc - timedelta(hours=5)
             
         bookmakers = partido.get('bookmakers', [])
         if not bookmakers:
@@ -242,7 +245,7 @@ with pestana_radar:
 
     if consultar:
         if len(ligas_sels) > 0 and len(mercados_sels) > 0:
-            st.cache_data.clear() # Limpiamos la caché inmediatamente al pulsar para refrescar datos reales
+            st.cache_data.clear() 
             consolidador = {}
             for liga in ligas_sels:
                 sport_key = todas_las_ligas[liga]
@@ -343,16 +346,15 @@ with pestana_radar:
                                             info_val = m_info['value_bets'][plantilla_opcion]
                                             lbl_val = "🔥 VALOR" if info_val['es_value'] else ""
                                             
-                                            # Modificado el parseo de strings en key para evitar errores de caracteres especiales en Streamlit
                                             clean_op = plantilla_opcion.replace(' ','_').replace('(','').replace(')','')
                                             clean_m = nombre_m.replace(' ','_').replace('(','').replace(')','')
                                             
                                             chk = st.checkbox(f"{plantilla_opcion} ({cuota_m}) {lbl_val}", key=f"ap_{part['id']}_{clean_m}_{clean_op}_vp{v_partido}_vt{v_ticket}")
-                                            c_betano = m_info['betano_cuotas'].get(plantilla_opcion, "N/A")
+                                            facing_betano = m_info['betano_cuotas'].get(plantilla_opcion, "N/A")
                                             p_real = info_val['prob_real']
                                             clase_color = "prob-alta" if p_real >= 60 else ("prob-media" if p_real >= 40 else "prob-baja")
                                             
-                                            st.markdown(f"<small>🏠 {casa_m} | Betano: {c_betano}<br>🎯 Prob: <span class='{clase_color}'>{round(p_real,1)}%</span></small>", unsafe_allow_html=True)
+                                            st.markdown(f"<small>🏠 {casa_m} | Betano: {facing_betano}<br>🎯 Prob: <span class='{clase_color}'>{round(p_real,1)}%</span></small>", unsafe_allow_html=True)
                                             
                                             if chk:
                                                 apuestas_seleccionadas.append({
