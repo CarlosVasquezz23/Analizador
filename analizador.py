@@ -73,6 +73,8 @@ pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBET
 # --- CACHÉ INTELIGENTE CORREGIDO ---
 @st.cache_data(ttl=120)
 def consultar_api_odds(sport_key, market_key):
+    """Endpoint MASIVO: solo soporta mercados 'featured' (h2h, spreads, totals, outrights).
+    Devuelve TODOS los partidos de una liga en una sola llamada."""
     if not sport_key:
         return []
 
@@ -94,6 +96,53 @@ def consultar_api_odds(sport_key, market_key):
     except Exception:
         pass
     return []
+
+
+@st.cache_data(ttl=120)
+def consultar_api_odds_evento(sport_key, event_id, market_key):
+    """Endpoint POR EVENTO: soporta mercados adicionales (double_chance, btts,
+    player props, etc). Hay que llamarlo una vez por cada partido."""
+    if not sport_key or not event_id:
+        return None
+
+    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event_id}/odds/?apiKey={API_KEY}&regions=eu&markets={market_key}&oddsFormat=decimal"
+    try:
+        response = requests.get(url)
+        if response.status_code == 429:
+            st.error("❌ ¡Límite de créditos mensuales agotado en The Odds API!")
+            return None
+        elif response.status_code == 401:
+            st.error("❌ API Key inválida.")
+            return None
+        elif response.status_code != 200:
+            return None
+        return response.json()
+    except Exception:
+        return None
+
+
+def filtrar_partidos_por_fecha(datos, limite_horas):
+    """Filtra la lista de partidos por el rango de horas seleccionado,
+    replicando el mismo criterio que usa procesar_e_inyectar_mercado,
+    para no gastar créditos llamando al endpoint por evento en partidos
+    que de todas formas quedarían fuera del rango."""
+    ahora_utc = datetime.now(timezone.utc)
+    resultado = []
+    if not datos or not isinstance(datos, list):
+        return resultado
+
+    for partido in datos:
+        try:
+            fecha_utc = datetime.fromisoformat(partido['commence_time'].replace('Z', '+00:00'))
+        except (ValueError, KeyError):
+            continue
+
+        horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
+        if horas_para_partido < -6.0 or horas_para_partido > (limite_horas + 12):
+            continue
+
+        resultado.append(partido)
+    return resultado
 
 # --- PROCESADOR MULTI-MERCADO ---
 def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
@@ -233,6 +282,8 @@ with pestana_radar:
 
     with col_m:
         mercados_sels = st.multiselect("Mercados de Análisis:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
+        if any(m in mercados_sels for m in ["Doble Oportunidad", "Ambos Anotan (BTTS)"]):
+            st.caption("⚠️ Estos mercados consultan la API 1 vez por cada partido (más gasto de créditos).")
 
     with col_t:
         tiempo_sel = st.selectbox("Rango Temporal:", ["24 Horas", "48 Horas", "72 Horas"], index=1)
@@ -254,37 +305,49 @@ with pestana_radar:
         if len(ligas_sels) > 0 and len(mercados_sels) > 0:
             st.cache_data.clear()
             consolidador = {}
+
+            # Separamos los mercados en dos grupos porque usan endpoints
+            # DISTINTOS de The Odds API:
+            # - "featured" (h2h, totals): endpoint masivo, 1 sola llamada por liga.
+            # - "adicionales" (double_chance, btts): la API solo los expone en
+            #   el endpoint por evento, así que hay que llamar 1 vez por partido.
+            mercados_featured = [m for m in mercados_sels if diccionario_mercados[m] in ("h2h", "totals")]
+            mercados_adicionales = [m for m in mercados_sels if diccionario_mercados[m] in ("double_chance", "btts")]
+
             for liga in ligas_sels:
                 sport_key = todas_las_ligas[liga]
-                for m_sel in mercados_sels:
+
+                # --- 1) MERCADOS FEATURED: endpoint masivo (barato, 1 llamada) ---
+                for m_sel in mercados_featured:
                     market_api = diccionario_mercados[m_sel]
-                    # FIX: para Doble Oportunidad pedimos también h2h en la
-                    # misma llamada, así siempre tenemos datos para calcular
-                    # el fallback matemático cuando la casa no ofrezca
-                    # "double_chance" de forma nativa.
-                    if m_sel == "Doble Oportunidad":
-                        market_api = "h2h,double_chance"
-
-                    # --- BLOQUE TEMPORAL DE DIAGNÓSTICO — bórralo después de probar ---
-                    url_debug = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={market_api}&oddsFormat=decimal"
-                    try:
-                        resp_debug = requests.get(url_debug)
-                        with st.expander(f"🔎 DEBUG → Liga: {liga} | Mercado: {m_sel} | Status: {resp_debug.status_code}"):
-                            if resp_debug.status_code != 200:
-                                st.error(f"Respuesta cruda de error: {resp_debug.text}")
-                            else:
-                                data_debug = resp_debug.json()
-                                if data_debug:
-                                    st.write(f"✅ {len(data_debug)} partidos recibidos. Ejemplo del primero:")
-                                    st.json(data_debug[0])
-                                else:
-                                    st.warning("⚠️ La API respondió 200 pero con una lista vacía [] (sin partidos en el rango de fechas o sin cobertura de bookmakers).")
-                    except Exception as e:
-                        st.error(f"Error en la llamada de diagnóstico: {e}")
-                    # --- FIN BLOQUE TEMPORAL DE DIAGNÓSTICO ---
-
                     raw_data = consultar_api_odds(sport_key, market_key=market_api)
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
+
+                # --- 2) MERCADOS ADICIONALES: endpoint por evento (1 llamada x partido) ---
+                if mercados_adicionales:
+                    # Traemos la lista base de partidos vía h2h (barato) solo
+                    # para saber qué eventos existen y filtrarlos por fecha
+                    # ANTES de gastar créditos llamando evento por evento.
+                    base_data = consultar_api_odds(sport_key, market_key="h2h")
+                    eventos_filtrados = filtrar_partidos_por_fecha(base_data, limite_h)
+
+                    # Siempre incluimos "h2h" en la llamada por evento para
+                    # que el fallback matemático de Doble Oportunidad tenga
+                    # datos con qué calcular cuando la casa no lo ofrezca nativo.
+                    claves_markets = ["h2h"]
+                    if "Doble Oportunidad" in mercados_adicionales:
+                        claves_markets.append("double_chance")
+                    if "Ambos Anotan (BTTS)" in mercados_adicionales:
+                        claves_markets.append("btts")
+                    markets_str = ",".join(claves_markets)
+
+                    for partido_base in eventos_filtrados:
+                        event_id = partido_base['id']
+                        datos_evento = consultar_api_odds_evento(sport_key, event_id, markets_str)
+                        if datos_evento:
+                            for m_sel in mercados_adicionales:
+                                procesar_e_inyectar_mercado([datos_evento], m_sel, limite_h, liga, consolidador)
+
             st.session_state.datos_cargados = consolidador
             st.session_state.claves_auto = set()
             st.session_state.version_ticket += 1
