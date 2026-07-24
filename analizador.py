@@ -64,19 +64,23 @@ if 'datos_cargados' not in st.session_state:
     st.session_state.datos_cargados = {}
 if 'versiones_partidos' not in st.session_state:
     st.session_state.versiones_partidos = {}
-# Cambiamos parlay_automatico por un set que guarde las llaves de los checkboxes elegidos
 if 'claves_auto' not in st.session_state:
     st.session_state.claves_auto = set()
 
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
-# --- CACHÉ INTELIGENTE CON DIAGNÓSTICO EN TIEMPO REAL ---
+# --- CACHÉ INTELIGENTE CON DIAGNÓSTICO EN TIEMPO REAL CORREGIDO ---
 @st.cache_data(ttl=120)  
 def consultar_api_odds(sport_key, market_key):
     if not sport_key:
         return []
-    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={market_key},h2h&oddsFormat=decimal"
+        
+    # CORRECCIÓN CLAVE: Si se solicita double_chance, pedimos h2h a la API para evitar el error 422 
+    # y dejamos que el procesador matemático calcule las cuotas equivalentes automáticamente.
+    api_market = "h2h" if market_key == "double_chance" else market_key
+    
+    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={api_market}&oddsFormat=decimal"
     try:
         response = requests.get(url)
         
@@ -143,6 +147,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                         cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                         if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
                 
+                # Respaldo matemático inteligente usando H2H (aquí entra por defecto ahora)
                 if (not cuotas_globales) and ("h2h" in dict_b_markets):
                     outcomes_h2h = dict_b_markets["h2h"]
                     precios_h2h = {o['name']: float(o['price']) for o in outcomes_h2h}
@@ -252,7 +257,7 @@ with pestana_radar:
                     raw_data = consultar_api_odds(sport_key, market_key=market_api)
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
             st.session_state.datos_cargados = consolidador
-            st.session_state.claves_auto = set() # Limpia las selecciones automáticas previas
+            st.session_state.claves_auto = set() 
             
             if not consolidador:
                 st.info("⚠️ No se encontraron partidos activos o cuotas disponibles para los criterios seleccionados en las próximas horas.")
@@ -273,7 +278,6 @@ with pestana_radar:
                         clean_op = opcion.replace(' ','_').replace('(','').replace(')','')
                         clean_m = nombre_m.replace(' ','_').replace('(','').replace(')','')
                         
-                        # Generamos la clave única que tendrá el checkbox abajo
                         clave_chk = f"ap_{part['id']}_{clean_m}_{clean_op}"
                         
                         bolsa_probabilidades.append({
@@ -285,7 +289,6 @@ with pestana_radar:
             k_seleccion = min(len(bolsa_probabilidades), num_eventos_auto)
                 
             if k_seleccion > 0:
-                # Guardamos las claves en el estado para que se marquen solas
                 st.session_state.claves_auto = set([x['clave'] for x in bolsa_probabilidades[:k_seleccion]])
                 st.success(f"🎯 Se han marcado automáticamente los {k_seleccion} eventos más probables. ¡Puedes modificarlos o añadir más abajo!")
             else:
@@ -293,11 +296,10 @@ with pestana_radar:
 
     apuestas_seleccionadas = []
     
-    # Botón para limpiar de golpe las selecciones en pantalla
     if st.session_state.claves_auto or dict_partidos:
         if st.button("🧹 Limpiar todas las casillas marcadas"):
             st.session_state.claves_auto = set()
-            st.session_state.version_ticket += 1 # Fuerza el refresco completo de widgets
+            st.session_state.version_ticket += 1 
             st.rerun()
 
     if dict_partidos:
@@ -351,8 +353,6 @@ with pestana_radar:
                                             clean_m = nombre_m.replace(' ','_').replace('(','').replace(')','')
                                             
                                             clave_base = f"ap_{part['id']}_{clean_m}_{clean_op}"
-                                            
-                                            # Condición clave: Si la ID fue autogenerada, el valor inicial será True
                                             marcado_inicial = clave_base in st.session_state.claves_auto
                                             
                                             chk = st.checkbox(
@@ -374,7 +374,7 @@ with pestana_radar:
                                                     "seleccion": plantilla_opcion, "cuota": cuota_m, "casa": casa_m
                                                 })
 
-    # SECCIÓN DE BOLETO / PARLAY (Integra dinámicamente lo manual y lo automático)
+    # SECCIÓN DE BOLETO / PARLAY
     if apuestas_seleccionadas:
         st.markdown("---")
         st.header("🎟️ Configuración de Parlay Global")
