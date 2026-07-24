@@ -70,13 +70,18 @@ if 'claves_auto' not in st.session_state:
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
-# --- CACHÉ INTELIGENTE ---
+# --- CACHÉ INTELIGENTE (CORREGIDO PARA TRAER H2H SIEMPRE COMO RESPALDO DE IDENTIDAD) ---
 @st.cache_data(ttl=120)  
 def consultar_api_odds(sport_key, market_key):
     if not sport_key:
         return []
         
-    api_market = "h2h" if market_key == "double_chance" else market_key
+    # Forzamos a la API a devolver h2h junto con el mercado extra para que el procesador no pierda consistencia
+    if market_key != "h2h":
+        api_market = f"h2h,{market_key}"
+    else:
+        api_market = "h2h"
+        
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={api_market}&oddsFormat=decimal"
     try:
         response = requests.get(url)
@@ -261,7 +266,7 @@ with pestana_radar:
             
     dict_partidos = st.session_state.datos_cargados
 
-    # LÓGICA DE PRE-SELECCIÓN AUTOMÁTICA CORREGIDA (Haciendo match exacto de ID string)
+    # LÓGICA DE PRE-SELECCIÓN AUTOMÁTICA
     if generar_auto:
         if not dict_partidos:
             st.error("❌ Primero debes hacer clic en 'Consultar Radar Múltiple' para cargar datos.")
@@ -270,7 +275,6 @@ with pestana_radar:
             for p_id, part in dict_partidos.items():
                 for nombre_m, m_info in part['mercados'].items():
                     for opcion, val_data in m_info['value_bets'].items():
-                        # Unificación exacta del ID String
                         clave_chk = f"ap_{part['id']}_{nombre_m}_{opcion}"
                         bolsa_probabilidades.append({
                             "clave": clave_chk,
@@ -342,7 +346,6 @@ with pestana_radar:
                                             info_val = m_info['value_bets'][plantilla_opcion]
                                             lbl_val = "🔥 VALOR" if info_val['es_value'] else ""
                                             
-                                            # Clave unificada e idéntica
                                             clave_base = f"ap_{part['id']}_{nombre_m}_{plantilla_opcion}"
                                             marcado_inicial = clave_base in st.session_state.claves_auto
                                             
