@@ -70,38 +70,33 @@ if 'claves_auto' not in st.session_state:
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
-# --- CACHÉ INTELIGENTE CON DIAGNÓSTICO EN TIEMPO REAL CORREGIDO ---
+# --- CACHÉ INTELIGENTE ---
 @st.cache_data(ttl=120)  
 def consultar_api_odds(sport_key, market_key):
     if not sport_key:
         return []
         
-    # CORRECCIÓN CLAVE: Si se solicita double_chance, pedimos h2h a la API para evitar el error 422 
-    # y dejamos que el procesador matemático calcule las cuotas equivalentes automáticamente.
     api_market = "h2h" if market_key == "double_chance" else market_key
-    
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={api_market}&oddsFormat=decimal"
     try:
         response = requests.get(url)
-        
         if response.status_code == 429:
-            st.error("❌ ¡Límite de créditos mensuales agotado en The Odds API! Genera una nueva API Key.")
+            st.error("❌ ¡Límite de créditos mensuales agotado en The Odds API!")
             return []
         elif response.status_code == 401:
-            st.error("❌ API Key inválida o mal configurada. Revisa los accesos del proveedor.")
+            st.error("❌ API Key inválida.")
             return []
         elif response.status_code != 200:
-            st.error(f"⚠️ Error devuelto por el servidor (Código {response.status_code}): {response.text}")
             return []
             
         res_json = response.json()
         if res_json and len(res_json) > 0:
             return res_json
-    except Exception as e:
-        st.error(f"💥 Error crítico de conexión a la API: {str(e)}")
+    except Exception:
+        pass
     return []
 
-# --- PROCESADOR MULTI-MERCADO AGRUPADO ---
+# --- PROCESADOR MULTI-MERCADO ---
 def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
     ahora_utc = datetime.utcnow()
     if not datos or not isinstance(datos, list):
@@ -147,7 +142,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                         cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                         if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
                 
-                # Respaldo matemático inteligente usando H2H (aquí entra por defecto ahora)
                 if (not cuotas_globales) and ("h2h" in dict_b_markets):
                     outcomes_h2h = dict_b_markets["h2h"]
                     precios_h2h = {o['name']: float(o['price']) for o in outcomes_h2h}
@@ -258,15 +252,16 @@ with pestana_radar:
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
             st.session_state.datos_cargados = consolidador
             st.session_state.claves_auto = set() 
+            st.session_state.version_ticket += 1
             
             if not consolidador:
-                st.info("⚠️ No se encontraron partidos activos o cuotas disponibles para los criterios seleccionados en las próximas horas.")
+                st.info("⚠️ No se encontraron partidos activos o cuotas disponibles.")
         else:
             st.warning("Elige al menos una liga y un mercado antes de consultar.")
             
     dict_partidos = st.session_state.datos_cargados
 
-    # LÓGICA DE PRE-SELECCIÓN AUTOMÁTICA
+    # LÓGICA DE PRE-SELECCIÓN AUTOMÁTICA CORREGIDA (Haciendo match exacto de ID string)
     if generar_auto:
         if not dict_partidos:
             st.error("❌ Primero debes hacer clic en 'Consultar Radar Múltiple' para cargar datos.")
@@ -275,11 +270,8 @@ with pestana_radar:
             for p_id, part in dict_partidos.items():
                 for nombre_m, m_info in part['mercados'].items():
                     for opcion, val_data in m_info['value_bets'].items():
-                        clean_op = opcion.replace(' ','_').replace('(','').replace(')','')
-                        clean_m = nombre_m.replace(' ','_').replace('(','').replace(')','')
-                        
-                        clave_chk = f"ap_{part['id']}_{clean_m}_{clean_op}"
-                        
+                        # Unificación exacta del ID String
+                        clave_chk = f"ap_{part['id']}_{nombre_m}_{opcion}"
                         bolsa_probabilidades.append({
                             "clave": clave_chk,
                             "prob_real": val_data['prob_real']
@@ -290,7 +282,8 @@ with pestana_radar:
                 
             if k_seleccion > 0:
                 st.session_state.claves_auto = set([x['clave'] for x in bolsa_probabilidades[:k_seleccion]])
-                st.success(f"🎯 Se han marcado automáticamente los {k_seleccion} eventos más probables. ¡Puedes modificarlos o añadir más abajo!")
+                st.session_state.version_ticket += 1
+                st.success(f"🎯 Se han marcado automáticamente los {k_seleccion} eventos más probables. ¡Míralos abajo!")
             else:
                 st.error("No se encontraron eventos bajo los filtros actuales.")
 
@@ -349,16 +342,14 @@ with pestana_radar:
                                             info_val = m_info['value_bets'][plantilla_opcion]
                                             lbl_val = "🔥 VALOR" if info_val['es_value'] else ""
                                             
-                                            clean_op = plantilla_opcion.replace(' ','_').replace('(','').replace(')','')
-                                            clean_m = nombre_m.replace(' ','_').replace('(','').replace(')','')
-                                            
-                                            clave_base = f"ap_{part['id']}_{clean_m}_{clean_op}"
+                                            # Clave unificada e idéntica
+                                            clave_base = f"ap_{part['id']}_{nombre_m}_{plantilla_opcion}"
                                             marcado_inicial = clave_base in st.session_state.claves_auto
                                             
                                             chk = st.checkbox(
                                                 f"{plantilla_opcion} ({cuota_m}) {lbl_val}", 
                                                 value=marcado_inicial,
-                                                key=f"{clave_base}_vp{v_partido}_vt{v_ticket}"
+                                                key=f"render_{clave_base}_vp{v_partido}_vt{v_ticket}"
                                             )
                                             
                                             facing_betano = m_info['betano_cuotas'].get(plantilla_opcion, "N/A")
@@ -413,10 +404,6 @@ with pestana_radar:
                         "Ganancia Potencial": ganancia_neta
                     })
                     st.session_state.version_ticket += 1
-                    
-                    # CORREGIDO: Línea de borrado de datos comentada para que el parley no desaparezca de la pantalla
-                    # st.session_state.datos_cargados = {} 
-                    
                     st.session_state.claves_auto = set()
                     st.toast("¡Apuesta registrada exitosamente!", icon="💾")
                     st.rerun()
