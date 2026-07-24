@@ -76,7 +76,6 @@ def consultar_api_odds(sport_key, market_key):
     if not sport_key:
         return []
         
-    # CORRECCIÓN AQUÍ: Se usaba market_api en lugar del argumento market_key de la función
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url)
@@ -127,11 +126,11 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         
         for b in bookmakers:
             b_key = b['key'].lower()
-            if not b.get('markets'): continue
+            if not b.get('markets') or not isinstance(b['markets'], list): 
+                continue
             
-            dict_b_markets = {m['key']: m['outcomes'] for m in m['markets']} if isinstance(b['markets'], list) else {}
-            # Re-estructuramos de forma segura los mercados del bookmaker
-            dict_b_markets = {m['key']: m['outcomes'] for m in b['markets']}
+            # Re-estructuramos de forma segura los mercados del bookmaker evitando variables duplicadas
+            dict_b_markets = {m['key']: m['outcomes'] for m in b['markets'] if 'key' in m and 'outcomes' in m}
             
             if mercado == "Doble Oportunidad":
                 if "double_chance" in dict_b_markets:
@@ -144,7 +143,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                         cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                         if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
                 
-                # Tu cálculo matemático impecable si no viene nativo en la API:
+                # Respaldo matemático implícito si la API no trae Double Chance nativo pero tiene H2H
                 if (not cuotas_globales) and ("h2h" in dict_b_markets):
                     outcomes_h2h = dict_b_markets["h2h"]
                     precios_h2h = {o['name']: float(o['price']) for o in outcomes_h2h}
@@ -251,6 +250,7 @@ with pestana_radar:
                 sport_key = todas_las_ligas[liga]
                 for m_sel in mercados_sels:
                     market_api = diccionario_mercados[m_sel]
+                    # CORREGIDO: Se pasa 'market_key=market_api' correctamente
                     raw_data = consultar_api_odds(sport_key, market_key=market_api)
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
             st.session_state.datos_cargados = consolidador
