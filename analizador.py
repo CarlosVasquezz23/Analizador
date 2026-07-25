@@ -35,7 +35,15 @@ st.markdown("""
     .prob-media { color: #f1c40f; font-weight: bold; }
     .prob-baja { color: #e74c3c; font-weight: bold; }
     .match-header { font-size: 18px; font-weight: bold; margin-bottom: 2px; }
-    .creditos-caja { background-color: #1e272e; padding: 10px; border-radius: 8px; border-left: 5px solid #00d2d3; margin-bottom: 15px; }
+    
+    /* Versión corregida: Se añade espaciado interno asimétrico para centrar y despegar el texto del borde izquierdo */
+    .creditos-caja { 
+        background-color: #1e272e; 
+        padding: 12px 15px 12px 18px; 
+        border-radius: 8px; 
+        border-left: 5px solid #00d2d3; 
+        margin-bottom: 15px; 
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -82,7 +90,7 @@ diccionario_mercados = {
 
 # --- INICIALIZACIÓN DE ESTADOS ---
 if 'historial_apuestas' not in st.session_state:
-    st.session_state.historial_apuestas = cargar_historial_local() # Carga Persistente (Mejora 4)
+    st.session_state.historial_apuestas = cargar_historial_local()
 if 'version_ticket' not in st.session_state:
     st.session_state.version_ticket = 0
 if 'datos_cargados' not in st.session_state:
@@ -100,7 +108,7 @@ if 'creditos_restantes' not in st.session_state:
 with st.sidebar:
     st.header("⚙️ Filtros de Control Global")
     
-    # Renderizador de Créditos en Vivo (Mejora 1)
+    # Renderizador de Créditos en Vivo
     st.markdown(f"""
         <div class="creditos-caja">
             <small style="color:#a4b0be; text-transform:uppercase; font-weight:bold;">Créditos Restantes API</small><br>
@@ -127,7 +135,7 @@ with st.sidebar:
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
-# --- CACHÉ INTELIGENTE CON MANEJO DE CRÉDITOS Y ERRORES (Mejora 1) ---
+# --- CACHÉ INTELIGENTE CON MANEJO DE CRÉDITOS Y ERRORES ---
 def actualizar_creditos(headers):
     if 'x-requests-remaining' in headers:
         st.session_state.creditos_restantes = headers['x-requests-remaining']
@@ -550,7 +558,7 @@ with pestana_radar:
                             "Ganancia Potencial": ganancia_neta
                         })
                         
-                        # Guardado automático e inmediato en el almacenamiento local (Mejora 4)
+                        # Guardado automático e inmediato en el almacenamiento local
                         guardar_historial_local(st.session_state.historial_apuestas)
                         
                         st.session_state.version_ticket += 1
@@ -583,7 +591,6 @@ with pestana_historial:
                 nuevo_estado = st.selectbox("Resultado:", opciones_resultado, index=index_actual, key=f"estado_{idx}")
                 if nuevo_estado != fila['Estado']:
                     st.session_state.historial_apuestas[idx]['Estado'] = nuevo_estado
-                    # Guardar tras cambiar estado
                     guardar_historial_local(st.session_state.historial_apuestas)
                     st.rerun()
 
