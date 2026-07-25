@@ -268,13 +268,14 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
 
         if max_cuotas:
             if partido_id not in diccionario_consolidador:
-                diccionario_consolidador[partido_id] = {
+                grid_consolidador = {
                     "id": partido_id,
                     "liga_origen": nombre_liga,
                     "fecha_str": fecha_local.strftime("%d/%m/%Y - %H:%M"),
                     "local": home, "visitante": away,
                     "mercados": {}
                 }
+                diccionario_consolidador[partido_id] = grid_consolidador
             diccionario_consolidador[partido_id]["mercados"][mercado] = {
                 "max_cuotas": max_cuotas,
                 "max_bookies": max_bookies,
@@ -283,7 +284,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             }
 
 # ==========================================
-# VISTA: PESTAÑA 1 - RADAR Y APUESTAS (NUEVO SPLIT DE DISEÑO)
+# VISTA: PESTAÑA 1 - RADAR Y APUESTAS
 # ==========================================
 with pestana_radar:
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
@@ -359,13 +360,24 @@ with pestana_radar:
 
     apuestas_seleccionadas = []
 
-    # --- PANTALLA DE ESPERA (EVITA EL VACÍO CENTRAL EN "WIDE") ---
+    # --- PANTALLA DE ESPERA CORREGIDA ---
     if not dict_partidos:
         st.markdown("---")
         col_wel1, col_wel2, col_wel3 = st.columns([1, 2, 1])
         with col_wel2:
-            st.info("💡 **Sistema en espera de instrucciones**\n\nPara comenzar a escanear cuotas de valor en tiempo real:\n1. Dirígete al menú de la izquierda (**Filtros de Control Global**).\n2. Elige uno o varios torneos.\n3. Selecciona tus mercados de interés.\n4. Presiona el botón rojo **Consultar Radar Múltiple**.")
-            st.image("https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=600&auto=format&fit=crop", caption="Data-Driven Sports Analytics", use_container_width=True)
+            st.info(
+                "💡 **Sistema en espera de instrucciones**\n\n"
+                "Para comenzar a escanear cuotas de valor en tiempo real:\n"
+                "1. Dirígete al menú de la izquierda (**Filtros de Control Global**).\n"
+                "2. Elige uno o varios torneos.\n"
+                "3. Selecciona tus mercados de interés.\n"
+                "4. Presiona el botón **Consultar Radar Múltiple**."
+            )
+            st.image(
+                "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=800&auto=format&fit=crop&q=60", 
+                caption="Data-Driven Sports Analytics", 
+                use_container_width=True
+            )
     else:
         # --- DISEÑO PARALELO DE DOS COLUMNAS ---
         col_izquierda, col_derecha = st.columns([6.5, 3.5])
