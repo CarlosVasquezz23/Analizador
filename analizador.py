@@ -215,7 +215,20 @@ with st.sidebar:
         </div>
     """, unsafe_allow_html=True)
     
-    ligas_sels = st.multiselect("Selecciona los Torneos a Analizar:", list(todas_las_ligas.keys()), default=[])
+    if 'ligas_sels_widget' not in st.session_state:
+        st.session_state.ligas_sels_widget = []
+
+    col_sel_todas, col_sel_limpiar = st.columns(2)
+    with col_sel_todas:
+        if st.button("✅ Todas", use_container_width=True):
+            st.session_state.ligas_sels_widget = list(todas_las_ligas.keys())
+            st.rerun()
+    with col_sel_limpiar:
+        if st.button("🧹 Ninguna", use_container_width=True):
+            st.session_state.ligas_sels_widget = []
+            st.rerun()
+
+    ligas_sels = st.multiselect("Selecciona los Torneos a Analizar:", list(todas_las_ligas.keys()), key="ligas_sels_widget")
 
     st.markdown("---")
     st.caption("🌎 Ligas extra vía Highlightly (Colombia, Ecuador, Uruguay, Perú)")
@@ -448,6 +461,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                     "id": partido_id,
                     "liga_origen": nombre_liga,
                     "fecha_str": fecha_local.strftime("%d/%m/%Y - %H:%M"),
+                    "fecha_ts": fecha_utc.timestamp(),
                     "local": home, "visitante": away,
                     "mercados": {}
                 }
@@ -543,6 +557,7 @@ def procesar_e_inyectar_highlightly(matches, mercados_sels, limite_horas, nombre
                 "id": match_id,
                 "liga_origen": nombre_liga,
                 "fecha_str": fecha_local.strftime("%d/%m/%Y - %H:%M"),
+                "fecha_ts": fecha_utc.timestamp(),
                 "local": home_team, "visitante": away_team,
                 "mercados": {}
             }
@@ -590,44 +605,51 @@ with pestana_radar:
             pidio_doble_oportunidad = "Doble Oportunidad" in mercados_sels
             pidio_btts = "Ambos Anotan (BTTS)" in mercados_sels
 
-            for liga in ligas_sels:
-                sport_key = todas_las_ligas[liga]
+            total_ligas_a_consultar = len(ligas_sels) + len(ligas_hl_sels)
 
-                # 1) MERCADOS GANADOR / TOTALES
-                for m_sel in mercados_featured:
-                    market_api = diccionario_mercados[m_sel]
-                    raw_data = consultar_api_odds(sport_key, market_key=market_api)
-                    procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
+            with st.status(f"🔄 Consultando {total_ligas_a_consultar} liga(s)...", expanded=True) as status_consulta:
+                for idx_liga, liga in enumerate(ligas_sels, start=1):
+                    status_consulta.update(label=f"🔄 Consultando ({idx_liga}/{total_ligas_a_consultar}): {liga}")
+                    sport_key = todas_las_ligas[liga]
 
-                # 2) DOBLE OPORTUNIDAD
-                if pidio_doble_oportunidad:
-                    base_h2h = consultar_api_odds(sport_key, market_key="h2h")
-                    procesar_e_inyectar_mercado(base_h2h, "Doble Oportunidad", limite_h, liga, consolidador)
+                    # 1) MERCADOS GANADOR / TOTALES
+                    for m_sel in mercados_featured:
+                        market_api = diccionario_mercados[m_sel]
+                        raw_data = consultar_api_odds(sport_key, market_key=market_api)
+                        procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
 
-                # 3) BTTS
-                if pidio_btts:
-                    base_para_filtrar = consultar_api_odds(sport_key, market_key="h2h")
-                    eventos_filtrados = filtrar_partidos_por_fecha(base_para_filtrar, limite_h)
-                    for partido_base in eventos_filtrados:
-                        event_id = partido_base['id']
-                        datos_evento = consultar_api_odds_evento(sport_key, event_id, "btts")
-                        if datos_evento:
-                            procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
+                    # 2) DOBLE OPORTUNIDAD
+                    if pidio_doble_oportunidad:
+                        base_h2h = consultar_api_odds(sport_key, market_key="h2h")
+                        procesar_e_inyectar_mercado(base_h2h, "Doble Oportunidad", limite_h, liga, consolidador)
 
-            # 4) LIGAS EXTRA VÍA HIGHLIGHTLY (Colombia, Ecuador, Uruguay, Perú)
-            dias_a_cubrir = (limite_h // 24) + 2
-            fechas_a_consultar = [(datetime.now(timezone.utc) + timedelta(days=d)).strftime("%Y-%m-%d") for d in range(dias_a_cubrir)]
+                    # 3) BTTS
+                    if pidio_btts:
+                        base_para_filtrar = consultar_api_odds(sport_key, market_key="h2h")
+                        eventos_filtrados = filtrar_partidos_por_fecha(base_para_filtrar, limite_h)
+                        for partido_base in eventos_filtrados:
+                            event_id = partido_base['id']
+                            datos_evento = consultar_api_odds_evento(sport_key, event_id, "btts")
+                            if datos_evento:
+                                procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
 
-            for liga_hl in ligas_hl_sels:
-                league_id = HL_LEAGUE_IDS.get(liga_hl)
-                if not league_id:
-                    st.warning(f"⚠️ Falta configurar el League ID de Highlightly para: {liga_hl}. Usa el buscador del sidebar.")
-                    continue
-                partidos_liga_hl = []
-                for f in fechas_a_consultar:
-                    partidos_liga_hl.extend(hl_consultar_matches(league_id, f))
-                st.caption(f"🔎 Highlightly — {liga_hl}: {len(partidos_liga_hl)} partido(s) encontrado(s) en el rango de fechas consultado.")
-                procesar_e_inyectar_highlightly(partidos_liga_hl, mercados_sels, limite_h, liga_hl, consolidador)
+                # 4) LIGAS EXTRA VÍA HIGHLIGHTLY (Colombia, Ecuador, Uruguay, Perú)
+                dias_a_cubrir = (limite_h // 24) + 2
+                fechas_a_consultar = [(datetime.now(timezone.utc) + timedelta(days=d)).strftime("%Y-%m-%d") for d in range(dias_a_cubrir)]
+
+                for idx_hl, liga_hl in enumerate(ligas_hl_sels, start=len(ligas_sels) + 1):
+                    status_consulta.update(label=f"🔄 Consultando ({idx_hl}/{total_ligas_a_consultar}): {liga_hl}")
+                    league_id = HL_LEAGUE_IDS.get(liga_hl)
+                    if not league_id:
+                        st.warning(f"⚠️ Falta configurar el League ID de Highlightly para: {liga_hl}. Usa el buscador del sidebar.")
+                        continue
+                    partidos_liga_hl = []
+                    for f in fechas_a_consultar:
+                        partidos_liga_hl.extend(hl_consultar_matches(league_id, f))
+                    st.caption(f"🔎 Highlightly — {liga_hl}: {len(partidos_liga_hl)} partido(s) encontrado(s) en el rango de fechas consultado.")
+                    procesar_e_inyectar_highlightly(partidos_liga_hl, mercados_sels, limite_h, liga_hl, consolidador)
+
+                status_consulta.update(label=f"✅ Consulta completa: {len(consolidador)} partido(s) con cuotas encontrados.", state="complete", expanded=False)
 
             st.session_state.datos_cargados = consolidador
             st.session_state.claves_auto = set()
@@ -685,13 +707,32 @@ with pestana_radar:
                    "Intenta cambiando el rango a **72 Horas** o agregando una liga europea como control.")
     else:
         # Buscador Dinámico de Equipos (Mejora 3 - UI/UX)
-        busqueda_equipo = st.text_input("🔍 Buscador rápido por nombre de equipo:", "").strip().lower()
+        col_busq, col_valor, col_orden = st.columns([2.2, 1.3, 1.5])
+        with col_busq:
+            busqueda_equipo = st.text_input("🔍 Buscador rápido por nombre de equipo:", "").strip().lower()
+        with col_valor:
+            st.markdown("<br>", unsafe_allow_html=True)
+            solo_valor = st.checkbox("🔥 Solo VALOR")
+        with col_orden:
+            orden_sel = st.selectbox("Ordenar por:", ["🕐 Hora del partido", "📈 Mayor probabilidad"])
+
+        def _partido_tiene_valor(p):
+            for m_info in p['mercados'].values():
+                for op_info in m_info['value_bets'].values():
+                    if op_info['es_value']:
+                        return True
+            return False
+
+        def _max_prob_partido(p):
+            probs = [op['prob_real'] for m in p['mercados'].values() for op in m['value_bets'].values()]
+            return max(probs) if probs else 0
 
         # Filtrado por búsqueda en el diccionario temporal
         dict_partidos_filtrados = {}
         for p_id, p in dict_partidos.items():
             if busqueda_equipo in p['local'].lower() or busqueda_equipo in p['visitante'].lower():
-                dict_partidos_filtrados[p_id] = p
+                if not solo_valor or _partido_tiene_valor(p):
+                    dict_partidos_filtrados[p_id] = p
 
         # --- DISEÑO PARALELO SI HAY RESULTADOS ---
         col_izquierda, col_derecha = st.columns([6.5, 3.5])
@@ -714,6 +755,10 @@ with pestana_radar:
                 for p_idx, liga_pestaña in enumerate(ligas_con_datos):
                     with pestanas_ligas[p_idx]:
                         partidos_filtrados = [p for p in dict_partidos_filtrados.values() if p['liga_origen'] == liga_pestaña]
+                        if orden_sel == "🕐 Hora del partido":
+                            partidos_filtrados.sort(key=lambda p: p.get('fecha_ts', 0))
+                        else:
+                            partidos_filtrados.sort(key=_max_prob_partido, reverse=True)
                         for part in partidos_filtrados:
                             if part['id'] not in st.session_state.versiones_partidos:
                                 st.session_state.versiones_partidos[part['id']] = 0
