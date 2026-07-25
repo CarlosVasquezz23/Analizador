@@ -272,10 +272,14 @@ def af_consultar_odds(fixture_id):
 # Usa el buscador que aparece en la barra lateral ("🔧 Buscar League ID en API-Football")
 # para encontrar el ID numérico real de cada liga, y reemplaza los None de abajo.
 AF_LEAGUE_IDS = {
-    "🇨🇴 Primera A (Colombia)": None,
-    "🇪🇨 LigaPro (Ecuador)": None,
-    "🇺🇾 Primera División (Uruguay)": None,
-    "🇵🇪 Liga 1 (Perú)": None,
+    "🇨🇴 Primera A (Colombia)": 239,
+    "🇪🇨 LigaPro (Ecuador)": 242,
+    "🇺🇾 Primera División Uruguay - Apertura": 268,
+    "🇺🇾 Primera División Uruguay - Clausura": 270,
+    "🇵🇪 Liga 1 (Perú)": 281,
+    "🇲🇽 Liga MX (México)": 262,
+    "🇵🇾 División Profesional Paraguay - Apertura": 250,
+    "🇵🇾 División Profesional Paraguay - Clausura": 252,
 }
 
 # --- ESTRUCTURAS DE DATOS EXTENDIDAS ---
