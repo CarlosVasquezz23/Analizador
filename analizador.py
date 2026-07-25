@@ -371,12 +371,13 @@ with pestana_radar:
                 "1. Dirígete al menú de la izquierda (**Filtros de Control Global**).\n"
                 "2. Elige uno o varios torneos.\n"
                 "3. Selecciona tus mercados de interés.\n"
-                "4. Presiona el botón **Consultar Radar Múltiple**."
+                "4. Presiona el botón **🔍 Consultar Radar Múltiple**."
             )
+            # URL ultra-estable directa desde el repositorio oficial de Streamlit para evitar roturas de hotlinking
             st.image(
-                "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=800&auto=format&fit=crop&q=60", 
-                caption="Data-Driven Sports Analytics", 
-                use_container_width=True
+                "https://raw.githubusercontent.com/streamlit/static-assets/main/images/favicon.png", 
+                width=45,
+                caption="Data-Driven Sports Analytics"
             )
     else:
         # --- DISEÑO PARALELO DE DOS COLUMNAS ---
