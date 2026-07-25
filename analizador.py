@@ -99,9 +99,17 @@ def hl_consultar_matches(league_id, fecha_str):
         elif r.status_code == 429:
             st.error("❌ ¡Límite de créditos agotado en Highlightly!")
             return []
-        else:
+        elif r.status_code == 401:
+            st.error("❌ Highlightly: API Key inválida (401) al consultar partidos.")
             return []
-    except Exception:
+        elif r.status_code == 403:
+            st.error(f"❌ Highlightly: Acceso denegado (403) al consultar partidos de la liga {league_id}. Tu plan probablemente no incluye este endpoint o esta liga.")
+            return []
+        else:
+            st.warning(f"⚠️ Highlightly devolvió {r.status_code} al consultar partidos (liga {league_id}, fecha {fecha_str}): {r.text[:200]}")
+            return []
+    except Exception as e:
+        st.error(f"💥 Error de conexión con Highlightly (matches): {e}")
         return []
 
 @st.cache_data(ttl=300)
@@ -116,9 +124,20 @@ def hl_consultar_odds(match_id):
             if data:
                 return data[0].get("odds", [])
             return []
-        else:
+        elif r.status_code == 401:
+            st.error("❌ Highlightly: API Key inválida (401) al consultar cuotas.")
             return []
-    except Exception:
+        elif r.status_code == 403:
+            st.error(f"❌ Highlightly: Acceso denegado (403) al consultar cuotas del partido {match_id}. El endpoint /odds requiere plan PRO o superior — revisa tu plan en highlightly.net.")
+            return []
+        elif r.status_code == 429:
+            st.error("❌ ¡Límite de créditos agotado en Highlightly!")
+            return []
+        else:
+            st.warning(f"⚠️ Highlightly devolvió {r.status_code} al consultar cuotas del partido {match_id}: {r.text[:200]}")
+            return []
+    except Exception as e:
+        st.error(f"💥 Error de conexión con Highlightly (odds): {e}")
         return []
 
 # 3) Usa el buscador que aparece en la barra lateral ("🔧 Buscar League ID en Highlightly")
@@ -602,6 +621,7 @@ with pestana_radar:
                 partidos_liga_hl = []
                 for f in fechas_a_consultar:
                     partidos_liga_hl.extend(hl_consultar_matches(league_id, f))
+                st.caption(f"🔎 Highlightly — {liga_hl}: {len(partidos_liga_hl)} partido(s) encontrado(s) en el rango de fechas consultado.")
                 procesar_e_inyectar_highlightly(partidos_liga_hl, mercados_sels, limite_h, liga_hl, consolidador)
 
             st.session_state.datos_cargados = consolidador
