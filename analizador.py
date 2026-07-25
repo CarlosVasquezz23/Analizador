@@ -3,17 +3,39 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 import urllib.parse
+import json
+import os
 
 # Configuración de página avanzada
 st.set_page_config(page_title="Radar Enterprise Parlay Global", page_icon="⚽", layout="wide")
 
-# Estilos visuales limpios para las métricas de probabilidad
+# ARCHIVO DE PERSISTENCIA LOCAL (Mejora 4)
+DB_FILE = "bitacora_backup.json"
+
+def cargar_historial_local():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def guardar_historial_local(historial):
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(historial, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.sidebar.error(f"Error al guardar persistencia: {e}")
+
+# Estilos visuales limpios para las métricas de probabilidad y UI
 st.markdown("""
     <style>
     .prob-alta { color: #2ecc71; font-weight: bold; }
     .prob-media { color: #f1c40f; font-weight: bold; }
     .prob-baja { color: #e74c3c; font-weight: bold; }
     .match-header { font-size: 18px; font-weight: bold; margin-bottom: 2px; }
+    .creditos-caja { background-color: #1e272e; padding: 10px; border-radius: 8px; border-left: 5px solid #00d2d3; margin-bottom: 15px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -60,7 +82,7 @@ diccionario_mercados = {
 
 # --- INICIALIZACIÓN DE ESTADOS ---
 if 'historial_apuestas' not in st.session_state:
-    st.session_state.historial_apuestas = []
+    st.session_state.historial_apuestas = cargar_historial_local() # Carga Persistente (Mejora 4)
 if 'version_ticket' not in st.session_state:
     st.session_state.version_ticket = 0
 if 'datos_cargados' not in st.session_state:
@@ -71,10 +93,20 @@ if 'versiones_partidos' not in st.session_state:
     st.session_state.versiones_partidos = {}
 if 'claves_auto' not in st.session_state:
     st.session_state.claves_auto = set()
+if 'creditos_restantes' not in st.session_state:
+    st.session_state.creditos_restantes = "No consultado"
 
 # --- CONFIGURACIÓN E INTERFAZ EN EL SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Filtros de Control Global")
+    
+    # Renderizador de Créditos en Vivo (Mejora 1)
+    st.markdown(f"""
+        <div class="creditos-caja">
+            <small style="color:#a4b0be; text-transform:uppercase; font-weight:bold;">Créditos Restantes API</small><br>
+            <span style="font-size:18px; font-weight:bold; color:#00d2d3;">🔑 {st.session_state.creditos_restantes}</span>
+        </div>
+    """, unsafe_allow_html=True)
     
     ligas_sels = st.multiselect("Selecciona los Torneos a Analizar:", list(todas_las_ligas.keys()), default=[])
 
@@ -95,7 +127,11 @@ with st.sidebar:
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
-# --- CACHÉ INTELIGENTE ---
+# --- CACHÉ INTELIGENTE CON MANEJO DE CRÉDITOS Y ERRORES (Mejora 1) ---
+def actualizar_creditos(headers):
+    if 'x-requests-remaining' in headers:
+        st.session_state.creditos_restantes = headers['x-requests-remaining']
+
 @st.cache_data(ttl=60)
 def consultar_api_odds(sport_key, market_key):
     if not sport_key:
@@ -103,6 +139,8 @@ def consultar_api_odds(sport_key, market_key):
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu,us&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url)
+        actualizar_creditos(response.headers)
+        
         if response.status_code == 429:
             st.error("❌ ¡Límite de créditos mensuales agotado en The Odds API!")
             return []
@@ -110,13 +148,13 @@ def consultar_api_odds(sport_key, market_key):
             st.error("❌ API Key inválida.")
             return []
         elif response.status_code != 200:
+            st.warning(f"⚠️ Error {response.status_code} al consultar la liga {sport_key}.")
             return []
         res_json = response.json()
-        if res_json and len(res_json) > 0:
-            return res_json
-    except Exception:
-        pass
-    return []
+        return res_json if res_json else []
+    except Exception as e:
+        st.error(f"💥 Error de conexión en red: {e}")
+        return []
 
 @st.cache_data(ttl=60)
 def consultar_api_odds_evento(sport_key, event_id, market_key):
@@ -125,6 +163,8 @@ def consultar_api_odds_evento(sport_key, event_id, market_key):
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event_id}/odds/?apiKey={API_KEY}&regions=eu,us&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url)
+        actualizar_creditos(response.headers)
+        
         if response.status_code == 429:
             st.error("❌ ¡Límite de créditos mensuales agotado!")
             return None
@@ -149,7 +189,6 @@ def filtrar_partidos_por_fecha(datos, limite_horas):
         except (ValueError, KeyError):
             continue
 
-        # FILTRO AUTOMÁTICO DE DESAPARICIÓN: Si el partido ya tiene más de 105 minutos de iniciado, se ignora
         if ahora_utc > (fecha_utc + timedelta(minutes=105)):
             continue
 
@@ -160,7 +199,7 @@ def filtrar_partidos_por_fecha(datos, limite_horas):
         resultado.append(partido)
     return resultado
 
-# --- PROCESADOR MULTI-MERCADO OPTIMIZADO PARA LATAM ---
+# --- PROCESADOR MULTI-MERCADO ---
 def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
     ahora_utc = datetime.now(timezone.utc)
     if not datos or not isinstance(datos, list):
@@ -176,7 +215,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         except ValueError:
             continue
 
-        # FILTRO AUTOMÁTICO DE DESAPARICIÓN: Si el partido ya tiene más de 105 minutos de iniciado, no se procesa
         if ahora_utc > (fecha_utc + timedelta(minutes=105)):
             continue
 
@@ -386,85 +424,98 @@ with pestana_radar:
                    "casas de apuestas internacionales aún no han abierto sus líneas. "
                    "Intenta cambiando el rango a **72 Horas** o agregando una liga europea como control.")
     else:
+        # Buscador Dinámico de Equipos (Mejora 3 - UI/UX)
+        busqueda_equipo = st.text_input("🔍 Buscador rápido por nombre de equipo:", "").strip().lower()
+
+        # Filtrado por búsqueda en el diccionario temporal
+        dict_partidos_filtrados = {}
+        for p_id, p in dict_partidos.items():
+            if busqueda_equipo in p['local'].lower() or busqueda_equipo in p['visitante'].lower():
+                dict_partidos_filtrados[p_id] = p
+
         # --- DISEÑO PARALELO SI HAY RESULTADOS ---
         col_izquierda, col_derecha = st.columns([6.5, 3.5])
 
         with col_izquierda:
-            st.subheader(f"📋 Eventos Consolidados Encontrados ({len(dict_partidos)})")
+            st.subheader(f"📋 Eventos Consolidados Encontrados ({len(dict_partidos_filtrados)})")
             
-            if st.session_state.claves_auto or dict_partidos:
+            if st.session_state.claves_auto or dict_partidos_filtrados:
                 if st.button("🧹 Limpiar todas las casillas marcadas"):
                     st.session_state.claves_auto = set()
                     st.session_state.version_ticket += 1
                     st.rerun()
 
             v_ticket = st.session_state.version_ticket
-            ligas_con_datos = list(set([p['liga_origen'] for p in dict_partidos.values()]))
-            pestanas_ligas = st.tabs(ligas_con_datos)
+            ligas_con_datos = list(set([p['liga_origen'] for p in dict_partidos_filtrados.values()]))
+            
+            if ligas_con_datos:
+                pestanas_ligas = st.tabs(ligas_con_datos)
 
-            for p_idx, liga_pestaña in enumerate(ligas_con_datos):
-                with pestanas_ligas[p_idx]:
-                    partidos_filtrados = [p for p in dict_partidos.values() if p['liga_origen'] == liga_pestaña]
-                    for part in partidos_filtrados:
-                        if part['id'] not in st.session_state.versiones_partidos:
-                            st.session_state.versiones_partidos[part['id']] = 0
-                        v_partido = st.session_state.versiones_partidos[part['id']]
+                for p_idx, liga_pestaña in enumerate(ligas_con_datos):
+                    with pestanas_ligas[p_idx]:
+                        partidos_filtrados = [p for p in dict_partidos_filtrados.values() if p['liga_origen'] == liga_pestaña]
+                        for part in partidos_filtrados:
+                            if part['id'] not in st.session_state.versiones_partidos:
+                                st.session_state.versiones_partidos[part['id']] = 0
+                            v_partido = st.session_state.versiones_partidos[part['id']]
 
-                        with st.container(border=True):
-                            col_borrar, col_info = st.columns([0.6, 5.4])
-                            with col_borrar:
-                                if st.button("🗑️", key=f"clear_{part['id']}"):
-                                    del st.session_state.datos_cargados[part['id']]
-                                    st.rerun()
+                            with st.container(border=True):
+                                col_borrar, col_info = st.columns([0.6, 5.4])
+                                with col_borrar:
+                                    if st.button("🗑️", key=f"clear_{part['id']}"):
+                                        del st.session_state.datos_cargados[part['id']]
+                                        st.rerun()
 
-                            with col_info:
-                                st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
-                                st.caption(f"📅 Hora Local: {part['fecha_str']}")
+                                with col_info:
+                                    st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
+                                    st.caption(f"📅 Hora Local: {part['fecha_str']}")
 
-                            mercados_del_partido = list(part['mercados'].keys())
-                            sub_tabs_mercados = st.tabs(mercados_del_partido)
+                                mercados_del_partido = list(part['mercados'].keys())
+                                sub_tabs_mercados = st.tabs(mercados_del_partido)
 
-                            for m_idx, nombre_m in enumerate(mercados_del_partido):
-                                with sub_tabs_mercados[m_idx]:
-                                    m_info = part['mercados'][nombre_m]
-                                    opciones_disponibles = list(m_info['max_cuotas'].keys())
+                                for m_idx, nombre_m in enumerate(mercados_del_partido):
+                                    with sub_tabs_mercados[m_idx]:
+                                        m_info = part['mercados'][nombre_m]
+                                        opciones_disponibles = list(m_info['max_cuotas'].keys())
 
-                                    if nombre_m == "1X2 (Ganador)": orden_estricto = ["Local", "Empate", "Visitante"]
-                                    elif nombre_m == "Doble Oportunidad": orden_estricto = ["1X (Local o Empate)", "12 (Local o Visitante)", "X2 (Visitante o Empate)"]
-                                    elif nombre_m == "Ambos Anotan (BTTS)": orden_estricto = ["Sí", "No"]
-                                    else: orden_estricto = sorted(opciones_disponibles, key=lambda x: 0 if "Más" in x else 1)
+                                        if nombre_m == "1X2 (Ganador)": orden_estricto = ["Local", "Empate", "Visitante"]
+                                        elif nombre_m == "Doble Oportunidad": orden_estricto = ["1X (Local o Empate)", "12 (Local o Visitante)", "X2 (Visitante o Empate)"]
+                                        elif nombre_m == "Ambos Anotan (BTTS)": orden_estricto = ["Sí", "No"]
+                                        else: orden_estricto = sorted(opciones_disponibles, key=lambda x: 0 if "Más" in x else 1)
 
-                                    sub_cols = st.columns(len(orden_estricto))
-                                    for idx, plantilla_opcion in enumerate(orden_estricto):
-                                        with sub_cols[idx]:
-                                            if plantilla_opcion in opciones_disponibles:
-                                                cuota_m = m_info['max_cuotas'][plantilla_opcion]
-                                                casa_m = m_info['max_bookies'][plantilla_opcion]
-                                                info_val = m_info['value_bets'][plantilla_opcion]
-                                                lbl_val = "🔥 VALOR" if info_val['es_value'] else ""
+                                        sub_cols = st.columns(len(orden_estricto))
+                                        for idx, plantilla_opcion in enumerate(orden_estricto):
+                                            with sub_cols[idx]:
+                                                if plantilla_opcion in opciones_disponibles:
+                                                    cuota_m = m_info['max_cuotas'][plantilla_opcion]
+                                                    casa_m = m_info['max_bookies'][plantilla_opcion]
+                                                    info_val = m_info['value_bets'][plantilla_opcion]
+                                                    lbl_val = "🔥 VALOR" if info_val['es_value'] else ""
 
-                                                clave_base = f"ap_{part['id']}_{nombre_m}_{plantilla_opcion}"
-                                                marcado_inicial = clave_base in st.session_state.claves_auto
+                                                    clave_base = f"ap_{part['id']}_{nombre_m}_{plantilla_opcion}"
+                                                    marcado_inicial = clave_base in st.session_state.claves_auto
 
-                                                chk = st.checkbox(
-                                                    f"{plantilla_opcion} ({cuota_m}) {lbl_val}",
-                                                    value=marcado_inicial,
-                                                    key=f"render_{clave_base}_vp{v_partido}_vt{v_ticket}"
-                                                )
+                                                    chk = st.checkbox(
+                                                        f"{plantilla_opcion} ({cuota_m}) {lbl_val}",
+                                                        value=marcado_inicial,
+                                                        key=f"render_{clave_base}_vp{v_partido}_vt{v_ticket}"
+                                                    )
 
-                                                facing_betano = m_info['betano_cuotas'].get(plantilla_opcion, None)
-                                                txt_betano = f" | Betano: {facing_betano}" if facing_betano else ""
-                                                p_real = info_val['prob_real']
-                                                clase_color = "prob-alta" if p_real >= 60 else ("prob-media" if p_real >= 40 else "prob-baja")
+                                                    facing_betano = m_info['betano_cuotas'].get(plantilla_opcion, None)
+                                                    txt_betano = f" | Betano: {facing_betano}" if facing_betano else ""
+                                                    p_real = info_val['prob_real']
+                                                    clase_color = "prob-alta" if p_real >= 60 else ("prob-media" if p_real >= 40 else "prob-baja")
 
-                                                st.markdown(f"<small>🏠 {casa_m}{txt_betano}<br>🎯 Prob: <span class='{clase_color}'>{round(p_real,1)}%</span></small>", unsafe_allow_html=True)
+                                                    st.markdown(f"<small>🏠 {casa_m}{txt_betano}<br>🎯 Prob: <span class='{clase_color}'>{round(p_real,1)}%</span></small>", unsafe_allow_html=True)
 
-                                                if chk:
-                                                    apuestas_seleccionadas.append({
-                                                        "evento": f"{part['local']} vs {part['visitante']}",
-                                                        "liga": part['liga_origen'], "mercado": nombre_m,
-                                                        "seleccion": plantilla_opcion, "cuota": cuota_m, "casa": casa_m
-                                                    })
+                                                    if chk:
+                                                        apuestas_seleccionadas.append({
+                                                            "evento": f"{part['local']} vs {part['visitante']}",
+                                                            "liga": part['liga_origen'], "mercado": nombre_m,
+                                                            "seleccion": plantilla_opcion, "cuota": cuota_m, "casa": casa_m
+                                                        })
+            else:
+                st.warning("Ningún equipo coincide con los términos de búsqueda.")
 
         with col_derecha:
             st.subheader("🎟️ Configuración de Parlay")
@@ -498,9 +549,13 @@ with pestana_radar:
                             "Estado": "Pendiente",
                             "Ganancia Potencial": ganancia_neta
                         })
+                        
+                        # Guardado automático e inmediato en el almacenamiento local (Mejora 4)
+                        guardar_historial_local(st.session_state.historial_apuestas)
+                        
                         st.session_state.version_ticket += 1
                         st.session_state.claves_auto = set()
-                        st.toast("¡Apuesta registrada exitosamente!", icon="💾")
+                        st.toast("¡Apuesta registrada exitosamente en local!", icon="💾")
                         st.rerun()
 
                     st.markdown(f'<a href="https://api.whatsapp.com/send?text={msg_encoded}" target="_blank" style="text-decoration:none;"><button style="border:none; background-color:#25D366; color:white; padding:10px 14px; border-radius:8px; font-size:16px; font-weight:bold; width:100%; height:43px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">📲 Compartir en WhatsApp</button></a>', unsafe_allow_html=True)
@@ -523,11 +578,13 @@ with pestana_historial:
                 st.write(f"🆔 **Ticket #{idx+1}** ({fila['Fecha']}) | Inversión: ${fila['Inversión']} | Cuota: x{round(fila['Cuota'],2)} | {fila['Detalles']}")
             with col_est:
                 opciones_resultado = ["Pendiente", "Ganado", "Perdido"]
-                index_actual = opciones_resultado.index(fila['Estado'])
+                index_actual = opciones_resultado.index(fila['Estado']) if fila['Estado'] in opciones_resultado else 0
 
                 nuevo_estado = st.selectbox("Resultado:", opciones_resultado, index=index_actual, key=f"estado_{idx}")
                 if nuevo_estado != fila['Estado']:
                     st.session_state.historial_apuestas[idx]['Estado'] = nuevo_estado
+                    # Guardar tras cambiar estado
+                    guardar_historial_local(st.session_state.historial_apuestas)
                     st.rerun()
 
         df_actualizado = pd.DataFrame(st.session_state.historial_apuestas)
