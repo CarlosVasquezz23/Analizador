@@ -627,19 +627,19 @@ with pestana_historial:
     # Creamos las dos columnas dentro del bloque donde SÍ hay datos
     col_descarga, col_borrar = st.columns([3, 1])
     
-    with col_descarga:
-        st.download_button(
-            label="📊 Descargar Bitácora Completa (CSV)",
-            data=csv_data,
-            file_name=f"Reporte_Apuestas.csv",
-            mime='text/csv',
-            use_container_width=True
-        )
+        with col_descarga:
+                st.download_button(
+                        label="📊 Descargar Bitácora Completa (CSV)",
+                        data=csv_data,
+                        file_name=f"Reporte_Apuestas.csv",
+                        mime='text/csv',
+                        use_container_width=True
+                    )
         
-    with col_borrar:
-        if st.button("🗑️ Reiniciar Bitácora", use_container_width=True, type="secondary"):
-            limpiar_historial_local()
-            st.success("¡Bitácora borrada con éxito!")
-            st.rerun()
+        with col_borrar:
+                if st.button("🗑️ Reiniciar Bitácora", use_container_width=True, type="secondary"):
+                        limpiar_historial_local()
+                        st.success("¡Bitácora borrada con éxito!")
+                       st.rerun()
     else:
-                st.info("Aún no tienes apuestas registradas en la bitácora.")
+                    st.info("Aún no tienes apuestas registradas en la bitácora.")
