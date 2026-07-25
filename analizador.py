@@ -360,7 +360,7 @@ with pestana_radar:
 
     apuestas_seleccionadas = []
 
-    # --- PANTALLA DE ESPERA CORREGIDA ---
+    # --- PANTALLA DE ESPERA LIMPIA Y SIN IMÁGENES ---
     if not dict_partidos:
         st.markdown("---")
         col_wel1, col_wel2, col_wel3 = st.columns([1, 2, 1])
@@ -372,12 +372,6 @@ with pestana_radar:
                 "2. Elige uno o varios torneos.\n"
                 "3. Selecciona tus mercados de interés.\n"
                 "4. Presiona el botón **🔍 Consultar Radar Múltiple**."
-            )
-            # URL ultra-estable directa desde el repositorio oficial de Streamlit para evitar roturas de hotlinking
-            st.image(
-                "https://raw.githubusercontent.com/streamlit/static-assets/main/images/favicon.png", 
-                width=45,
-                caption="Data-Driven Sports Analytics"
             )
     else:
         # --- DISEÑO PARALELO DE DOS COLUMNAS ---
