@@ -957,20 +957,22 @@ with pestana_radar:
                             if datos_evento:
                                 procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
 
-                # 4) LIGAS EXTRA VÍA API-FOOTBALL (Colombia, Ecuador, Uruguay, Perú) — fuente activa
+                # 4) LIGAS EXTRA VÍA API-FOOTBALL (Colombia, Ecuador, Uruguay, Perú, México, Paraguay) — fuente activa
                 dias_a_cubrir = (limite_h // 24) + 2
                 fecha_desde_af = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 fecha_hasta_af = (datetime.now(timezone.utc) + timedelta(days=dias_a_cubrir)).strftime("%Y-%m-%d")
                 temporada_af = datetime.now(timezone.utc).year
+                resumen_ligas_extra = []  # se muestra después, fuera del status (que se colapsa al terminar)
 
                 for idx_af, liga_af in enumerate(ligas_af_sels, start=len(ligas_sels) + 1):
                     status_consulta.update(label=f"🔄 Consultando ({idx_af}/{total_ligas_a_consultar}): {liga_af}")
                     league_id_af = AF_LEAGUE_IDS.get(liga_af)
                     if not league_id_af:
                         st.warning(f"⚠️ Falta configurar el League ID de API-Football para: {liga_af}. Usa el buscador del sidebar.")
+                        resumen_ligas_extra.append(f"⚠️ API-Football — {liga_af}: sin League ID configurado.")
                         continue
                     fixtures_liga_af = af_consultar_fixtures(league_id_af, temporada_af, fecha_desde_af, fecha_hasta_af)
-                    st.caption(f"🔎 API-Football — {liga_af}: {len(fixtures_liga_af)} partido(s) encontrado(s) en el rango de fechas consultado.")
+                    resumen_ligas_extra.append(f"🔎 API-Football — {liga_af}: {len(fixtures_liga_af)} partido(s) encontrado(s) entre {fecha_desde_af} y {fecha_hasta_af}.")
                     procesar_e_inyectar_api_football(fixtures_liga_af, mercados_sels, limite_h, liga_af, consolidador)
 
                 # 5) LIGAS EXTRA VÍA HIGHLIGHTLY (fuente de respaldo, deshabilitada por defecto)
@@ -981,14 +983,20 @@ with pestana_radar:
                     league_id = HL_LEAGUE_IDS.get(liga_hl)
                     if not league_id:
                         st.warning(f"⚠️ Falta configurar el League ID de Highlightly para: {liga_hl}. Usa el buscador del sidebar.")
+                        resumen_ligas_extra.append(f"⚠️ Highlightly — {liga_hl}: sin League ID configurado.")
                         continue
                     partidos_liga_hl = []
                     for f in fechas_a_consultar:
                         partidos_liga_hl.extend(hl_consultar_matches(league_id, f))
-                    st.caption(f"🔎 Highlightly — {liga_hl}: {len(partidos_liga_hl)} partido(s) encontrado(s) en el rango de fechas consultado.")
+                    resumen_ligas_extra.append(f"🔎 Highlightly — {liga_hl}: {len(partidos_liga_hl)} partido(s) encontrado(s) en el rango de fechas consultado.")
                     procesar_e_inyectar_highlightly(partidos_liga_hl, mercados_sels, limite_h, liga_hl, consolidador)
 
                 status_consulta.update(label=f"✅ Consulta completa: {len(consolidador)} partido(s) con cuotas encontrados.", state="complete", expanded=False)
+
+            if resumen_ligas_extra:
+                with st.expander("🧾 Detalle de la consulta a ligas extra (API-Football / Highlightly)", expanded=False):
+                    for linea in resumen_ligas_extra:
+                        st.caption(linea)
 
             st.session_state.datos_cargados_previos = st.session_state.datos_cargados
             st.session_state.datos_cargados = consolidador
