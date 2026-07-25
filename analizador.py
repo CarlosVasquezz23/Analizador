@@ -13,22 +13,24 @@ st.markdown("""
     .prob-alta { color: #2ecc71; font-weight: bold; }
     .prob-media { color: #f1c40f; font-weight: bold; }
     .prob-baja { color: #e74c3c; font-weight: bold; }
-    .match-header { font-size: 16px; font-weight: bold; margin-bottom: 2px; }
+    .match-header { font-size: 18px; font-weight: bold; margin-bottom: 2px; }
     </style>
 """, unsafe_allow_html=True)
 
 # --- TU CONFIGURACIÓN ---
 API_KEY = "e6414a3efabaf34994030cd0a8ea88b1"
 
-# --- ESTRUCTURAS DE DATOS ---
+# --- ESTRUCTURAS DE DATOS EXTENDIDAS ---
 ligas_top = {
     "🇪🇺 Champions League (Europa)": "soccer_uefa_champions_league",
+    "🇪🇺 Europa League (Europa)": "soccer_uefa_europa_league",
     "🏆 Copa Libertadores (CONMEBOL)": "soccer_conmebol_copa_distribuidores",
     "🥈 Copa Sudamericana (CONMEBOL)": "soccer_conmebol_copa_sudamericana"
 }
 
 ligas_locales = {
     "🇺🇾 Primera División (Uruguay)": "soccer_uruguay_primera_division",
+    "🇵🇪 Liga 1 (Perú)": "soccer_peru_primera_division",
     "🇦🇷 Liga Profesional (Argentina)": "soccer_argentina_primera_division",
     "🇨🇴 Primera A (Colombia)": "soccer_colombia_primera_a",
     "🇨🇱 Primera División (Chile)": "soccer_chile_campeonato",
@@ -42,7 +44,8 @@ ligas_locales = {
     "🇮🇹 Serie A (Italia)": "soccer_italy_serie_a",
     "🇩🇪 Bundesliga (Alemania)": "soccer_germany_bundesliga",
     "🇫🇷 Ligue 1 (Francia)": "soccer_france_ligue_one",
-    "🇳🇱 Eredivisie (Países Bajos)": "soccer_netherlands_eredivisie"
+    "🇳🇱 Eredivisie (Países Bajos)": "soccer_netherlands_eredivisie",
+    "🇵🇹 Primeira Liga (Portugal)": "soccer_portugal_primeira_liga"
 }
 
 ligas_locales_ordenadas = dict(sorted(ligas_locales.items()))
@@ -67,18 +70,35 @@ if 'versiones_partidos' not in st.session_state:
 if 'claves_auto' not in st.session_state:
     st.session_state.claves_auto = set()
 
+# --- CONFIGURACIÓN E INTERFAZ EN EL SIDEBAR ---
+with st.sidebar:
+    st.header("⚙️ Filtros de Control Global")
+    
+    ligas_sels = st.multiselect("Selecciona los Torneos a Analizar:", list(todas_las_ligas.keys()), default=[])
+
+    mercados_sels = st.multiselect("Mercados de Análisis:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
+    if "Ambos Anotan (BTTS)" in mercados_sels:
+        st.caption("⚠️ BTTS consulta la API 1 vez por cada partido (más gasto de créditos). Doble Oportunidad se calcula matemáticamente.")
+
+    tiempo_sel = st.selectbox("Rango Temporal:", ["24 Horas", "48 Horas", "72 Horas"], index=1)
+    limite_h = int(tiempo_sel.split()[0])
+
+    monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0)
+    
+    st.markdown("---")
+    consultar = st.button("🔍 Consultar Radar Múltiple", type="primary", use_container_width=True)
+    num_eventos_auto = st.slider("Eventos para el Generador Automático:", min_value=2, max_value=6, value=3)
+    generar_auto = st.button("🎲 ¡Pre-seleccionar Muestras!", use_container_width=True)
+
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
-# --- CACHÉ INTELIGENTE CORREGIDO ---
+# --- CACHÉ INTELIGENTE ---
 @st.cache_data(ttl=120)
 def consultar_api_odds(sport_key, market_key):
-    """Endpoint MASIVO: solo soporta mercados 'featured' (h2h, spreads, totals, outrights).
-    Devuelve TODOS los partidos de una liga en una sola llamada."""
     if not sport_key:
         return []
-
-    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu&markets={market_key}&oddsFormat=decimal"
+    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu,us&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url)
         if response.status_code == 429:
@@ -89,7 +109,6 @@ def consultar_api_odds(sport_key, market_key):
             return []
         elif response.status_code != 200:
             return []
-
         res_json = response.json()
         if res_json and len(res_json) > 0:
             return res_json
@@ -97,19 +116,15 @@ def consultar_api_odds(sport_key, market_key):
         pass
     return []
 
-
 @st.cache_data(ttl=120)
 def consultar_api_odds_evento(sport_key, event_id, market_key):
-    """Endpoint POR EVENTO: soporta mercados adicionales (double_chance, btts,
-    player props, etc). Hay que llamarlo una vez por cada partido."""
     if not sport_key or not event_id:
         return None
-
-    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event_id}/odds/?apiKey={API_KEY}&regions=eu&markets={market_key}&oddsFormat=decimal"
+    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event_id}/odds/?apiKey={API_KEY}&regions=eu,us&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url)
         if response.status_code == 429:
-            st.error("❌ ¡Límite de créditos mensuales agotado en The Odds API!")
+            st.error("❌ ¡Límite de créditos mensuales agotado!")
             return None
         elif response.status_code == 401:
             st.error("❌ API Key inválida.")
@@ -120,12 +135,7 @@ def consultar_api_odds_evento(sport_key, event_id, market_key):
     except Exception:
         return None
 
-
 def filtrar_partidos_por_fecha(datos, limite_horas):
-    """Filtra la lista de partidos por el rango de horas seleccionado,
-    replicando el mismo criterio que usa procesar_e_inyectar_mercado,
-    para no gastar créditos llamando al endpoint por evento en partidos
-    que de todas formas quedarían fuera del rango."""
     ahora_utc = datetime.now(timezone.utc)
     resultado = []
     if not datos or not isinstance(datos, list):
@@ -144,7 +154,7 @@ def filtrar_partidos_por_fecha(datos, limite_horas):
         resultado.append(partido)
     return resultado
 
-# --- PROCESADOR MULTI-MERCADO ---
+# --- PROCESADOR MULTI-MERCADO MEJORADO CON CÁLCULO DE MARGEN CIENTÍFICO ---
 def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
     ahora_utc = datetime.now(timezone.utc)
     if not datos or not isinstance(datos, list):
@@ -161,7 +171,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             continue
 
         horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
-
         if horas_para_partido < -6.0 or horas_para_partido > (limite_horas + 12):
             continue
 
@@ -178,17 +187,10 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             if not b.get('markets'):
                 continue
 
-            # Re-estructuramos de forma segura los mercados del bookmaker
             dict_b_markets = {m['key']: m['outcomes'] for m in b['markets']}
 
             if mercado == "Doble Oportunidad":
-                # FIX: el chequeo de si hay que calcular el fallback matemático
-                # debe hacerse POR CASA DE APUESTAS, no de forma global con
-                # "cuotas_globales" (eso hacía que solo la primera casa sin
-                # cobertura nativa aportara su cálculo, y las siguientes se
-                # perdieran porque el diccionario global ya no estaba vacío).
                 tiene_nativo = "double_chance" in dict_b_markets
-
                 if tiene_nativo:
                     for o in dict_b_markets["double_chance"]:
                         o_name = o['name']
@@ -200,8 +202,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                         if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
 
                 elif "h2h" in dict_b_markets:
-                    # Esta casa no ofrece Doble Oportunidad nativa:
-                    # la calculamos matemáticamente a partir de su h2h.
                     outcomes_h2h = dict_b_markets["h2h"]
                     precios_h2h = {o['name']: float(o['price']) for o in outcomes_h2h}
                     draw_key = next((k for k in precios_h2h.keys() if k not in [home, away]), None)
@@ -242,17 +242,33 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                     if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
 
         max_cuotas, max_bookies, value_bets = {}, {}, {}
+        
+        # --- ALGORITMO DE DETECCIÓN CLEAN-VALUEBETS ---
+        # Calculamos primero las cuotas promedio del mercado general
+        cuotas_promedio_dict = {}
         for opcion, tuplas in cuotas_globales.items():
             precios = [t[0] for t in tuplas]
-            cuota_promedio = sum(precios) / len(precios) if precios else 1.0
-            probabilidad_mercado = 1 / cuota_promedio
+            cuotas_promedio_dict[opcion] = sum(precios) / len(precios) if precios else 1.0
+
+        # Calculamos el overround (margen implícito acumulado del promedio del mercado)
+        overround = sum([1 / cp for cp in cuotas_promedio_dict.values()])
+
+        for opcion, tuplas in cuotas_globales.items():
+            precios = [t[0] for t in tuplas]
+            cuota_promedio = cuotas_promedio_dict[opcion]
+            
+            # Probabilidad Real libre de overround (Normalizada matemáticamente)
+            probabilidad_real = (1 / cuota_promedio) / overround if overround > 0 else (1 / cuota_promedio)
+            
             cuota_maxima = max(precios)
             bookie_maximo = tuplas[precios.index(cuota_maxima)][1]
 
             max_cuotas[opcion] = cuota_maxima
             max_bookies[opcion] = bookie_maximo
-            ev = (cuota_maxima * probabilidad_mercado) - 1
-            value_bets[opcion] = {"ev": ev, "prob_real": probabilidad_mercado * 100, "es_value": ev > 0.01}
+            
+            # EV calculado usando la probabilidad implícita justa sin margen del mercado
+            ev = (cuota_maxima * probabilidad_real) - 1
+            value_bets[opcion] = {"ev": ev, "prob_real": probabilidad_real * 100, "es_value": ev > 0.02}
 
         if max_cuotas:
             if partido_id not in diccionario_consolidador:
@@ -276,47 +292,11 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
 with pestana_radar:
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
 
-    col_l, col_m, col_t, col_inv = st.columns([2, 1.5, 1, 1])
-    with col_l:
-        ligas_sels = st.multiselect("Selecciona los Torneos a Analizar:", list(todas_las_ligas.keys()), default=[])
-
-    with col_m:
-        mercados_sels = st.multiselect("Mercados de Análisis:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
-        if "Ambos Anotan (BTTS)" in mercados_sels:
-            st.caption("⚠️ BTTS consulta la API 1 vez por cada partido (más gasto de créditos). Doble Oportunidad es gratis, se calcula matemáticamente.")
-
-    with col_t:
-        tiempo_sel = st.selectbox("Rango Temporal:", ["24 Horas", "48 Horas", "72 Horas"], index=1)
-        limite_h = int(tiempo_sel.split()[0])
-
-    with col_inv:
-        monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0)
-
-    st.markdown(" ")
-
-    c_btn1, c_btn2 = st.columns(2)
-    with c_btn1:
-        consultar = st.button("🔍 Consultar Radar Múltiple", type="primary", use_container_width=True)
-    with c_btn2:
-        num_eventos_auto = st.slider("Eventos para el Generador Automático:", min_value=2, max_value=6, value=3)
-        generar_auto = st.button("🎲 ¡Pre-seleccionar Muestras Probables!", use_container_width=True)
-
     if consultar:
         if len(ligas_sels) > 0 and len(mercados_sels) > 0:
             st.cache_data.clear()
             consolidador = {}
 
-            # Separamos los mercados en tres grupos porque cada uno se
-            # resuelve de forma distinta con The Odds API:
-            # - "featured" (h2h, totals): endpoint masivo, 1 sola llamada por liga.
-            # - "Doble Oportunidad": NO se pide nunca a la API (la API ni
-            #   siquiera lo expone en el endpoint masivo - error 422). Se
-            #   calcula matemáticamente a partir del mismo h2h masivo, que
-            #   ya tenemos gratis. Cero llamadas extra.
-            # - "Ambos Anotan (BTTS)": no existe fórmula matemática para
-            #   derivarlo del h2h (no hay relación fija entre ganar/empatar
-            #   y que ambos anoten), así que es la ÚNICA que sí requiere
-            #   llamar al endpoint por evento (1 llamada por partido).
             mercados_featured = [m for m in mercados_sels if diccionario_mercados[m] in ("h2h", "totals")]
             pidio_doble_oportunidad = "Doble Oportunidad" in mercados_sels
             pidio_btts = "Ambos Anotan (BTTS)" in mercados_sels
@@ -324,20 +304,18 @@ with pestana_radar:
             for liga in ligas_sels:
                 sport_key = todas_las_ligas[liga]
 
-                # --- 1) MERCADOS FEATURED: endpoint masivo (barato, 1 llamada) ---
+                # 1) MERCADOS FEATURED
                 for m_sel in mercados_featured:
                     market_api = diccionario_mercados[m_sel]
                     raw_data = consultar_api_odds(sport_key, market_key=market_api)
                     procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
 
-                # --- 2) DOBLE OPORTUNIDAD: gratis, calculada desde h2h masivo ---
+                # 2) DOBLE OPORTUNIDAD
                 if pidio_doble_oportunidad:
-                    # st.cache_data evita que esto duplique la llamada si
-                    # "1X2 (Ganador)" también fue seleccionado arriba.
                     base_h2h = consultar_api_odds(sport_key, market_key="h2h")
                     procesar_e_inyectar_mercado(base_h2h, "Doble Oportunidad", limite_h, liga, consolidador)
 
-                # --- 3) BTTS: única que gasta créditos extra (1 llamada x partido) ---
+                # 3) BTTS
                 if pidio_btts:
                     base_para_filtrar = consultar_api_odds(sport_key, market_key="h2h")
                     eventos_filtrados = filtrar_partidos_por_fecha(base_para_filtrar, limite_h)
@@ -354,7 +332,7 @@ with pestana_radar:
             if not consolidador:
                 st.info("⚠️ No se encontraron partidos activos o cuotas disponibles en el rango de horas seleccionado.")
         else:
-            st.warning("Elige al menos una liga y un mercado antes de consultar.")
+            st.warning("Elige al menos una liga y un mercado antes de consultar en el menú lateral.")
 
     dict_partidos = st.session_state.datos_cargados
 
@@ -379,7 +357,7 @@ with pestana_radar:
             if k_seleccion > 0:
                 st.session_state.claves_auto = set([x['clave'] for x in bolsa_probabilidades[:k_seleccion]])
                 st.session_state.version_ticket += 1
-                st.success(f"🎯 Se han marcado automáticamente los {k_seleccion} eventos más probables. ¡Míralos abajo!")
+                st.success(f"🎯 Marcados automáticamente los {k_seleccion} eventos con mayor probabilidad.")
             else:
                 st.error("No se encontraron eventos bajo los filtros actuales.")
 
@@ -447,11 +425,12 @@ with pestana_radar:
                                                 key=f"render_{clave_base}_vp{v_partido}_vt{v_ticket}"
                                             )
 
-                                            facing_betano = m_info['betano_cuotas'].get(plantilla_opcion, "N/A")
+                                            facing_betano = m_info['betano_cuotas'].get(plantilla_opcion, None)
+                                            txt_betano = f" | Betano: {facing_betano}" if facing_betano else ""
                                             p_real = info_val['prob_real']
                                             clase_color = "prob-alta" if p_real >= 60 else ("prob-media" if p_real >= 40 else "prob-baja")
 
-                                            st.markdown(f"<small>🏠 {casa_m} | Betano: {facing_betano}<br>🎯 Prob: <span class='{clase_color}'>{round(p_real,1)}%</span></small>", unsafe_allow_html=True)
+                                            st.markdown(f"<small>🏠 {casa_m}{txt_betano}<br>🎯 Prob: <span class='{clase_color}'>{round(p_real,1)}%</span></small>", unsafe_allow_html=True)
 
                                             if chk:
                                                 apuestas_seleccionadas.append({
