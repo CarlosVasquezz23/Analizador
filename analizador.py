@@ -124,10 +124,11 @@ def hl_consultar_odds(match_id):
 # 3) Usa el buscador que aparece en la barra lateral ("🔧 Buscar League ID en Highlightly")
 #    para encontrar el ID numérico real de cada liga, y reemplaza los None de abajo.
 HL_LEAGUE_IDS = {
-    "🇨🇴 Primera A (Colombia)": None,
-    "🇪🇨 LigaPro (Ecuador)": None,
-    "🇺🇾 Primera División (Uruguay)": None,
-    "🇵🇪 Liga 1 (Perú)": None,
+    "🇨🇴 Primera A (Colombia)": 204173,
+    "🇪🇨 LigaPro (Ecuador)": 206726,
+    "🇺🇾 Primera División Uruguay - Apertura": 228852,
+    "🇺🇾 Primera División Uruguay - Clausura": 230554,
+    "🇵🇪 Liga 1 (Perú)": 239915,
 }
 
 # --- ESTRUCTURAS DE DATOS EXTENDIDAS ---
@@ -139,12 +140,8 @@ ligas_top = {
 }
 
 ligas_locales = {
-    "🇺🇾 Primera División (Uruguay)": "soccer_uruguay_primera_division",
-    "🇵🇪 Liga 1 (Perú)": "soccer_peru_primera_division",
     "🇦🇷 Liga Profesional (Argentina)": "soccer_argentina_primera_division",
-    "🇨🇴 Primera A (Colombia)": "soccer_colombia_primera_a",
     "🇨🇱 Primera División (Chile)": "soccer_chile_campeonato",
-    "🇪🇨 LigaPro (Ecuador)": "soccer_ecuador_liga_pro",
     "🇪🇨 Copa Ecuador": "soccer_ecuador_copa_ecuador",
     "🇧🇷 Brasileirao Serie A": "soccer_brazil_campeonato",
     "🇧🇷 Copa de Brasil": "soccer_brazil_copa_do_brasil",
@@ -157,6 +154,9 @@ ligas_locales = {
     "🇳🇱 Eredivisie (Países Bajos)": "soccer_netherlands_eredivisie",
     "🇵🇹 Primeira Liga (Portugal)": "soccer_portugal_primeira_liga"
 }
+# Nota: Uruguay, Perú, Colombia y LigaPro Ecuador se quitaron de aquí porque The Odds API
+# devuelve 404 para esos sport_key (no están en su catálogo). Ahora se consultan vía
+# Highlightly, más abajo en "Ligas extra a analizar" en el sidebar.
 
 ligas_locales_ordenadas = dict(sorted(ligas_locales.items()))
 todas_las_ligas = {**ligas_top, **ligas_locales_ordenadas}
