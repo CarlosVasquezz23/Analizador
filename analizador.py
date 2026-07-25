@@ -149,8 +149,11 @@ def filtrar_partidos_por_fecha(datos, limite_horas):
         except (ValueError, KeyError):
             continue
 
+        # FILTRO AUTOMÁTICO DE DESAPARICIÓN: Si el partido ya tiene más de 105 minutos de iniciado, se ignora
+        if ahora_utc > (fecha_utc + timedelta(minutes=105)):
+            continue
+
         horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
-        # Ampliado el rango inferior y superior para no dejar fuera ligas de LATAM por diferencias horarias de carga
         if horas_para_partido < -12.0 or horas_para_partido > (limite_horas + 24):
             continue
 
@@ -171,6 +174,10 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         try:
             fecha_utc = datetime.fromisoformat(partido['commence_time'].replace('Z', '+00:00'))
         except ValueError:
+            continue
+
+        # FILTRO AUTOMÁTICO DE DESAPARICIÓN: Si el partido ya tiene más de 105 minutos de iniciado, no se procesa
+        if ahora_utc > (fecha_utc + timedelta(minutes=105)):
             continue
 
         horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
