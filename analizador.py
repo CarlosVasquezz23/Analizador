@@ -20,6 +20,7 @@ def cargar_historial_local():
         except Exception:
             return []
     return []
+
 def limpiar_historial_local():
     """Borra por completo el archivo JSON local y vacía la sesión actual."""
     if os.path.exists(DB_FILE):
@@ -296,12 +297,10 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                         o_name = "Más de 2.5" if o['name'].lower() in ["over", "más", "mas"] else "Menos de 2.5"
                         cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                         if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
-
-            elif mercado == "1X2 (Ganador)" and "h2h" in dict_b_markets:
-                for o in dict_b_markets["h2h"]:
-                    o_name = "Local" if o['name'] == home else ("Visitante" if o['name'] == away else "Empate")
-                    cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-                    if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
+                            for o in dict_b_markets["h2h"]:
+            o_name = "Local" if o['name'] == home else ("Visitante" if o['name'] == away else "Empate")
+            cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
+            if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
 
         max_cuotas, max_bookies, value_bets = {}, {}, {}
         
@@ -487,14 +486,14 @@ with pestana_radar:
                                 mercados_del_partido = list(part['mercados'].keys())
                                 sub_tabs_mercados = st.tabs(mercados_del_partido)
 
-                                for m_idx, nombre_m in enumerate(mercados_del_partido):
+                                for m_idx, text_m in enumerate(mercados_del_partido):
                                     with sub_tabs_mercados[m_idx]:
-                                        m_info = part['mercados'][nombre_m]
+                                        m_info = part['mercados'][text_m]
                                         opciones_disponibles = list(m_info['max_cuotas'].keys())
 
-                                        if nombre_m == "1X2 (Ganador)": orden_estricto = ["Local", "Empate", "Visitante"]
-                                        elif nombre_m == "Doble Oportunidad": orden_estricto = ["1X (Local o Empate)", "12 (Local o Visitante)", "X2 (Visitante o Empate)"]
-                                        elif nombre_m == "Ambos Anotan (BTTS)": orden_estricto = ["Sí", "No"]
+                                        if text_m == "1X2 (Ganador)": orden_estricto = ["Local", "Empate", "Visitante"]
+                                        elif text_m == "Doble Oportunidad": orden_estricto = ["1X (Local o Empate)", "12 (Local o Visitante)", "X2 (Visitante o Empate)"]
+                                        elif text_m == "Ambos Anotan (BTTS)": orden_estricto = ["Sí", "No"]
                                         else: orden_estricto = sorted(opciones_disponibles, key=lambda x: 0 if "Más" in x else 1)
 
                                         sub_cols = st.columns(len(orden_estricto))
@@ -506,7 +505,7 @@ with pestana_radar:
                                                     info_val = m_info['value_bets'][plantilla_opcion]
                                                     lbl_val = "🔥 VALOR" if info_val['es_value'] else ""
 
-                                                    clave_base = f"ap_{part['id']}_{nombre_m}_{plantilla_opcion}"
+                                                    clave_base = f"ap_{part['id']}_{text_m}_{plantilla_opcion}"
                                                     marcado_inicial = clave_base in st.session_state.claves_auto
 
                                                     chk = st.checkbox(
@@ -525,7 +524,7 @@ with pestana_radar:
                                                     if chk:
                                                         apuestas_seleccionadas.append({
                                                             "evento": f"{part['local']} vs {part['visitante']}",
-                                                            "liga": part['liga_origen'], "mercado": nombre_m,
+                                                            "liga": part['liga_origen'], "mercado": text_m,
                                                             "seleccion": plantilla_opcion, "cuota": cuota_m, "casa": casa_m
                                                         })
             else:
@@ -564,7 +563,6 @@ with pestana_radar:
                             "Ganancia Potencial": ganancia_neta
                         })
                         
-                        # Guardado automático e inmediato en el almacenamiento local
                         guardar_historial_local(st.session_state.historial_apuestas)
                         
                         st.session_state.version_ticket += 1
@@ -583,10 +581,10 @@ with pestana_historial:
     st.title("📊 Módulo de Auditoría Financiera Avanzada")
 
     if st.session_state.historial_apuestas:
-        df_historial = pd.DataFrame(st.session_state.historial_apuestas)
+        df_actualizado = pd.DataFrame(st.session_state.historial_apuestas)
 
         st.subheader("📝 Modificar Resultados Recientes")
-        for idx, fila in df_historial.iterrows():
+        for idx, fila in df_actualizado.iterrows():
             col_d, col_est = st.columns([3, 1])
             with col_d:
                 st.write(f"🆔 **Ticket #{idx+1}** ({fila['Fecha']}) | Inversión: ${fila['Inversión']} | Cuota: x{round(fila['Cuota'],2)} | {fila['Detalles']}")
@@ -600,7 +598,6 @@ with pestana_historial:
                     guardar_historial_local(st.session_state.historial_apuestas)
                     st.rerun()
 
-        df_actualizado = pd.DataFrame(st.session_state.historial_apuestas)
         total_invertido = df_actualizado['Inversión'].sum()
         ganado_mask = df_actualizado['Estado'] == "Ganado"
         total_retornado = (df_actualizado[ganado_mask]['Inversión'] * df_actualizado[ganado_mask]['Cuota']).sum()
@@ -619,27 +616,26 @@ with pestana_historial:
         df_actualizado['Ganancia_Efectiva'] = df_actualizado.apply(lambda r: (r['Inversión']*r['Cuota'] - r['Inversión']) if r['Estado'] == "Ganado" else (-r['Inversión'] if r['Estado'] == "Perdido" else 0), axis=1)
         df_actualizado['Rendimiento Acumulado ($)'] = df_actualizado['Ganancia_Efectiva'].cumsum()
 
-      st.dataframe(df_actualizado[['Fecha', 'Detalles', 'Inversión', 'Estado', 'Rendimiento Acumulado ($)']], use_container_width=True)
-    csv_data = df_actualizado.to_csv(index=False).encode('utf-8')
-    
-    st.markdown("---")
-    
-    # Creamos las dos columnas dentro del bloque donde SÍ hay datos
-    col_descarga, col_borrar = st.columns([3, 1])
-    
-        with col_descarga:
-                st.download_button(
-                        label="📊 Descargar Bitácora Completa (CSV)",
-                        data=csv_data,
-                        file_name=f"Reporte_Apuestas.csv",
-                        mime='text/csv',
-                        use_container_width=True
-                    )
+        st.dataframe(df_actualizado[['Fecha', 'Detalles', 'Inversión', 'Estado', 'Rendimiento Acumulado ($)']], use_container_width=True)
+        csv_data = df_actualizado.to_csv(index=False).encode('utf-8')
         
+        st.markdown("---")
+        
+        col_descarga, col_borrar = st.columns([3, 1])
+        
+        with col_descarga:
+            st.download_button(
+                label="📊 Descargar Bitácora Completa (CSV)",
+                data=csv_data,
+                file_name="Reporte_Apuestas.csv",
+                mime='text/csv',
+                use_container_width=True
+            )
+            
         with col_borrar:
-                if st.button("🗑️ Reiniciar Bitácora", use_container_width=True, type="secondary"):
-                        limpiar_historial_local()
-                        st.success("¡Bitácora borrada con éxito!")
-                       st.rerun()
+            if st.button("🗑️ Reiniciar Bitácora", use_container_width=True, type="secondary"):
+                limpiar_historial_local()
+                st.success("¡Bitácora borrada con éxito!")
+                st.rerun()
     else:
-                    st.info("Aún no tienes apuestas registradas en la bitácora.")
+        st.info("Aún no tienes apuestas registradas en la bitácora.")
