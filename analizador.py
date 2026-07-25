@@ -297,10 +297,12 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                         o_name = "Más de 2.5" if o['name'].lower() in ["over", "más", "mas"] else "Menos de 2.5"
                         cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                         if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
-                            for o in dict_b_markets["h2h"]:
-            o_name = "Local" if o['name'] == home else ("Visitante" if o['name'] == away else "Empate")
-            cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-            if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
+
+            elif mercado == "1X2 (Ganador)" and "h2h" in dict_b_markets:
+                for o in dict_b_markets["h2h"]:
+                    o_name = "Local" if o['name'] == home else ("Visitante" if o['name'] == away else "Empate")
+                    cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
+                    if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
 
         max_cuotas, max_bookies, value_bets = {}, {}, {}
         
