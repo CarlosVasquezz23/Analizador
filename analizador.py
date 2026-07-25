@@ -65,6 +65,8 @@ if 'version_ticket' not in st.session_state:
     st.session_state.version_ticket = 0
 if 'datos_cargados' not in st.session_state:
     st.session_state.datos_cargados = {}
+if 'ha_consultado' not in st.session_state:
+    st.session_state.ha_consultado = False
 if 'versiones_partidos' not in st.session_state:
     st.session_state.versiones_partidos = {}
 if 'claves_auto' not in st.session_state:
@@ -94,7 +96,7 @@ with st.sidebar:
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
 # --- CACHÉ INTELIGENTE ---
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=60)
 def consultar_api_odds(sport_key, market_key):
     if not sport_key:
         return []
@@ -116,7 +118,7 @@ def consultar_api_odds(sport_key, market_key):
         pass
     return []
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=60)
 def consultar_api_odds_evento(sport_key, event_id, market_key):
     if not sport_key or not event_id:
         return None
@@ -148,13 +150,14 @@ def filtrar_partidos_por_fecha(datos, limite_horas):
             continue
 
         horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
-        if horas_para_partido < -6.0 or horas_para_partido > (limite_horas + 12):
+        # Ampliado el rango inferior y superior para no dejar fuera ligas de LATAM por diferencias horarias de carga
+        if horas_para_partido < -12.0 or horas_para_partido > (limite_horas + 24):
             continue
 
         resultado.append(partido)
     return resultado
 
-# --- PROCESADOR MULTI-MERCADO MEJORADO CON CÁLCULO DE MARGEN CIENTÍFICO ---
+# --- PROCESADOR MULTI-MERCADO OPTIMIZADO PARA LATAM ---
 def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
     ahora_utc = datetime.now(timezone.utc)
     if not datos or not isinstance(datos, list):
@@ -171,7 +174,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             continue
 
         horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
-        if horas_para_partido < -6.0 or horas_para_partido > (limite_horas + 12):
+        if horas_para_partido < -12.0 or horas_para_partido > (limite_horas + 24):
             continue
 
         fecha_local = fecha_utc - timedelta(hours=5)
@@ -243,7 +246,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
 
         max_cuotas, max_bookies, value_bets = {}, {}, {}
         
-        # --- ALGORITMO DE DETECCIÓN CLEAN-VALUEBETS ---
         cuotas_promedio_dict = {}
         for opcion, tuplas in cuotas_globales.items():
             precios = [t[0] for t in tuplas]
@@ -256,7 +258,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             cuota_promedio = cuotas_promedio_dict[opcion]
             
             probabilidad_real = (1 / cuota_promedio) / overround if overround > 0 else (1 / cuota_promedio)
-            
             cuota_maxima = max(precios)
             bookie_maximo = tuplas[precios.index(cuota_maxima)][1]
 
@@ -293,6 +294,7 @@ with pestana_radar:
         if len(ligas_sels) > 0 and len(mercados_sels) > 0:
             st.cache_data.clear()
             consolidador = {}
+            st.session_state.ha_consultado = True
 
             mercados_featured = [m for m in mercados_sels if diccionario_mercados[m] in ("h2h", "totals")]
             pidio_doble_oportunidad = "Doble Oportunidad" in mercados_sels
@@ -301,7 +303,7 @@ with pestana_radar:
             for liga in ligas_sels:
                 sport_key = todas_las_ligas[liga]
 
-                # 1) MERCADOS FEATURED
+                # 1) MERCADOS GANADOR / TOTALES
                 for m_sel in mercados_featured:
                     market_api = diccionario_mercados[m_sel]
                     raw_data = consultar_api_odds(sport_key, market_key=market_api)
@@ -325,9 +327,6 @@ with pestana_radar:
             st.session_state.datos_cargados = consolidador
             st.session_state.claves_auto = set()
             st.session_state.version_ticket += 1
-
-            if not consolidador:
-                st.info("⚠️ No se encontraron partidos activos o cuotas disponibles en el rango de horas seleccionado.")
         else:
             st.warning("Elige al menos una liga y un mercado antes de consultar en el menú lateral.")
 
@@ -336,7 +335,7 @@ with pestana_radar:
     # LÓGICA DE PRE-SELECCIÓN AUTOMÁTICA
     if generar_auto:
         if not dict_partidos:
-            st.error("❌ Primero debes hacer clic en 'Consultar Radar Múltiple' para cargar datos.")
+            st.error("❌ Primero debes hacer clic en '🔍 Consultar Radar Múltiple' para cargar datos.")
         else:
             bolsa_probabilidades = []
             for p_id, part in dict_partidos.items():
@@ -360,8 +359,8 @@ with pestana_radar:
 
     apuestas_seleccionadas = []
 
-    # --- PANTALLA DE ESPERA LIMPIA Y SIN IMÁGENES ---
-    if not dict_partidos:
+    # --- CONTROL DE FLUJO DE LA INTERFAZ CENTRAL ---
+    if not st.session_state.ha_consultado:
         st.markdown("---")
         col_wel1, col_wel2, col_wel3 = st.columns([1, 2, 1])
         with col_wel2:
@@ -373,8 +372,14 @@ with pestana_radar:
                 "3. Selecciona tus mercados de interés.\n"
                 "4. Presiona el botón **🔍 Consultar Radar Múltiple**."
             )
+    elif st.session_state.ha_consultado and not dict_partidos:
+        st.markdown("---")
+        st.warning("⚠️ **No se encontraron partidos activos o cuotas disponibles.**\n\n"
+                   "Las ligas seleccionadas no tienen partidos programados en las próximas horas o las "
+                   "casas de apuestas internacionales aún no han abierto sus líneas. "
+                   "Intenta cambiando el rango a **72 Horas** o agregando una liga europea como control.")
     else:
-        # --- DISEÑO PARALELO DE DOS COLUMNAS ---
+        # --- DISEÑO PARALELO SI HAY RESULTADOS ---
         col_izquierda, col_derecha = st.columns([6.5, 3.5])
 
         with col_izquierda:
