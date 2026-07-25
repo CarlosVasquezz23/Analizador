@@ -67,6 +67,60 @@ HL_BASE_URL = "https://soccer.highlightly.net"
 def hl_headers():
     return {"x-rapidapi-key": HL_API_KEY}
 
+@st.cache_data(ttl=86400)
+def hl_buscar_ligas(country_name):
+    """Devuelve la lista de ligas de Highlightly para un país. Úsalo para encontrar el ID real de la liga."""
+    if not country_name:
+        return []
+    url = f"{HL_BASE_URL}/leagues"
+    try:
+        r = requests.get(url, headers=hl_headers(), params={"countryName": country_name, "limit": 100})
+        if r.status_code == 200:
+            return r.json().get("data", [])
+        elif r.status_code == 401:
+            st.sidebar.error("❌ API Key de Highlightly inválida.")
+            return []
+        else:
+            st.sidebar.warning(f"⚠️ Highlightly devolvió {r.status_code} al buscar ligas.")
+            return []
+    except Exception as e:
+        st.sidebar.error(f"💥 Error de conexión con Highlightly: {e}")
+        return []
+
+@st.cache_data(ttl=300)
+def hl_consultar_matches(league_id, fecha_str):
+    if not league_id:
+        return []
+    url = f"{HL_BASE_URL}/matches"
+    try:
+        r = requests.get(url, headers=hl_headers(), params={"leagueId": league_id, "date": fecha_str, "limit": 100})
+        if r.status_code == 200:
+            return r.json().get("data", [])
+        elif r.status_code == 429:
+            st.error("❌ ¡Límite de créditos agotado en Highlightly!")
+            return []
+        else:
+            return []
+    except Exception:
+        return []
+
+@st.cache_data(ttl=300)
+def hl_consultar_odds(match_id):
+    if not match_id:
+        return []
+    url = f"{HL_BASE_URL}/odds"
+    try:
+        r = requests.get(url, headers=hl_headers(), params={"matchId": match_id, "oddsType": "prematch", "limit": 5})
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            if data:
+                return data[0].get("odds", [])
+            return []
+        else:
+            return []
+    except Exception:
+        return []
+
 # 3) Usa el buscador que aparece en la barra lateral ("🔧 Buscar League ID en Highlightly")
 #    para encontrar el ID numérico real de cada liga, y reemplaza los None de abajo.
 HL_LEAGUE_IDS = {
@@ -228,60 +282,6 @@ def consultar_api_odds_evento(sport_key, event_id, market_key):
         return response.json()
     except Exception:
         return None
-
-@st.cache_data(ttl=86400)
-def hl_buscar_ligas(country_name):
-    """Devuelve la lista de ligas de Highlightly para un país. Úsalo para encontrar el ID real de la liga."""
-    if not country_name:
-        return []
-    url = f"{HL_BASE_URL}/leagues"
-    try:
-        r = requests.get(url, headers=hl_headers(), params={"countryName": country_name, "limit": 100})
-        if r.status_code == 200:
-            return r.json().get("data", [])
-        elif r.status_code == 401:
-            st.sidebar.error("❌ API Key de Highlightly inválida.")
-            return []
-        else:
-            st.sidebar.warning(f"⚠️ Highlightly devolvió {r.status_code} al buscar ligas.")
-            return []
-    except Exception as e:
-        st.sidebar.error(f"💥 Error de conexión con Highlightly: {e}")
-        return []
-
-@st.cache_data(ttl=300)
-def hl_consultar_matches(league_id, fecha_str):
-    if not league_id:
-        return []
-    url = f"{HL_BASE_URL}/matches"
-    try:
-        r = requests.get(url, headers=hl_headers(), params={"leagueId": league_id, "date": fecha_str, "limit": 100})
-        if r.status_code == 200:
-            return r.json().get("data", [])
-        elif r.status_code == 429:
-            st.error("❌ ¡Límite de créditos agotado en Highlightly!")
-            return []
-        else:
-            return []
-    except Exception:
-        return []
-
-@st.cache_data(ttl=300)
-def hl_consultar_odds(match_id):
-    if not match_id:
-        return []
-    url = f"{HL_BASE_URL}/odds"
-    try:
-        r = requests.get(url, headers=hl_headers(), params={"matchId": match_id, "oddsType": "prematch", "limit": 5})
-        if r.status_code == 200:
-            data = r.json().get("data", [])
-            if data:
-                return data[0].get("odds", [])
-            return []
-        else:
-            return []
-    except Exception:
-        return []
 
 def filtrar_partidos_por_fecha(datos, limite_horas):
     ahora_utc = datetime.now(timezone.utc)
