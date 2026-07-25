@@ -20,6 +20,12 @@ def cargar_historial_local():
         except Exception:
             return []
     return []
+def limpiar_historial_local():
+    """Borra por completo el archivo JSON local y vacía la sesión actual."""
+    if os.path.exists(DB_FILE):
+        os.remove(DB_FILE)
+    if 'historial_apuestas' in st.session_state:
+        st.session_state['historial_apuestas'] = []
 
 def guardar_historial_local(historial):
     try:
@@ -613,8 +619,27 @@ with pestana_historial:
         df_actualizado['Ganancia_Efectiva'] = df_actualizado.apply(lambda r: (r['Inversión']*r['Cuota'] - r['Inversión']) if r['Estado'] == "Ganado" else (-r['Inversión'] if r['Estado'] == "Perdido" else 0), axis=1)
         df_actualizado['Rendimiento Acumulado ($)'] = df_actualizado['Ganancia_Efectiva'].cumsum()
 
-        st.dataframe(df_actualizado[['Fecha', 'Detalles', 'Inversión', 'Estado', 'Rendimiento Acumulado ($)']], use_container_width=True)
-        csv_data = df_actualizado.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Descargar Bitácora Completa (CSV)", data=csv_data, file_name=f"Reporte_Apuestas.csv", mime='text/csv', use_container_width=True)
+      st.dataframe(df_actualizado[['Fecha', 'Detalles', 'Inversión', 'Estado', 'Rendimiento Acumulado ($)']], use_container_width=True)
+    csv_data = df_actualizado.to_csv(index=False).encode('utf-8')
+    
+    st.markdown("---")
+    
+    # Creamos las dos columnas dentro del bloque donde SÍ hay datos
+    col_descarga, col_borrar = st.columns([3, 1])
+    
+    with col_descarga:
+        st.download_button(
+            label="📊 Descargar Bitácora Completa (CSV)",
+            data=csv_data,
+            file_name=f"Reporte_Apuestas.csv",
+            mime='text/csv',
+            use_container_width=True
+        )
+        
+    with col_borrar:
+        if st.button("🗑️ Reiniciar Bitácora", use_container_width=True, type="secondary"):
+            limpiar_historial_local()
+            st.success("¡Bitácora borrada con éxito!")
+            st.rerun()
     else:
-        st.info("Aún no tienes apuestas registradas en la bitácora.")
+                st.info("Aún no tienes apuestas registradas en la bitácora.")
