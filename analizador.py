@@ -57,6 +57,25 @@ st.markdown("""
 # --- TU CONFIGURACIÓN ---
 API_KEY = "e6414a3efabaf34994030cd0a8ea88b1"
 
+# --- CONFIGURACIÓN HIGHLIGHTLY (segunda API, para ligas que The Odds API no cubre) ---
+# 1) Crea una cuenta en https://highlightly.net y saca tu API key (requiere plan PRO o superior
+#    para poder usar el endpoint de cuotas /odds; el plan gratuito NO lo incluye).
+# 2) Pega tu key aquí abajo:
+HL_API_KEY = "f18c6837-5aaf-4880-8148-9b7a133b5557"
+HL_BASE_URL = "https://soccer.highlightly.net"
+
+def hl_headers():
+    return {"x-rapidapi-key": HL_API_KEY}
+
+# 3) Usa el buscador que aparece en la barra lateral ("🔧 Buscar League ID en Highlightly")
+#    para encontrar el ID numérico real de cada liga, y reemplaza los None de abajo.
+HL_LEAGUE_IDS = {
+    "🇨🇴 Primera A (Colombia)": None,
+    "🇪🇨 LigaPro (Ecuador)": None,
+    "🇺🇾 Primera División (Uruguay)": None,
+    "🇵🇪 Liga 1 (Perú)": None,
+}
+
 # --- ESTRUCTURAS DE DATOS EXTENDIDAS ---
 ligas_top = {
     "🇪🇺 Champions League (Europa)": "soccer_uefa_champions_league",
@@ -125,6 +144,24 @@ with st.sidebar:
     
     ligas_sels = st.multiselect("Selecciona los Torneos a Analizar:", list(todas_las_ligas.keys()), default=[])
 
+    st.markdown("---")
+    st.caption("🌎 Ligas extra vía Highlightly (Colombia, Ecuador, Uruguay, Perú)")
+    ligas_hl_sels = st.multiselect(
+        "Ligas extra a analizar:",
+        [k for k, v in HL_LEAGUE_IDS.items()],
+        default=[]
+    )
+    with st.expander("🔧 Buscar League ID en Highlightly"):
+        st.caption("Úsalo una sola vez por país, copia el ID que te interese y pégalo en HL_LEAGUE_IDS dentro del código.")
+        pais_busqueda = st.text_input("País (en inglés, ej: Colombia)", "")
+        if st.button("Buscar ligas en Highlightly"):
+            resultados_hl = hl_buscar_ligas(pais_busqueda)
+            if resultados_hl:
+                for liga_hl in resultados_hl:
+                    st.write(f"**ID {liga_hl.get('id')}** — {liga_hl.get('name')}")
+            else:
+                st.warning("No se encontraron ligas o hubo un error de conexión/API key.")
+
     mercados_sels = st.multiselect("Mercados de Análisis:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
     if "Ambos Anotan (BTTS)" in mercados_sels:
         st.caption("⚠️ BTTS consulta la API 1 vez por cada partido (más gasto de créditos). Doble Oportunidad se calcula matemáticamente.")
@@ -191,6 +228,60 @@ def consultar_api_odds_evento(sport_key, event_id, market_key):
         return response.json()
     except Exception:
         return None
+
+@st.cache_data(ttl=86400)
+def hl_buscar_ligas(country_name):
+    """Devuelve la lista de ligas de Highlightly para un país. Úsalo para encontrar el ID real de la liga."""
+    if not country_name:
+        return []
+    url = f"{HL_BASE_URL}/leagues"
+    try:
+        r = requests.get(url, headers=hl_headers(), params={"countryName": country_name, "limit": 100})
+        if r.status_code == 200:
+            return r.json().get("data", [])
+        elif r.status_code == 401:
+            st.sidebar.error("❌ API Key de Highlightly inválida.")
+            return []
+        else:
+            st.sidebar.warning(f"⚠️ Highlightly devolvió {r.status_code} al buscar ligas.")
+            return []
+    except Exception as e:
+        st.sidebar.error(f"💥 Error de conexión con Highlightly: {e}")
+        return []
+
+@st.cache_data(ttl=300)
+def hl_consultar_matches(league_id, fecha_str):
+    if not league_id:
+        return []
+    url = f"{HL_BASE_URL}/matches"
+    try:
+        r = requests.get(url, headers=hl_headers(), params={"leagueId": league_id, "date": fecha_str, "limit": 100})
+        if r.status_code == 200:
+            return r.json().get("data", [])
+        elif r.status_code == 429:
+            st.error("❌ ¡Límite de créditos agotado en Highlightly!")
+            return []
+        else:
+            return []
+    except Exception:
+        return []
+
+@st.cache_data(ttl=300)
+def hl_consultar_odds(match_id):
+    if not match_id:
+        return []
+    url = f"{HL_BASE_URL}/odds"
+    try:
+        r = requests.get(url, headers=hl_headers(), params={"matchId": match_id, "oddsType": "prematch", "limit": 5})
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            if data:
+                return data[0].get("odds", [])
+            return []
+        else:
+            return []
+    except Exception:
+        return []
 
 def filtrar_partidos_por_fecha(datos, limite_horas):
     ahora_utc = datetime.now(timezone.utc)
@@ -344,6 +435,121 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                 "value_bets": value_bets
             }
 
+def procesar_e_inyectar_highlightly(matches, mercados_sels, limite_horas, nombre_liga, diccionario_consolidador):
+    ahora_utc = datetime.now(timezone.utc)
+    for match in matches:
+        match_id = match.get('id')
+        home_team = match.get('homeTeam', {}).get('name', '???')
+        away_team = match.get('awayTeam', {}).get('name', '???')
+        fecha_raw = match.get('date')
+        if not match_id or not fecha_raw:
+            continue
+        try:
+            fecha_utc = datetime.fromisoformat(fecha_raw.replace('Z', '+00:00'))
+        except Exception:
+            continue
+
+        horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
+        if horas_para_partido < -12.0 or horas_para_partido > (limite_horas + 24):
+            continue
+
+        odds_list = hl_consultar_odds(match_id)
+        if not odds_list:
+            continue
+
+        fecha_local = fecha_utc - timedelta(hours=5)
+        cuotas_por_mercado = {}
+        betano_por_mercado = {}
+
+        for entry in odds_list:
+            bookie = entry.get('bookmakerName', 'N/D')
+            market_name = entry.get('market', '')
+            values = entry.get('values', [])
+            es_betano = bookie.lower() == "betano"
+
+            if market_name == "Full Time Result" and "1X2 (Ganador)" in mercados_sels:
+                mapa = {"Home": "Local", "Draw": "Empate", "Away": "Visitante"}
+                for v in values:
+                    o_name = mapa.get(v.get('value'))
+                    if o_name and v.get('odd'):
+                        cuotas_por_mercado.setdefault("1X2 (Ganador)", {}).setdefault(o_name, []).append((float(v['odd']), bookie))
+                        if es_betano:
+                            betano_por_mercado.setdefault("1X2 (Ganador)", {})[o_name] = float(v['odd'])
+
+            elif market_name == "Both Teams to Score" and "Ambos Anotan (BTTS)" in mercados_sels:
+                mapa = {"Yes": "Sí", "No": "No"}
+                for v in values:
+                    o_name = mapa.get(v.get('value'))
+                    if o_name and v.get('odd'):
+                        cuotas_por_mercado.setdefault("Ambos Anotan (BTTS)", {}).setdefault(o_name, []).append((float(v['odd']), bookie))
+                        if es_betano:
+                            betano_por_mercado.setdefault("Ambos Anotan (BTTS)", {})[o_name] = float(v['odd'])
+
+            elif market_name == "Total Goals 2.5" and "Goles Más/Menos 2.5" in mercados_sels:
+                mapa = {"Over": "Más de 2.5", "Under": "Menos de 2.5"}
+                for v in values:
+                    o_name = mapa.get(v.get('value'))
+                    if o_name and v.get('odd'):
+                        cuotas_por_mercado.setdefault("Goles Más/Menos 2.5", {}).setdefault(o_name, []).append((float(v['odd']), bookie))
+                        if es_betano:
+                            betano_por_mercado.setdefault("Goles Más/Menos 2.5", {})[o_name] = float(v['odd'])
+
+        # Doble Oportunidad: Highlightly no la ofrece nativa, se calcula a partir de Full Time Result
+        if "Doble Oportunidad" in mercados_sels and "1X2 (Ganador)" in cuotas_por_mercado:
+            ftr = cuotas_por_mercado["1X2 (Ganador)"]
+            if "Local" in ftr and "Empate" in ftr and "Visitante" in ftr:
+                c_home = max(p for p, _ in ftr["Local"])
+                c_draw = max(p for p, _ in ftr["Empate"])
+                c_away = max(p for p, _ in ftr["Visitante"])
+                casa_ref = next(b for p, b in ftr["Local"] if p == c_home)
+                c_1x = round((c_home * c_draw) / (c_home + c_draw), 2)
+                c_x2 = round((c_away * c_draw) / (c_away + c_draw), 2)
+                c_12 = round((c_home * c_away) / (c_home + c_away), 2)
+                cuotas_por_mercado["Doble Oportunidad"] = {
+                    "1X (Local o Empate)": [(c_1x, casa_ref)],
+                    "X2 (Visitante o Empate)": [(c_x2, casa_ref)],
+                    "12 (Local o Visitante)": [(c_12, casa_ref)],
+                }
+
+        if not cuotas_por_mercado:
+            continue
+
+        if match_id not in diccionario_consolidador:
+            diccionario_consolidador[match_id] = {
+                "id": match_id,
+                "liga_origen": nombre_liga,
+                "fecha_str": fecha_local.strftime("%d/%m/%Y - %H:%M"),
+                "local": home_team, "visitante": away_team,
+                "mercados": {}
+            }
+
+        for mercado_app, cuotas_globales in cuotas_por_mercado.items():
+            max_cuotas, max_bookies, value_bets = {}, {}, {}
+            cuotas_promedio_dict = {}
+            for opcion, tuplas in cuotas_globales.items():
+                precios = [t[0] for t in tuplas]
+                cuotas_promedio_dict[opcion] = sum(precios) / len(precios) if precios else 1.0
+            overround = sum([1 / cp for cp in cuotas_promedio_dict.values()]) if cuotas_promedio_dict else 1.0
+
+            for opcion, tuplas in cuotas_globales.items():
+                precios = [t[0] for t in tuplas]
+                cuota_promedio = cuotas_promedio_dict[opcion]
+                probabilidad_real = (1 / cuota_promedio) / overround if overround > 0 else (1 / cuota_promedio)
+                cuota_maxima = max(precios)
+                bookie_maximo = tuplas[precios.index(cuota_maxima)][1]
+
+                max_cuotas[opcion] = cuota_maxima
+                max_bookies[opcion] = bookie_maximo
+                ev = (cuota_maxima * probabilidad_real) - 1
+                value_bets[opcion] = {"ev": ev, "prob_real": probabilidad_real * 100, "es_value": ev > 0.02}
+
+            diccionario_consolidador[match_id]["mercados"][mercado_app] = {
+                "max_cuotas": max_cuotas,
+                "max_bookies": max_bookies,
+                "betano_cuotas": betano_por_mercado.get(mercado_app, {}),
+                "value_bets": value_bets
+            }
+
 # ==========================================
 # VISTA: PESTAÑA 1 - RADAR Y APUESTAS
 # ==========================================
@@ -351,7 +557,7 @@ with pestana_radar:
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
 
     if consultar:
-        if len(ligas_sels) > 0 and len(mercados_sels) > 0:
+        if (len(ligas_sels) > 0 or len(ligas_hl_sels) > 0) and len(mercados_sels) > 0:
             st.cache_data.clear()
             consolidador = {}
             st.session_state.ha_consultado = True
@@ -383,6 +589,20 @@ with pestana_radar:
                         datos_evento = consultar_api_odds_evento(sport_key, event_id, "btts")
                         if datos_evento:
                             procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
+
+            # 4) LIGAS EXTRA VÍA HIGHLIGHTLY (Colombia, Ecuador, Uruguay, Perú)
+            dias_a_cubrir = (limite_h // 24) + 2
+            fechas_a_consultar = [(datetime.now(timezone.utc) + timedelta(days=d)).strftime("%Y-%m-%d") for d in range(dias_a_cubrir)]
+
+            for liga_hl in ligas_hl_sels:
+                league_id = HL_LEAGUE_IDS.get(liga_hl)
+                if not league_id:
+                    st.warning(f"⚠️ Falta configurar el League ID de Highlightly para: {liga_hl}. Usa el buscador del sidebar.")
+                    continue
+                partidos_liga_hl = []
+                for f in fechas_a_consultar:
+                    partidos_liga_hl.extend(hl_consultar_matches(league_id, f))
+                procesar_e_inyectar_highlightly(partidos_liga_hl, mercados_sels, limite_h, liga_hl, consolidador)
 
             st.session_state.datos_cargados = consolidador
             st.session_state.claves_auto = set()
