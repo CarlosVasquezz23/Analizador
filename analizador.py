@@ -181,6 +181,103 @@ HL_LEAGUE_IDS = {
     "🇵🇪 Liga 1 (Perú)": 239915,
 }
 
+# --- CONFIGURACIÓN API-FOOTBALL (tercera fuente, plan gratis con endpoint de cuotas incluido) ---
+# Registro directo en api-football.com (NO vía RapidAPI), por eso usamos el header x-apisports-key
+# y la URL directa v3.football.api-sports.io. Plan gratis: 100 solicitudes/día.
+AF_API_KEY = "5cca912e78e3ec42256f42db0b59fda2"
+AF_BASE_URL = "https://v3.football.api-sports.io"
+
+def af_headers():
+    return {"x-apisports-key": AF_API_KEY}
+
+def _actualizar_creditos_af(response_headers):
+    """API-Football manda el límite diario restante en estos headers (cuando el plan los expone)."""
+    restante = response_headers.get('x-ratelimit-requests-remaining')
+    limite = response_headers.get('x-ratelimit-requests-limit')
+    if restante is not None:
+        st.session_state.creditos_restantes_af = f"{restante}/{limite}" if limite else restante
+
+@st.cache_data(ttl=86400)
+def af_buscar_ligas(country_name):
+    """Devuelve la lista de ligas de API-Football para un país. Úsalo para encontrar el ID real de la liga."""
+    if not country_name:
+        return []
+    url = f"{AF_BASE_URL}/leagues"
+    try:
+        r = requests.get(url, headers=af_headers(), params={"country": country_name})
+        _actualizar_creditos_af(r.headers)
+        if r.status_code == 200:
+            return r.json().get("response", [])
+        elif r.status_code in (401, 403):
+            st.sidebar.error("❌ API Key de API-Football inválida o sin acceso.")
+            return []
+        else:
+            st.sidebar.warning(f"⚠️ API-Football devolvió {r.status_code} al buscar ligas.")
+            return []
+    except Exception as e:
+        st.sidebar.error(f"💥 Error de conexión con API-Football: {e}")
+        return []
+
+@st.cache_data(ttl=300)
+def af_consultar_fixtures(league_id, season, fecha_desde, fecha_hasta):
+    if not league_id:
+        return []
+    url = f"{AF_BASE_URL}/fixtures"
+    try:
+        r = requests.get(url, headers=af_headers(), params={
+            "league": league_id, "season": season, "from": fecha_desde, "to": fecha_hasta
+        })
+        _actualizar_creditos_af(r.headers)
+        if r.status_code == 200:
+            return r.json().get("response", [])
+        elif r.status_code == 429:
+            st.error("❌ ¡Límite diario de 100 solicitudes agotado en API-Football!")
+            return []
+        elif r.status_code in (401, 403):
+            st.error("❌ API-Football: Key inválida o sin acceso (401/403) al consultar partidos.")
+            return []
+        else:
+            st.warning(f"⚠️ API-Football devolvió {r.status_code} al consultar partidos (liga {league_id}): {r.text[:200]}")
+            return []
+    except Exception as e:
+        st.error(f"💥 Error de conexión con API-Football (fixtures): {e}")
+        return []
+
+@st.cache_data(ttl=300)
+def af_consultar_odds(fixture_id):
+    if not fixture_id:
+        return []
+    url = f"{AF_BASE_URL}/odds"
+    try:
+        r = requests.get(url, headers=af_headers(), params={"fixture": fixture_id})
+        _actualizar_creditos_af(r.headers)
+        if r.status_code == 200:
+            data = r.json().get("response", [])
+            if data:
+                return data[0].get("bookmakers", [])
+            return []
+        elif r.status_code == 429:
+            st.error("❌ ¡Límite diario de 100 solicitudes agotado en API-Football!")
+            return []
+        elif r.status_code in (401, 403):
+            st.error("❌ API-Football: Key inválida o sin acceso (401/403) al consultar cuotas.")
+            return []
+        else:
+            st.warning(f"⚠️ API-Football devolvió {r.status_code} al consultar cuotas del partido {fixture_id}: {r.text[:200]}")
+            return []
+    except Exception as e:
+        st.error(f"💥 Error de conexión con API-Football (odds): {e}")
+        return []
+
+# Usa el buscador que aparece en la barra lateral ("🔧 Buscar League ID en API-Football")
+# para encontrar el ID numérico real de cada liga, y reemplaza los None de abajo.
+AF_LEAGUE_IDS = {
+    "🇨🇴 Primera A (Colombia)": None,
+    "🇪🇨 LigaPro (Ecuador)": None,
+    "🇺🇾 Primera División (Uruguay)": None,
+    "🇵🇪 Liga 1 (Perú)": None,
+}
+
 # --- ESTRUCTURAS DE DATOS EXTENDIDAS ---
 ligas_top = {
     "🇪🇺 Champions League (Europa)": "soccer_uefa_champions_league",
@@ -206,7 +303,8 @@ ligas_locales = {
 }
 # Nota: Uruguay, Perú, Colombia y LigaPro Ecuador se quitaron de aquí porque The Odds API
 # devuelve 404 para esos sport_key (no están en su catálogo). Ahora se consultan vía
-# Highlightly, más abajo en "Ligas extra a analizar" en el sidebar.
+# API-Football (fuente activa) y Highlightly (fuente de respaldo, deshabilitada), más abajo en
+# "Ligas extra a analizar" en el sidebar.
 
 ligas_locales_ordenadas = dict(sorted(ligas_locales.items()))
 todas_las_ligas = {**ligas_top, **ligas_locales_ordenadas}
@@ -233,6 +331,8 @@ if 'claves_auto' not in st.session_state:
     st.session_state.claves_auto = set()
 if 'creditos_restantes' not in st.session_state:
     st.session_state.creditos_restantes = "No consultado"
+if 'creditos_restantes_af' not in st.session_state:
+    st.session_state.creditos_restantes_af = "No consultado"
 
 # --- CONFIGURACIÓN E INTERFAZ EN EL SIDEBAR ---
 with st.sidebar:
@@ -243,6 +343,12 @@ with st.sidebar:
         <div class="creditos-caja">
             <small style="color:#a4b0be; text-transform:uppercase; font-weight:bold;">Créditos Restantes API</small><br>
             <span style="font-size:18px; font-weight:bold; color:#00d2d3;">🔑 {st.session_state.creditos_restantes}</span>
+        </div>
+    """, unsafe_allow_html=True)
+    st.markdown(f"""
+        <div class="creditos-caja" style="border-left-color:#feca57;">
+            <small style="color:#a4b0be; text-transform:uppercase; font-weight:bold;">Créditos Restantes API-Football (100/día)</small><br>
+            <span style="font-size:18px; font-weight:bold; color:#feca57;">🔑 {st.session_state.creditos_restantes_af}</span>
         </div>
     """, unsafe_allow_html=True)
     
@@ -262,11 +368,36 @@ with st.sidebar:
     ligas_sels = st.multiselect("Selecciona los Torneos a Analizar:", list(todas_las_ligas.keys()), key="ligas_sels_widget")
 
     st.markdown("---")
-    st.caption("🌎 Ligas extra vía Highlightly (Colombia, Ecuador, Uruguay, Perú)")
+    st.caption("🌎 Ligas extra vía API-Football (Colombia, Ecuador, Uruguay, Perú) — plan gratis")
+    habilitar_af = st.checkbox("✅ Habilitar ligas extra (API-Football, gratis)", value=True)
+    if habilitar_af:
+        ligas_af_sels = st.multiselect(
+            "Ligas extra a analizar (API-Football):",
+            [k for k, v in AF_LEAGUE_IDS.items()],
+            default=[]
+        )
+    else:
+        ligas_af_sels = []
+    with st.expander("🔧 Buscar League ID en API-Football"):
+        st.caption("Úsalo una sola vez por país, copia el ID que te interese y pégalo en AF_LEAGUE_IDS dentro del código.")
+        pais_busqueda_af = st.text_input("País (en inglés, ej: Colombia)", "", key="pais_busqueda_af")
+        if st.button("Buscar ligas en API-Football"):
+            resultados_af = af_buscar_ligas(pais_busqueda_af)
+            if resultados_af:
+                for liga_af in resultados_af:
+                    liga_info = liga_af.get('league', {})
+                    temporadas = liga_af.get('seasons', [])
+                    temporada_actual = next((t.get('year') for t in temporadas if t.get('current')), None)
+                    st.write(f"**ID {liga_info.get('id')}** — {liga_info.get('name')} (temporada actual: {temporada_actual})")
+            else:
+                st.warning("No se encontraron ligas o hubo un error de conexión/API key.")
+
+    st.markdown("---")
+    st.caption("🌎 Ligas extra vía Highlightly (fuente de respaldo, requiere plan PRO)")
     habilitar_hl = st.checkbox("🔒 Habilitar ligas extra (requiere plan PRO de Highlightly)", value=False)
     if habilitar_hl:
         ligas_hl_sels = st.multiselect(
-            "Ligas extra a analizar:",
+            "Ligas extra a analizar (Highlightly):",
             [k for k, v in HL_LEAGUE_IDS.items()],
             default=[]
         )
@@ -301,8 +432,10 @@ with st.sidebar:
     _txt_estimado = f"📊 Estimado mínimo: ~{_calls_odds_api} llamada(s) a The Odds API"
     if "Ambos Anotan (BTTS)" in mercados_sels:
         _txt_estimado += " + 1 extra por cada partido encontrado (variable)"
-    if ligas_sels or ligas_hl_sels:
+    if ligas_sels or ligas_hl_sels or ligas_af_sels:
         st.caption(_txt_estimado)
+    if ligas_af_sels:
+        st.caption(f"📊 API-Football: 1 llamada por liga (fixtures) + 1 llamada por cada partido encontrado (odds) — recuerda el límite de 100/día.")
 
     consultar = st.button("🔍 Consultar Radar Múltiple", type="primary", use_container_width=True)
     num_eventos_auto = st.slider("Eventos para el Generador Automático:", min_value=2, max_value=6, value=3)
@@ -658,6 +791,124 @@ def procesar_e_inyectar_highlightly(matches, mercados_sels, limite_horas, nombre
                 "todas_cuotas": cuotas_globales
             }
 
+def procesar_e_inyectar_api_football(fixtures, mercados_sels, limite_horas, nombre_liga, diccionario_consolidador):
+    ahora_utc = datetime.now(timezone.utc)
+    ESTADOS_NO_JUGABLES = {"FT", "AET", "PEN", "PST", "CANC", "ABD", "AWD", "WO", "LIVE", "1H", "2H", "HT", "ET", "BT", "P", "SUSP", "INT"}
+
+    for fx in fixtures:
+        fixture_info = fx.get('fixture', {})
+        fixture_id = fixture_info.get('id')
+        status_corto = fixture_info.get('status', {}).get('short', '')
+        fecha_raw = fixture_info.get('date')
+        teams = fx.get('teams', {})
+        home_team = teams.get('home', {}).get('name', '???')
+        away_team = teams.get('away', {}).get('name', '???')
+
+        if not fixture_id or not fecha_raw or status_corto in ESTADOS_NO_JUGABLES:
+            continue
+        try:
+            fecha_utc = datetime.fromisoformat(fecha_raw.replace('Z', '+00:00'))
+        except Exception:
+            continue
+
+        horas_para_partido = (fecha_utc - ahora_utc).total_seconds() / 3600
+        if horas_para_partido < -12.0 or horas_para_partido > (limite_horas + 24):
+            continue
+
+        bookmakers = af_consultar_odds(fixture_id)
+        if not bookmakers:
+            continue
+
+        fecha_local = fecha_utc - timedelta(hours=5)
+        cuotas_por_mercado = {}
+        betano_por_mercado = {}
+
+        for bm in bookmakers:
+            bookie = bm.get('name', 'N/D')
+            es_betano = bookie.lower() == "betano"
+            for bet in bm.get('bets', []):
+                bet_name = bet.get('name', '')
+                values = bet.get('values', [])
+
+                if bet_name == "Match Winner" and "1X2 (Ganador)" in mercados_sels:
+                    mapa = {"Home": "Local", "Draw": "Empate", "Away": "Visitante"}
+                    for v in values:
+                        o_name = mapa.get(v.get('value'))
+                        if o_name and v.get('odd'):
+                            cuotas_por_mercado.setdefault("1X2 (Ganador)", {}).setdefault(o_name, []).append((float(v['odd']), bookie))
+                            if es_betano:
+                                betano_por_mercado.setdefault("1X2 (Ganador)", {})[o_name] = float(v['odd'])
+
+                elif bet_name == "Double Chance" and "Doble Oportunidad" in mercados_sels:
+                    mapa = {"Home/Draw": "1X (Local o Empate)", "Draw/Away": "X2 (Visitante o Empate)", "Home/Away": "12 (Local o Visitante)"}
+                    for v in values:
+                        o_name = mapa.get(v.get('value'))
+                        if o_name and v.get('odd'):
+                            cuotas_por_mercado.setdefault("Doble Oportunidad", {}).setdefault(o_name, []).append((float(v['odd']), bookie))
+                            if es_betano:
+                                betano_por_mercado.setdefault("Doble Oportunidad", {})[o_name] = float(v['odd'])
+
+                elif bet_name == "Both Teams Score" and "Ambos Anotan (BTTS)" in mercados_sels:
+                    mapa = {"Yes": "Sí", "No": "No"}
+                    for v in values:
+                        o_name = mapa.get(v.get('value'))
+                        if o_name and v.get('odd'):
+                            cuotas_por_mercado.setdefault("Ambos Anotan (BTTS)", {}).setdefault(o_name, []).append((float(v['odd']), bookie))
+                            if es_betano:
+                                betano_por_mercado.setdefault("Ambos Anotan (BTTS)", {})[o_name] = float(v['odd'])
+
+                elif bet_name == "Goals Over/Under" and "Goles Más/Menos 2.5" in mercados_sels:
+                    for v in values:
+                        val_raw = v.get('value', '')
+                        if "2.5" not in val_raw or not v.get('odd'):
+                            continue
+                        o_name = "Más de 2.5" if val_raw.lower().startswith("over") else ("Menos de 2.5" if val_raw.lower().startswith("under") else None)
+                        if o_name:
+                            cuotas_por_mercado.setdefault("Goles Más/Menos 2.5", {}).setdefault(o_name, []).append((float(v['odd']), bookie))
+                            if es_betano:
+                                betano_por_mercado.setdefault("Goles Más/Menos 2.5", {})[o_name] = float(v['odd'])
+
+        if not cuotas_por_mercado:
+            continue
+
+        if fixture_id not in diccionario_consolidador:
+            diccionario_consolidador[fixture_id] = {
+                "id": fixture_id,
+                "liga_origen": nombre_liga,
+                "fecha_str": fecha_local.strftime("%d/%m/%Y - %H:%M"),
+                "fecha_ts": fecha_utc.timestamp(),
+                "local": home_team, "visitante": away_team,
+                "mercados": {}
+            }
+
+        for mercado_app, cuotas_globales in cuotas_por_mercado.items():
+            max_cuotas, max_bookies, value_bets = {}, {}, {}
+            cuotas_promedio_dict = {}
+            for opcion, tuplas in cuotas_globales.items():
+                precios = [t[0] for t in tuplas]
+                cuotas_promedio_dict[opcion] = sum(precios) / len(precios) if precios else 1.0
+            overround = sum([1 / cp for cp in cuotas_promedio_dict.values()]) if cuotas_promedio_dict else 1.0
+
+            for opcion, tuplas in cuotas_globales.items():
+                precios = [t[0] for t in tuplas]
+                cuota_promedio = cuotas_promedio_dict[opcion]
+                probabilidad_real = (1 / cuota_promedio) / overround if overround > 0 else (1 / cuota_promedio)
+                cuota_maxima = max(precios)
+                bookie_maximo = tuplas[precios.index(cuota_maxima)][1]
+
+                max_cuotas[opcion] = cuota_maxima
+                max_bookies[opcion] = bookie_maximo
+                ev = (cuota_maxima * probabilidad_real) - 1
+                value_bets[opcion] = {"ev": ev, "prob_real": probabilidad_real * 100, "es_value": ev > 0.02}
+
+            diccionario_consolidador[fixture_id]["mercados"][mercado_app] = {
+                "max_cuotas": max_cuotas,
+                "max_bookies": max_bookies,
+                "betano_cuotas": betano_por_mercado.get(mercado_app, {}),
+                "value_bets": value_bets,
+                "todas_cuotas": cuotas_globales
+            }
+
 # ==========================================
 # VISTA: PESTAÑA 1 - RADAR Y APUESTAS
 # ==========================================
@@ -665,7 +916,7 @@ with pestana_radar:
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
 
     if consultar or autorefresh_disparo:
-        if (len(ligas_sels) > 0 or len(ligas_hl_sels) > 0) and len(mercados_sels) > 0:
+        if (len(ligas_sels) > 0 or len(ligas_hl_sels) > 0 or len(ligas_af_sels) > 0) and len(mercados_sels) > 0:
             st.cache_data.clear()
             consolidador = {}
             st.session_state.ha_consultado = True
@@ -674,7 +925,7 @@ with pestana_radar:
             pidio_doble_oportunidad = "Doble Oportunidad" in mercados_sels
             pidio_btts = "Ambos Anotan (BTTS)" in mercados_sels
 
-            total_ligas_a_consultar = len(ligas_sels) + len(ligas_hl_sels)
+            total_ligas_a_consultar = len(ligas_sels) + len(ligas_hl_sels) + len(ligas_af_sels)
 
             with st.status(f"🔄 Consultando {total_ligas_a_consultar} liga(s)...", expanded=True) as status_consulta:
                 for idx_liga, liga in enumerate(ligas_sels, start=1):
@@ -702,11 +953,26 @@ with pestana_radar:
                             if datos_evento:
                                 procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
 
-                # 4) LIGAS EXTRA VÍA HIGHLIGHTLY (Colombia, Ecuador, Uruguay, Perú)
+                # 4) LIGAS EXTRA VÍA API-FOOTBALL (Colombia, Ecuador, Uruguay, Perú) — fuente activa
                 dias_a_cubrir = (limite_h // 24) + 2
+                fecha_desde_af = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                fecha_hasta_af = (datetime.now(timezone.utc) + timedelta(days=dias_a_cubrir)).strftime("%Y-%m-%d")
+                temporada_af = datetime.now(timezone.utc).year
+
+                for idx_af, liga_af in enumerate(ligas_af_sels, start=len(ligas_sels) + 1):
+                    status_consulta.update(label=f"🔄 Consultando ({idx_af}/{total_ligas_a_consultar}): {liga_af}")
+                    league_id_af = AF_LEAGUE_IDS.get(liga_af)
+                    if not league_id_af:
+                        st.warning(f"⚠️ Falta configurar el League ID de API-Football para: {liga_af}. Usa el buscador del sidebar.")
+                        continue
+                    fixtures_liga_af = af_consultar_fixtures(league_id_af, temporada_af, fecha_desde_af, fecha_hasta_af)
+                    st.caption(f"🔎 API-Football — {liga_af}: {len(fixtures_liga_af)} partido(s) encontrado(s) en el rango de fechas consultado.")
+                    procesar_e_inyectar_api_football(fixtures_liga_af, mercados_sels, limite_h, liga_af, consolidador)
+
+                # 5) LIGAS EXTRA VÍA HIGHLIGHTLY (fuente de respaldo, deshabilitada por defecto)
                 fechas_a_consultar = [(datetime.now(timezone.utc) + timedelta(days=d)).strftime("%Y-%m-%d") for d in range(dias_a_cubrir)]
 
-                for idx_hl, liga_hl in enumerate(ligas_hl_sels, start=len(ligas_sels) + 1):
+                for idx_hl, liga_hl in enumerate(ligas_hl_sels, start=len(ligas_sels) + len(ligas_af_sels) + 1):
                     status_consulta.update(label=f"🔄 Consultando ({idx_hl}/{total_ligas_a_consultar}): {liga_hl}")
                     league_id = HL_LEAGUE_IDS.get(liga_hl)
                     if not league_id:
