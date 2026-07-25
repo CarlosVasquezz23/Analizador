@@ -269,7 +269,32 @@ def af_consultar_odds(fixture_id):
         st.error(f"💥 Error de conexión con API-Football (odds): {e}")
         return []
 
-# Usa el buscador que aparece en la barra lateral ("🔧 Buscar League ID en API-Football")
+@st.cache_data(ttl=60)
+def af_consultar_status():
+    """Devuelve el estado crudo de la cuenta (plan, límites, requests usados) directo desde API-Football."""
+    url = f"{AF_BASE_URL}/status"
+    try:
+        r = requests.get(url, headers=af_headers())
+        _actualizar_creditos_af(r.headers)
+        return r.status_code, r.json() if r.text else {}
+    except Exception as e:
+        return None, {"error": str(e)}
+
+@st.cache_data(ttl=60)
+def af_prueba_liga_grande():
+    """Prueba con el Brasileirao Serie A (liga 71), que en julio está en plena temporada (a diferencia de las
+    ligas europeas, que en julio están de pretemporada y no sirven como control)."""
+    url = f"{AF_BASE_URL}/fixtures"
+    hoy = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    hasta = (datetime.now(timezone.utc) + timedelta(days=10)).strftime("%Y-%m-%d")
+    try:
+        r = requests.get(url, headers=af_headers(), params={"league": 71, "season": datetime.now(timezone.utc).year, "from": hoy, "to": hasta})
+        _actualizar_creditos_af(r.headers)
+        return r.status_code, r.json() if r.text else {}
+    except Exception as e:
+        return None, {"error": str(e)}
+
+
 # para encontrar el ID numérico real de cada liga, y reemplaza los None de abajo.
 AF_LEAGUE_IDS = {
     "🇨🇴 Primera A (Colombia)": 239,
@@ -382,6 +407,18 @@ with st.sidebar:
         )
     else:
         ligas_af_sels = []
+    with st.expander("🔬 Diagnóstico API-Football (por qué salen 0 partidos)"):
+        st.caption("Muestra la respuesta cruda de la API: tu plan real y una prueba con el Brasileirao (liga en plena temporada en julio, a diferencia de las ligas europeas que ahora están de pretemporada), para descartar que el problema sea solo de calendario en las ligas sudamericanas.")
+        if st.button("Ejecutar diagnóstico"):
+            st.write("**1) Estado de tu cuenta (`/status`):**")
+            cod1, data1 = af_consultar_status()
+            st.caption(f"HTTP {cod1}")
+            st.json(data1)
+            st.write("**2) Prueba con Brasileirao Serie A (liga 71) próximos 10 días:**")
+            cod2, data2 = af_prueba_liga_grande()
+            st.caption(f"HTTP {cod2} — resultados: {len(data2.get('response', [])) if isinstance(data2, dict) else 'N/D'}")
+            st.json(data2)
+
     with st.expander("🔧 Buscar League ID en API-Football"):
         st.caption("Úsalo una sola vez por país, copia el ID que te interese y pégalo en AF_LEAGUE_IDS dentro del código.")
         pais_busqueda_af = st.text_input("País (en inglés, ej: Colombia)", "", key="pais_busqueda_af")
