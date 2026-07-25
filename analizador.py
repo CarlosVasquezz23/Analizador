@@ -125,7 +125,7 @@ def hl_consultar_odds(match_id):
                 return data[0].get("odds", [])
             return []
         elif r.status_code == 401:
-            st.error("❌ Highlightly: API Key inválida (401) al consultar cuotas.")
+            st.error("❌ Highlightly: Error 401 al consultar cuotas. Como /matches sí funciona con esta key, esto casi seguro significa que tu plan actual (Free/Basic) NO incluye el endpoint /odds — necesitas plan PRO o superior en highlightly.net.")
             return []
         elif r.status_code == 403:
             st.error(f"❌ Highlightly: Acceso denegado (403) al consultar cuotas del partido {match_id}. El endpoint /odds requiere plan PRO o superior — revisa tu plan en highlightly.net.")
@@ -219,11 +219,16 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption("🌎 Ligas extra vía Highlightly (Colombia, Ecuador, Uruguay, Perú)")
-    ligas_hl_sels = st.multiselect(
-        "Ligas extra a analizar:",
-        [k for k, v in HL_LEAGUE_IDS.items()],
-        default=[]
-    )
+    habilitar_hl = st.checkbox("🔒 Habilitar ligas extra (requiere plan PRO de Highlightly)", value=False)
+    if habilitar_hl:
+        ligas_hl_sels = st.multiselect(
+            "Ligas extra a analizar:",
+            [k for k, v in HL_LEAGUE_IDS.items()],
+            default=[]
+        )
+    else:
+        ligas_hl_sels = []
+        st.caption("Desactivadas por ahora. Actívalas cuando tengas el plan PRO de Highlightly.")
     with st.expander("🔧 Buscar League ID en Highlightly"):
         st.caption("Úsalo una sola vez por país, copia el ID que te interese y pégalo en HL_LEAGUE_IDS dentro del código.")
         pais_busqueda = st.text_input("País (en inglés, ej: Colombia)", "")
