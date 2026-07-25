@@ -35,6 +35,25 @@ def guardar_historial_local(historial):
     except Exception as e:
         st.sidebar.error(f"Error al guardar persistencia: {e}")
 
+def enviar_telegram(mensaje):
+    """Envía un mensaje de texto al chat configurado usando el bot de Telegram guardado en session_state."""
+    token = st.session_state.get('tg_token', '')
+    chat_id = st.session_state.get('tg_chat_id', '')
+    if not token or not chat_id:
+        st.warning("⚠️ Configura tu Bot Token y Chat ID de Telegram en el sidebar (🔔 Notificaciones por Telegram) antes de enviar.")
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        r = requests.post(url, data={"chat_id": chat_id, "text": mensaje, "parse_mode": "Markdown"})
+        if r.status_code == 200:
+            return True
+        else:
+            st.error(f"❌ Error al enviar a Telegram ({r.status_code}): {r.text[:200]}")
+            return False
+    except Exception as e:
+        st.error(f"💥 Error de conexión con Telegram: {e}")
+        return False
+
 # Estilos visuales limpios para las métricas de probabilidad y UI
 st.markdown("""
     <style>
@@ -50,6 +69,18 @@ st.markdown("""
         border-radius: 8px; 
         border-left: 5px solid #00d2d3; 
         margin-bottom: 15px; 
+    }
+    .movimiento-sube { color: #2ecc71; font-weight: bold; }
+    .movimiento-baja { color: #e74c3c; font-weight: bold; }
+
+    /* Vista compacta para pantallas de móvil */
+    @media (max-width: 640px) {
+        .match-header { font-size: 14px; }
+        .creditos-caja { padding: 8px 10px 8px 12px; margin-bottom: 8px; }
+        .creditos-caja span { font-size: 15px !important; }
+        div[data-testid="stMetricValue"] { font-size: 18px; }
+        button { font-size: 13px !important; padding: 6px 8px !important; }
+        small { font-size: 11px; }
     }
     </style>
 """, unsafe_allow_html=True)
@@ -263,9 +294,45 @@ with st.sidebar:
     monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0)
     
     st.markdown("---")
+
+    # ESTIMADO DE CRÉDITOS (aproximado, antes de consultar)
+    _mercados_featured_est = [m for m in mercados_sels if diccionario_mercados[m] in ("h2h", "totals")]
+    _calls_odds_api = len(ligas_sels) * (len(_mercados_featured_est) + (1 if "Doble Oportunidad" in mercados_sels else 0) + (1 if "Ambos Anotan (BTTS)" in mercados_sels else 0))
+    _txt_estimado = f"📊 Estimado mínimo: ~{_calls_odds_api} llamada(s) a The Odds API"
+    if "Ambos Anotan (BTTS)" in mercados_sels:
+        _txt_estimado += " + 1 extra por cada partido encontrado (variable)"
+    if ligas_sels or ligas_hl_sels:
+        st.caption(_txt_estimado)
+
     consultar = st.button("🔍 Consultar Radar Múltiple", type="primary", use_container_width=True)
     num_eventos_auto = st.slider("Eventos para el Generador Automático:", min_value=2, max_value=6, value=3)
     generar_auto = st.button("🎲 ¡Pre-seleccionar Muestras!", use_container_width=True)
+
+    # AUTO-REFRESCO (requiere el paquete streamlit-autorefresh en requirements.txt)
+    st.markdown("---")
+    habilitar_autorefresh = st.checkbox("🔁 Auto-refresco automático", value=False)
+    intervalo_min = st.number_input("Minutos entre refrescos:", min_value=1, max_value=60, value=5, disabled=not habilitar_autorefresh)
+    autorefresh_disparo = False
+    if habilitar_autorefresh:
+        try:
+            from streamlit_autorefresh import st_autorefresh
+            _contador_ref = st_autorefresh(interval=int(intervalo_min * 60 * 1000), key="autorefresh_radar_key")
+            if 'ultimo_contador_autorefresh' not in st.session_state:
+                st.session_state.ultimo_contador_autorefresh = _contador_ref
+            elif _contador_ref != st.session_state.ultimo_contador_autorefresh:
+                st.session_state.ultimo_contador_autorefresh = _contador_ref
+                autorefresh_disparo = True
+        except ImportError:
+            st.warning("⚠️ Falta el paquete 'streamlit-autorefresh'. Agrega esta línea a tu requirements.txt: streamlit-autorefresh")
+
+    # TELEGRAM (opcional)
+    st.markdown("---")
+    with st.expander("🔔 Notificaciones por Telegram"):
+        st.caption("Crea un bot con @BotFather en Telegram para obtener el token, y usa @userinfobot para tu chat_id.")
+        TELEGRAM_BOT_TOKEN = st.text_input("Bot Token de Telegram:", value=st.session_state.get('tg_token', ''), type="password")
+        TELEGRAM_CHAT_ID = st.text_input("Chat ID de Telegram:", value=st.session_state.get('tg_chat_id', ''))
+        st.session_state['tg_token'] = TELEGRAM_BOT_TOKEN
+        st.session_state['tg_chat_id'] = TELEGRAM_CHAT_ID
 
 # --- NAVEGACIÓN PRINCIPAL ---
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
@@ -470,7 +537,8 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                 "max_cuotas": max_cuotas,
                 "max_bookies": max_bookies,
                 "betano_cuotas": betano_cuotas,
-                "value_bets": value_bets
+                "value_bets": value_bets,
+                "todas_cuotas": cuotas_globales
             }
 
 def procesar_e_inyectar_highlightly(matches, mercados_sels, limite_horas, nombre_liga, diccionario_consolidador):
@@ -586,7 +654,8 @@ def procesar_e_inyectar_highlightly(matches, mercados_sels, limite_horas, nombre
                 "max_cuotas": max_cuotas,
                 "max_bookies": max_bookies,
                 "betano_cuotas": betano_por_mercado.get(mercado_app, {}),
-                "value_bets": value_bets
+                "value_bets": value_bets,
+                "todas_cuotas": cuotas_globales
             }
 
 # ==========================================
@@ -595,7 +664,7 @@ def procesar_e_inyectar_highlightly(matches, mercados_sels, limite_horas, nombre
 with pestana_radar:
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
 
-    if consultar:
+    if consultar or autorefresh_disparo:
         if (len(ligas_sels) > 0 or len(ligas_hl_sels) > 0) and len(mercados_sels) > 0:
             st.cache_data.clear()
             consolidador = {}
@@ -651,9 +720,11 @@ with pestana_radar:
 
                 status_consulta.update(label=f"✅ Consulta completa: {len(consolidador)} partido(s) con cuotas encontrados.", state="complete", expanded=False)
 
+            st.session_state.datos_cargados_previos = st.session_state.datos_cargados
             st.session_state.datos_cargados = consolidador
             st.session_state.claves_auto = set()
             st.session_state.version_ticket += 1
+            st.session_state.ultima_consulta = datetime.now()
         else:
             st.warning("Elige al menos una liga y un mercado antes de consultar en el menú lateral.")
 
@@ -706,6 +777,12 @@ with pestana_radar:
                    "casas de apuestas internacionales aún no han abierto sus líneas. "
                    "Intenta cambiando el rango a **72 Horas** o agregando una liga europea como control.")
     else:
+        # Indicador de frescura de los datos
+        if st.session_state.get('ultima_consulta'):
+            _delta_min = int((datetime.now() - st.session_state.ultima_consulta).total_seconds() // 60)
+            _txt_frescura = "hace instantes" if _delta_min < 1 else (f"hace {_delta_min} minuto" + ("s" if _delta_min != 1 else ""))
+            st.caption(f"🕐 Última actualización: {_txt_frescura}")
+
         # Buscador Dinámico de Equipos (Mejora 3 - UI/UX)
         col_busq, col_valor, col_orden = st.columns([2.2, 1.3, 1.5])
         with col_busq:
@@ -715,6 +792,39 @@ with pestana_radar:
             solo_valor = st.checkbox("🔥 Solo VALOR")
         with col_orden:
             orden_sel = st.selectbox("Ordenar por:", ["🕐 Hora del partido", "📈 Mayor probabilidad"])
+
+        # Recolectar todas las casas de apuestas vistas en la consulta actual
+        casas_disponibles = sorted(set(
+            casa for p in dict_partidos.values() for m in p['mercados'].values()
+            for tuplas in m.get('todas_cuotas', {}).values() for _, casa in tuplas
+        ))
+        with st.expander("🎛️ Filtros de casas de apuestas y rango de cuota"):
+            col_casas, col_rango = st.columns([2, 1.3])
+            with col_casas:
+                casas_sels = st.multiselect("Casas de apuestas a incluir:", casas_disponibles, default=casas_disponibles)
+            with col_rango:
+                rango_cuota_sel = st.slider("Rango de cuota:", min_value=1.0, max_value=20.0, value=(1.0, 20.0), step=0.1)
+        casas_sels_set = set(casas_sels) if casas_sels else set(casas_disponibles)
+
+        def _cuota_filtrada(m_info, opcion):
+            tuplas = m_info.get('todas_cuotas', {}).get(opcion, [])
+            filtradas = [(p, c) for p, c in tuplas if c in casas_sels_set and rango_cuota_sel[0] <= p <= rango_cuota_sel[1]]
+            if not filtradas:
+                return None, None
+            precios = [t[0] for t in filtradas]
+            cuota_max = max(precios)
+            casa_max = filtradas[precios.index(cuota_max)][1]
+            return cuota_max, casa_max
+
+        def _cuota_anterior(part_id, mercado, opcion):
+            prev = st.session_state.get('datos_cargados_previos', {})
+            p_prev = prev.get(part_id)
+            if not p_prev:
+                return None
+            m_prev = p_prev.get('mercados', {}).get(mercado)
+            if not m_prev:
+                return None
+            return m_prev.get('max_cuotas', {}).get(opcion)
 
         def _partido_tiene_valor(p):
             for m_info in p['mercados'].values():
@@ -788,20 +898,46 @@ with pestana_radar:
                                         elif text_m == "Ambos Anotan (BTTS)": orden_estricto = ["Sí", "No"]
                                         else: orden_estricto = sorted(opciones_disponibles, key=lambda x: 0 if "Más" in x else 1)
 
+                                        # Gráfico comparativo de cuotas entre casas de apuestas
+                                        if st.checkbox("📊 Comparar cuotas entre casas", key=f"cmp_{part['id']}_{text_m}"):
+                                            filas_cmp = {}
+                                            for opcion, tuplas in m_info.get('todas_cuotas', {}).items():
+                                                for precio, casa in tuplas:
+                                                    filas_cmp.setdefault(casa, {})[opcion] = precio
+                                            if filas_cmp:
+                                                df_cmp = pd.DataFrame(filas_cmp).T
+                                                st.bar_chart(df_cmp)
+                                            else:
+                                                st.caption("No hay suficientes datos para graficar.")
+
                                         sub_cols = st.columns(len(orden_estricto))
                                         for idx, plantilla_opcion in enumerate(orden_estricto):
                                             with sub_cols[idx]:
                                                 if plantilla_opcion in opciones_disponibles:
-                                                    cuota_m = m_info['max_cuotas'][plantilla_opcion]
-                                                    casa_m = m_info['max_bookies'][plantilla_opcion]
+                                                    cuota_m, casa_m = _cuota_filtrada(m_info, plantilla_opcion)
+                                                    if cuota_m is None:
+                                                        st.caption(f"🚫 {plantilla_opcion}: sin datos con estos filtros")
+                                                        continue
+
                                                     info_val = m_info['value_bets'][plantilla_opcion]
                                                     lbl_val = "🔥 VALOR" if info_val['es_value'] else ""
+
+                                                    cuota_ant = _cuota_anterior(part['id'], text_m, plantilla_opcion)
+                                                    if cuota_ant is not None:
+                                                        if cuota_m > cuota_ant + 0.001:
+                                                            icono_mov = " 🔺"
+                                                        elif cuota_m < cuota_ant - 0.001:
+                                                            icono_mov = " 🔻"
+                                                        else:
+                                                            icono_mov = " ➖"
+                                                    else:
+                                                        icono_mov = ""
 
                                                     clave_base = f"ap_{part['id']}_{text_m}_{plantilla_opcion}"
                                                     marcado_inicial = clave_base in st.session_state.claves_auto
 
                                                     chk = st.checkbox(
-                                                        f"{plantilla_opcion} ({cuota_m}) {lbl_val}",
+                                                        f"{plantilla_opcion} ({cuota_m}){icono_mov} {lbl_val}",
                                                         value=marcado_inicial,
                                                         key=f"render_{clave_base}_vp{v_partido}_vt{v_ticket}"
                                                     )
@@ -863,6 +999,10 @@ with pestana_radar:
                         st.rerun()
 
                     st.markdown(f'<a href="https://api.whatsapp.com/send?text={msg_encoded}" target="_blank" style="text-decoration:none;"><button style="border:none; background-color:#25D366; color:white; padding:10px 14px; border-radius:8px; font-size:16px; font-weight:bold; width:100%; height:43px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">📲 Compartir en WhatsApp</button></a>', unsafe_allow_html=True)
+
+                    if st.button("📤 Enviar a Telegram", use_container_width=True):
+                        if enviar_telegram(texto_whatsapp):
+                            st.toast("¡Ticket enviado a Telegram!", icon="📤")
             else:
                 st.info("Marca las casillas de las cuotas a la izquierda para armar tu ticket aquí en tiempo real.")
 
