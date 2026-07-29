@@ -193,6 +193,85 @@ st.markdown("""
         display: flex; align-items: center; justify-content: center;
     }
 
+    /* ---------- Alertas (info/warning/error/success) ---------- */
+    div[data-testid="stAlert"] {
+        border-radius: 12px !important;
+        border: 1px solid var(--rg-border) !important;
+    }
+
+    /* ---------- Expanders ---------- */
+    div[data-testid="stExpander"] {
+        border: 1px solid var(--rg-border) !important;
+        border-radius: 12px !important;
+        background: var(--rg-card-alt);
+        overflow: hidden;
+    }
+    div[data-testid="stExpander"] summary {
+        font-weight: 600 !important;
+    }
+
+    /* ---------- Inputs, selects, multiselects ---------- */
+    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, textarea {
+        border-radius: 10px !important;
+        background: var(--rg-card-alt) !important;
+        border-color: var(--rg-border) !important;
+    }
+    span[data-baseweb="tag"] {
+        border-radius: 6px !important;
+        background: rgba(0,210,211,0.16) !important;
+    }
+
+    /* ---------- Separadores ---------- */
+    hr { border-color: var(--rg-border) !important; opacity: 0.7; }
+
+    /* ---------- Tarjeta de estado vacío ---------- */
+    .empty-card {
+        background: linear-gradient(160deg, #1c1712 0%, #14110d 100%);
+        border: 1px solid rgba(241,196,15,0.25);
+        border-radius: 16px;
+        padding: 22px 26px;
+    }
+
+    /* ---------- Botón de Telegram (key="telegram_btn") ---------- */
+    div[class*="st-key-telegram_btn"] button {
+        background: linear-gradient(90deg, #229ED9, #1B8FC9) !important;
+        color: white !important;
+        border: none !important;
+    }
+
+    /* ---------- Dataframe ---------- */
+    div[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; border: 1px solid var(--rg-border); }
+
+    /* ---------- Chips de cuota seleccionable (st.container key="chip_*") ---------- */
+    div[class*="st-key-chip_"] {
+        border: 1px solid var(--rg-border);
+        background: var(--rg-card-alt);
+        border-radius: 12px;
+        padding: 8px 10px 10px 10px;
+        margin-bottom: 8px;
+        transition: border-color .15s ease, background .15s ease;
+    }
+    div[class*="st-key-chip_"]:hover { border-color: rgba(0,210,211,0.5); }
+    div[class*="st-key-chip_"]:has(input:checked) {
+        background: rgba(0,210,211,0.10);
+        border-color: var(--rg-accent);
+        box-shadow: 0 0 0 1px rgba(0,210,211,0.18);
+    }
+    div[class*="st-key-chip_"] div[data-testid="stCheckbox"] label { font-weight: 600 !important; }
+
+    /* ---------- Tarjetas KPI (pestaña Auditoría) ---------- */
+    .kpi-card {
+        border-radius: 14px; padding: 16px 18px; border: 1px solid var(--rg-border);
+        background: linear-gradient(160deg, var(--rg-card) 0%, #0f131b 100%);
+        height: 100%;
+    }
+    .kpi-label {
+        font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+        color: var(--rg-text-soft); margin-bottom: 6px; display: flex; align-items: center; gap: 6px;
+    }
+    .kpi-value { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700; line-height: 1.1; }
+    .kpi-sub { font-size: 12.5px; margin-top: 4px; font-weight: 600; }
+
     /* ---------- Vista compacta para pantallas de móvil ---------- */
     @media (max-width: 640px) {
         .match-header { font-size: 14px; }
@@ -203,6 +282,8 @@ st.markdown("""
         small { font-size: 11px; }
         .welcome-card { padding: 18px 16px; }
         .liga-chip, .kickoff-chip { font-size: 10px !important; }
+        .kpi-value { font-size: 20px; }
+        .kpi-card { padding: 10px 12px; }
     }
     </style>
 """, unsafe_allow_html=True)
@@ -1181,11 +1262,21 @@ with pestana_radar:
                 </div>
             """, unsafe_allow_html=True)
     elif st.session_state.ha_consultado and not dict_partidos:
-        st.markdown("---")
-        st.warning("⚠️ **No se encontraron partidos activos o cuotas disponibles.**\n\n"
-                   "Las ligas seleccionadas no tienen partidos programados en las próximas horas o las "
-                   "casas de apuestas internacionales aún no han abierto sus líneas. "
-                   "Intenta cambiando el rango a **72 Horas** o agregando una liga europea como control.")
+        st.markdown("<br>", unsafe_allow_html=True)
+        col_e1, col_e2, col_e3 = st.columns([1, 2.4, 1])
+        with col_e2:
+            st.markdown("""
+                <div class="empty-card">
+                    <h3 style="margin-top:0; color:#f1c40f;">⚠️ No se encontraron partidos activos o cuotas disponibles</h3>
+                    <p style="color:#cfd8e3; font-size:14.5px;">
+                        Las ligas seleccionadas no tienen partidos programados en las próximas horas, o las casas de apuestas
+                        internacionales aún no han abierto sus líneas.
+                    </p>
+                    <p style="color:#8a94a6; font-size:13.5px;">
+                        💡 Intenta cambiando el rango a <b>72 Horas</b> o agregando una liga europea como control.
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
     else:
         if st.session_state.get('ultima_consulta'):
             _delta_min = int((datetime.now() - st.session_state.ultima_consulta).total_seconds() // 60)
@@ -1341,18 +1432,19 @@ with pestana_radar:
                                                     clave_base = f"ap_{part['id']}_{text_m}_{plantilla_opcion}"
                                                     marcado_inicial = clave_base in st.session_state.claves_auto
 
-                                                    chk = st.checkbox(
-                                                        f"{plantilla_opcion} ({cuota_m}){icono_mov} {lbl_val}",
-                                                        value=marcado_inicial,
-                                                        key=f"render_{clave_base}_vp{v_partido}_vt{v_ticket}"
-                                                    )
+                                                    with st.container(key=f"chip_{clave_base}_vp{v_partido}_vt{v_ticket}"):
+                                                        chk = st.checkbox(
+                                                            f"{plantilla_opcion} ({cuota_m}){icono_mov} {lbl_val}",
+                                                            value=marcado_inicial,
+                                                            key=f"render_{clave_base}_vp{v_partido}_vt{v_ticket}"
+                                                        )
 
-                                                    facing_betano = m_info['betano_cuotas'].get(plantilla_opcion, None)
-                                                    txt_betano = f" | Betano: {facing_betano}" if facing_betano else ""
-                                                    p_real = info_val['prob_real']
-                                                    clase_color = "prob-alta" if p_real >= 60 else ("prob-media" if p_real >= 40 else "prob-baja")
+                                                        facing_betano = m_info['betano_cuotas'].get(plantilla_opcion, None)
+                                                        txt_betano = f" | Betano: {facing_betano}" if facing_betano else ""
+                                                        p_real = info_val['prob_real']
+                                                        clase_color = "prob-alta" if p_real >= 60 else ("prob-media" if p_real >= 40 else "prob-baja")
 
-                                                    st.markdown(f"<small>🏠 {casa_m}{txt_betano}<br>🎯 Prob: <span class='{clase_color}'>{round(p_real,1)}%</span></small>", unsafe_allow_html=True)
+                                                        st.markdown(f"<small>🏠 {casa_m}{txt_betano}<br>🎯 Prob: <span class='{clase_color}'>{round(p_real,1)}%</span></small>", unsafe_allow_html=True)
 
                                                     if chk:
                                                         apuestas_seleccionadas.append({
@@ -1412,7 +1504,7 @@ with pestana_radar:
 
                     st.markdown(f'<a href="https://api.whatsapp.com/send?text={msg_encoded}" target="_blank" style="text-decoration:none;"><button style="border:none; background-color:#25D366; color:white; padding:10px 14px; border-radius:8px; font-size:16px; font-weight:bold; width:100%; height:43px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">📲 Compartir en WhatsApp</button></a>', unsafe_allow_html=True)
 
-                    if st.button("📤 Enviar a Telegram", use_container_width=True):
+                    if st.button("📤 Enviar a Telegram", use_container_width=True, key="telegram_btn"):
                         if enviar_telegram(texto_whatsapp):
                             st.toast("¡Ticket enviado a Telegram!", icon="📤")
             else:
@@ -1450,12 +1542,39 @@ with pestana_historial:
         tickets_terminados = df_actualizado[df_actualizado['Estado'] != "Pendiente"]
         tasa_acierto = (len(df_actualizado[ganado_mask]) / len(tickets_terminados) * 100) if len(tickets_terminados) > 0 else 0
 
-        st.markdown("---")
+        st.markdown("<br>", unsafe_allow_html=True)
         st.subheader("📈 Tus Métricas de Rendimiento Real")
+
+        color_balance = "#2ecc71" if balance_neto >= 0 else "#e74c3c"
+        icono_balance = "📈" if balance_neto >= 0 else "📉"
+        color_acierto = "#2ecc71" if tasa_acierto >= 55 else ("#f1c40f" if tasa_acierto >= 40 else "#e74c3c")
+
         kpi1, kpi2, kpi3 = st.columns(3)
-        kpi1.metric("Total Invertido", f"${round(total_invertido, 2)}")
-        kpi2.metric("Balance Neto", f"${round(balance_neto, 2)}", delta=f"{round(roi,2)}% ROI")
-        kpi3.metric("Tasa de Acierto", f"{round(tasa_acierto, 1)}%")
+        with kpi1:
+            st.markdown(f"""
+                <div class="kpi-card">
+                    <div class="kpi-label">💵 Total Invertido</div>
+                    <div class="kpi-value">${round(total_invertido, 2)}</div>
+                    <div class="kpi-sub" style="color:#8a94a6;">{len(df_actualizado)} ticket(s) registrados</div>
+                </div>
+            """, unsafe_allow_html=True)
+        with kpi2:
+            st.markdown(f"""
+                <div class="kpi-card">
+                    <div class="kpi-label">{icono_balance} Balance Neto</div>
+                    <div class="kpi-value" style="color:{color_balance};">${round(balance_neto, 2)}</div>
+                    <div class="kpi-sub" style="color:{color_balance};">{round(roi, 2)}% ROI</div>
+                </div>
+            """, unsafe_allow_html=True)
+        with kpi3:
+            st.markdown(f"""
+                <div class="kpi-card">
+                    <div class="kpi-label">🎯 Tasa de Acierto</div>
+                    <div class="kpi-value" style="color:{color_acierto};">{round(tasa_acierto, 1)}%</div>
+                    <div class="kpi-sub" style="color:#8a94a6;">{len(df_actualizado[ganado_mask])} ganados / {len(tickets_terminados)} resueltos</div>
+                </div>
+            """, unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
         df_actualizado['Ganancia_Efectiva'] = df_actualizado.apply(lambda r: (r['Inversión']*r['Cuota'] - r['Inversión']) if r['Estado'] == "Ganado" else (-r['Inversión'] if r['Estado'] == "Perdido" else 0), axis=1)
         df_actualizado['Rendimiento Acumulado ($)'] = df_actualizado['Ganancia_Efectiva'].cumsum()
