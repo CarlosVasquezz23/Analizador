@@ -54,33 +54,155 @@ def enviar_telegram(mensaje):
         st.error(f"💥 Error de conexión con Telegram: {e}")
         return False
 
-# Estilos visuales limpios para las métricas de probabilidad y UI
+# =========================================================
+# TEMA VISUAL — Radar Enterprise Parlay Global
+# =========================================================
 st.markdown("""
     <style>
-    .prob-alta { color: #2ecc71; font-weight: bold; }
-    .prob-media { color: #f1c40f; font-weight: bold; }
-    .prob-baja { color: #e74c3c; font-weight: bold; }
-    .match-header { font-size: 18px; font-weight: bold; margin-bottom: 2px; }
-    
-    /* Versión corregida: Se añade espaciado interno asimétrico para centrar y despegar el texto del borde izquierdo */
-    .creditos-caja { 
-        background-color: #1e272e; 
-        padding: 12px 15px 12px 18px; 
-        border-radius: 8px; 
-        border-left: 5px solid #00d2d3; 
-        margin-bottom: 15px; 
-    }
-    .movimiento-sube { color: #2ecc71; font-weight: bold; }
-    .movimiento-baja { color: #e74c3c; font-weight: bold; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
 
-    /* Vista compacta para pantallas de móvil */
+    :root {
+        --rg-bg: #0b0e14;
+        --rg-card: #12161f;
+        --rg-card-alt: #171c27;
+        --rg-border: #232a38;
+        --rg-border-soft: #1b212c;
+        --rg-accent: #00d2d3;
+        --rg-accent-2: #7c5cff;
+        --rg-success: #2ecc71;
+        --rg-warn: #f1c40f;
+        --rg-danger: #e74c3c;
+        --rg-gold: #feca57;
+        --rg-text-soft: #8a94a6;
+    }
+
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+
+    /* ---------- Tipografía general ---------- */
+    h1, h2, h3 { font-family: 'Inter', sans-serif; font-weight: 800 !important; letter-spacing: -0.02em; }
+    h1 { background: linear-gradient(90deg, #ffffff 0%, #9fb4c7 100%); -webkit-background-clip: text; background-clip: text; }
+
+    /* ---------- Probabilidades ---------- */
+    .prob-alta { color: var(--rg-success); font-weight: 700; }
+    .prob-media { color: var(--rg-warn); font-weight: 700; }
+    .prob-baja { color: var(--rg-danger); font-weight: 700; }
+    .movimiento-sube { color: var(--rg-success); font-weight: bold; }
+    .movimiento-baja { color: var(--rg-danger); font-weight: bold; }
+
+    /* ---------- Cabecera de partido ---------- */
+    .match-header { font-size: 18px; font-weight: 700; margin-bottom: 2px; letter-spacing: -0.01em; }
+    .liga-chip {
+        display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.04em; color: var(--rg-accent); background: rgba(0,210,211,0.10);
+        border: 1px solid rgba(0,210,211,0.35); border-radius: 999px; padding: 2px 10px; margin-bottom: 6px;
+    }
+    .kickoff-chip {
+        display: inline-block; font-size: 12px; font-weight: 600; color: #cfd8e3;
+        background: var(--rg-card-alt); border: 1px solid var(--rg-border); border-radius: 999px;
+        padding: 3px 10px; margin-top: 2px;
+    }
+
+    /* ---------- Badge de VALOR ---------- */
+    .value-pill {
+        display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.03em;
+        color: #0b0e14; background: linear-gradient(90deg, var(--rg-gold), #ff9f43);
+        border-radius: 999px; padding: 1px 8px; margin-left: 4px; vertical-align: middle;
+    }
+
+    /* ---------- Caja de créditos (sidebar) ---------- */
+    .creditos-caja {
+        background: linear-gradient(135deg, #151b26 0%, #10141c 100%);
+        padding: 12px 15px 12px 18px;
+        border-radius: 10px;
+        border-left: 4px solid var(--rg-accent);
+        border-top: 1px solid var(--rg-border-soft);
+        border-right: 1px solid var(--rg-border-soft);
+        border-bottom: 1px solid var(--rg-border-soft);
+        margin-bottom: 14px;
+    }
+
+    /* ---------- Tarjetas de partido (st.container con key="match_*") ---------- */
+    div[class*="st-key-match_"] {
+        background: linear-gradient(180deg, var(--rg-card) 0%, #0f131b 100%) !important;
+        border: 1px solid var(--rg-border) !important;
+        border-radius: 16px !important;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+    }
+
+    /* ---------- Ticket / Boleto de parlay (st.container key="ticket_card") ---------- */
+    div[class*="st-key-ticket_card"] {
+        background: linear-gradient(180deg, #12161f 0%, #0d1017 100%) !important;
+        border: 2px dashed rgba(0,210,211,0.45) !important;
+        border-radius: 18px !important;
+        box-shadow: 0 0 0 1px rgba(0,210,211,0.06), 0 6px 20px rgba(0,0,0,0.35);
+    }
+    .ticket-titulo {
+        font-family: 'Inter', sans-serif; font-weight: 800; font-size: 15px; letter-spacing: 0.04em;
+        text-transform: uppercase; color: var(--rg-accent); text-align: center; margin-bottom: 6px;
+    }
+    .ticket-item {
+        border-bottom: 1px dashed var(--rg-border); padding: 8px 0 10px 0;
+    }
+    .ticket-item:last-of-type { border-bottom: none; }
+    .ticket-cuota-tag {
+        font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--rg-accent);
+        background: rgba(0,210,211,0.08); border-radius: 6px; padding: 1px 6px; font-size: 12.5px;
+    }
+
+    /* ---------- Botones ---------- */
+    div.stButton > button {
+        border-radius: 10px !important;
+        font-weight: 600 !important;
+        transition: transform .08s ease, box-shadow .15s ease;
+        border: 1px solid var(--rg-border) !important;
+    }
+    div.stButton > button:hover { transform: translateY(-1px); }
+    div.stButton > button[kind="primary"] {
+        background: linear-gradient(90deg, #00b3b4, #00d2d3) !important;
+        border: none !important;
+        box-shadow: 0 4px 14px rgba(0,210,211,0.25);
+    }
+
+    /* ---------- Métricas ---------- */
+    div[data-testid="stMetric"] {
+        background: var(--rg-card-alt);
+        border: 1px solid var(--rg-border);
+        border-radius: 12px;
+        padding: 10px 14px;
+    }
+
+    /* ---------- Tabs ---------- */
+    button[data-baseweb="tab"] { font-weight: 600 !important; }
+    div[data-baseweb="tab-highlight"] { background-color: var(--rg-accent) !important; }
+
+    /* ---------- Bienvenida ---------- */
+    .welcome-card {
+        background: linear-gradient(160deg, #141a24 0%, #0f131a 100%);
+        border: 1px solid var(--rg-border);
+        border-radius: 18px;
+        padding: 28px 30px;
+        text-align: left;
+    }
+    .welcome-card h3 { margin-top: 0; }
+    .welcome-step {
+        display: flex; align-items: center; gap: 12px; margin: 10px 0; color: #cfd8e3; font-size: 14.5px;
+    }
+    .welcome-step .num {
+        flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; background: rgba(0,210,211,0.12);
+        border: 1px solid rgba(0,210,211,0.4); color: var(--rg-accent); font-weight: 700; font-size: 12.5px;
+        display: flex; align-items: center; justify-content: center;
+    }
+
+    /* ---------- Vista compacta para pantallas de móvil ---------- */
     @media (max-width: 640px) {
         .match-header { font-size: 14px; }
         .creditos-caja { padding: 8px 10px 8px 12px; margin-bottom: 8px; }
         .creditos-caja span { font-size: 15px !important; }
         div[data-testid="stMetricValue"] { font-size: 18px; }
-        button { font-size: 13px !important; padding: 6px 8px !important; }
+        div.stButton > button { font-size: 13px !important; padding: 6px 8px !important; }
         small { font-size: 11px; }
+        .welcome-card { padding: 18px 16px; }
+        .liga-chip, .kickoff-chip { font-size: 10px !important; }
     }
     </style>
 """, unsafe_allow_html=True)
@@ -89,9 +211,6 @@ st.markdown("""
 API_KEY = "e6414a3efabaf34994030cd0a8ea88b1"
 
 # --- CONFIGURACIÓN HIGHLIGHTLY (segunda API, para ligas que The Odds API no cubre) ---
-# 1) Crea una cuenta en https://highlightly.net y saca tu API key (requiere plan PRO o superior
-#    para poder usar el endpoint de cuotas /odds; el plan gratuito NO lo incluye).
-# 2) Pega tu key aquí abajo:
 HL_API_KEY = "f18c6837-5aaf-4880-8148-9b7a133b5557"
 HL_BASE_URL = "https://soccer.highlightly.net"
 
@@ -100,7 +219,6 @@ def hl_headers():
 
 @st.cache_data(ttl=86400)
 def hl_buscar_ligas(country_name):
-    """Devuelve la lista de ligas de Highlightly para un país. Úsalo para encontrar el ID real de la liga."""
     if not country_name:
         return []
     url = f"{HL_BASE_URL}/leagues"
@@ -171,8 +289,6 @@ def hl_consultar_odds(match_id):
         st.error(f"💥 Error de conexión con Highlightly (odds): {e}")
         return []
 
-# 3) Usa el buscador que aparece en la barra lateral ("🔧 Buscar League ID en Highlightly")
-#    para encontrar el ID numérico real de cada liga, y reemplaza los None de abajo.
 HL_LEAGUE_IDS = {
     "🇨🇴 Primera A (Colombia)": 204173,
     "🇪🇨 LigaPro (Ecuador)": 206726,
@@ -182,8 +298,6 @@ HL_LEAGUE_IDS = {
 }
 
 # --- CONFIGURACIÓN API-FOOTBALL (tercera fuente, plan gratis con endpoint de cuotas incluido) ---
-# Registro directo en api-football.com (NO vía RapidAPI), por eso usamos el header x-apisports-key
-# y la URL directa v3.football.api-sports.io. Plan gratis: 100 solicitudes/día.
 AF_API_KEY = "5cca912e78e3ec42256f42db0b59fda2"
 AF_BASE_URL = "https://v3.football.api-sports.io"
 
@@ -191,7 +305,6 @@ def af_headers():
     return {"x-apisports-key": AF_API_KEY}
 
 def _actualizar_creditos_af(response_headers):
-    """API-Football manda el límite diario restante en estos headers (cuando el plan los expone)."""
     restante = response_headers.get('x-ratelimit-requests-remaining')
     limite = response_headers.get('x-ratelimit-requests-limit')
     if restante is not None:
@@ -199,7 +312,6 @@ def _actualizar_creditos_af(response_headers):
 
 @st.cache_data(ttl=86400)
 def af_buscar_ligas(country_name):
-    """Devuelve la lista de ligas de API-Football para un país. Úsalo para encontrar el ID real de la liga."""
     if not country_name:
         return []
     url = f"{AF_BASE_URL}/leagues"
@@ -271,7 +383,6 @@ def af_consultar_odds(fixture_id):
 
 @st.cache_data(ttl=60)
 def af_consultar_status():
-    """Devuelve el estado crudo de la cuenta (plan, límites, requests usados) directo desde API-Football."""
     url = f"{AF_BASE_URL}/status"
     try:
         r = requests.get(url, headers=af_headers())
@@ -282,8 +393,6 @@ def af_consultar_status():
 
 @st.cache_data(ttl=60)
 def af_prueba_liga_grande():
-    """Prueba con el Brasileirao Serie A (liga 71), que en julio está en plena temporada (a diferencia de las
-    ligas europeas, que en julio están de pretemporada y no sirven como control)."""
     url = f"{AF_BASE_URL}/fixtures"
     hoy = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     hasta = (datetime.now(timezone.utc) + timedelta(days=10)).strftime("%Y-%m-%d")
@@ -295,7 +404,6 @@ def af_prueba_liga_grande():
         return None, {"error": str(e)}
 
 
-# para encontrar el ID numérico real de cada liga, y reemplaza los None de abajo.
 AF_LEAGUE_IDS = {
     "🇨🇴 Primera A (Colombia)": 239,
     "🇪🇨 LigaPro (Ecuador)": 242,
@@ -330,10 +438,6 @@ ligas_locales = {
     "🇳🇱 Eredivisie (Países Bajos)": "soccer_netherlands_eredivisie",
     "🇵🇹 Primeira Liga (Portugal)": "soccer_portugal_primeira_liga"
 }
-# Nota: Uruguay, Perú, Colombia y LigaPro Ecuador se quitaron de aquí porque The Odds API
-# devuelve 404 para esos sport_key (no están en su catálogo). Ahora se consultan vía
-# API-Football (fuente activa) y Highlightly (fuente de respaldo, deshabilitada), más abajo en
-# "Ligas extra a analizar" en el sidebar.
 
 ligas_locales_ordenadas = dict(sorted(ligas_locales.items()))
 todas_las_ligas = {**ligas_top, **ligas_locales_ordenadas}
@@ -367,7 +471,6 @@ if 'creditos_restantes_af' not in st.session_state:
 with st.sidebar:
     st.header("⚙️ Filtros de Control Global")
     
-    # Renderizador de Créditos en Vivo
     st.markdown(f"""
         <div class="creditos-caja">
             <small style="color:#a4b0be; text-transform:uppercase; font-weight:bold;">Créditos Restantes API</small><br>
@@ -467,7 +570,6 @@ with st.sidebar:
     
     st.markdown("---")
 
-    # ESTIMADO DE CRÉDITOS (aproximado, antes de consultar)
     _mercados_featured_est = [m for m in mercados_sels if diccionario_mercados[m] in ("h2h", "totals")]
     _calls_odds_api = len(ligas_sels) * (len(_mercados_featured_est) + (1 if "Doble Oportunidad" in mercados_sels else 0) + (1 if "Ambos Anotan (BTTS)" in mercados_sels else 0))
     _txt_estimado = f"📊 Estimado mínimo: ~{_calls_odds_api} llamada(s) a The Odds API"
@@ -482,7 +584,6 @@ with st.sidebar:
     num_eventos_auto = st.slider("Eventos para el Generador Automático:", min_value=2, max_value=6, value=3)
     generar_auto = st.button("🎲 ¡Pre-seleccionar Muestras!", use_container_width=True)
 
-    # AUTO-REFRESCO (requiere el paquete streamlit-autorefresh en requirements.txt)
     st.markdown("---")
     habilitar_autorefresh = st.checkbox("🔁 Auto-refresco automático", value=False)
     intervalo_min = st.number_input("Minutos entre refrescos:", min_value=1, max_value=60, value=5, disabled=not habilitar_autorefresh)
@@ -499,7 +600,6 @@ with st.sidebar:
         except ImportError:
             st.warning("⚠️ Falta el paquete 'streamlit-autorefresh'. Agrega esta línea a tu requirements.txt: streamlit-autorefresh")
 
-    # TELEGRAM (opcional)
     st.markdown("---")
     with st.expander("🔔 Notificaciones por Telegram"):
         st.caption("Crea un bot con @BotFather en Telegram para obtener el token, y usa @userinfobot para tu chat_id.")
@@ -774,7 +874,6 @@ def procesar_e_inyectar_highlightly(matches, mercados_sels, limite_horas, nombre
                         if es_betano:
                             betano_por_mercado.setdefault("Goles Más/Menos 2.5", {})[o_name] = float(v['odd'])
 
-        # Doble Oportunidad: Highlightly no la ofrece nativa, se calcula a partir de Full Time Result
         if "Doble Oportunidad" in mercados_sels and "1X2 (Ganador)" in cuotas_por_mercado:
             ftr = cuotas_por_mercado["1X2 (Ganador)"]
             if "Local" in ftr and "Empate" in ftr and "Visitante" in ftr:
@@ -955,6 +1054,7 @@ def procesar_e_inyectar_api_football(fixtures, mercados_sels, limite_horas, nomb
 # ==========================================
 with pestana_radar:
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
+    st.caption("Escaneo de cuotas en tiempo real · Value bets · Ticket parlay automático")
 
     if consultar or autorefresh_disparo:
         if (len(ligas_sels) > 0 or len(ligas_hl_sels) > 0 or len(ligas_af_sels) > 0) and len(mercados_sels) > 0:
@@ -973,18 +1073,15 @@ with pestana_radar:
                     status_consulta.update(label=f"🔄 Consultando ({idx_liga}/{total_ligas_a_consultar}): {liga}")
                     sport_key = todas_las_ligas[liga]
 
-                    # 1) MERCADOS GANADOR / TOTALES
                     for m_sel in mercados_featured:
                         market_api = diccionario_mercados[m_sel]
                         raw_data = consultar_api_odds(sport_key, market_key=market_api)
                         procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
 
-                    # 2) DOBLE OPORTUNIDAD
                     if pidio_doble_oportunidad:
                         base_h2h = consultar_api_odds(sport_key, market_key="h2h")
                         procesar_e_inyectar_mercado(base_h2h, "Doble Oportunidad", limite_h, liga, consolidador)
 
-                    # 3) BTTS
                     if pidio_btts:
                         base_para_filtrar = consultar_api_odds(sport_key, market_key="h2h")
                         eventos_filtrados = filtrar_partidos_por_fecha(base_para_filtrar, limite_h)
@@ -994,12 +1091,11 @@ with pestana_radar:
                             if datos_evento:
                                 procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
 
-                # 4) LIGAS EXTRA VÍA API-FOOTBALL (Colombia, Ecuador, Uruguay, Perú, México, Paraguay) — fuente activa
                 dias_a_cubrir = (limite_h // 24) + 2
                 fecha_desde_af = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 fecha_hasta_af = (datetime.now(timezone.utc) + timedelta(days=dias_a_cubrir)).strftime("%Y-%m-%d")
                 temporada_af = datetime.now(timezone.utc).year
-                resumen_ligas_extra = []  # se muestra después, fuera del status (que se colapsa al terminar)
+                resumen_ligas_extra = []
 
                 for idx_af, liga_af in enumerate(ligas_af_sels, start=len(ligas_sels) + 1):
                     status_consulta.update(label=f"🔄 Consultando ({idx_af}/{total_ligas_a_consultar}): {liga_af}")
@@ -1012,7 +1108,6 @@ with pestana_radar:
                     resumen_ligas_extra.append(f"🔎 API-Football — {liga_af}: {len(fixtures_liga_af)} partido(s) encontrado(s) entre {fecha_desde_af} y {fecha_hasta_af}.")
                     procesar_e_inyectar_api_football(fixtures_liga_af, mercados_sels, limite_h, liga_af, consolidador)
 
-                # 5) LIGAS EXTRA VÍA HIGHLIGHTLY (fuente de respaldo, deshabilitada por defecto)
                 fechas_a_consultar = [(datetime.now(timezone.utc) + timedelta(days=d)).strftime("%Y-%m-%d") for d in range(dias_a_cubrir)]
 
                 for idx_hl, liga_hl in enumerate(ligas_hl_sels, start=len(ligas_sels) + len(ligas_af_sels) + 1):
@@ -1045,7 +1140,6 @@ with pestana_radar:
 
     dict_partidos = st.session_state.datos_cargados
 
-    # LÓGICA DE PRE-SELECCIÓN AUTOMÁTICA
     if generar_auto:
         if not dict_partidos:
             st.error("❌ Primero debes hacer clic en '🔍 Consultar Radar Múltiple' para cargar datos.")
@@ -1072,19 +1166,20 @@ with pestana_radar:
 
     apuestas_seleccionadas = []
 
-    # --- CONTROL DE FLUJO DE LA INTERFAZ CENTRAL ---
     if not st.session_state.ha_consultado:
-        st.markdown("---")
-        col_wel1, col_wel2, col_wel3 = st.columns([1, 2, 1])
+        st.markdown("<br>", unsafe_allow_html=True)
+        col_wel1, col_wel2, col_wel3 = st.columns([1, 2.4, 1])
         with col_wel2:
-            st.info(
-                "💡 **Sistema en espera de instrucciones**\n\n"
-                "Para comenzar a escanear cuotas de valor en tiempo real:\n"
-                "1. Dirígete al menú de la izquierda (**Filtros de Control Global**).\n"
-                "2. Elige uno o varios torneos.\n"
-                "3. Selecciona tus mercados de interés.\n"
-                "4. Presiona el botón **🔍 Consultar Radar Múltiple**."
-            )
+            st.markdown("""
+                <div class="welcome-card">
+                    <h3>💡 Sistema en espera de instrucciones</h3>
+                    <p style="color:#8a94a6; margin-top:-6px;">Sigue estos pasos para empezar a escanear cuotas de valor en tiempo real:</p>
+                    <div class="welcome-step"><span class="num">1</span> Abre el menú de la izquierda — <b>Filtros de Control Global</b>.</div>
+                    <div class="welcome-step"><span class="num">2</span> Elige uno o varios torneos a analizar.</div>
+                    <div class="welcome-step"><span class="num">3</span> Selecciona tus mercados de interés.</div>
+                    <div class="welcome-step"><span class="num">4</span> Presiona <b style="color:#00d2d3;">🔍 Consultar Radar Múltiple</b>.</div>
+                </div>
+            """, unsafe_allow_html=True)
     elif st.session_state.ha_consultado and not dict_partidos:
         st.markdown("---")
         st.warning("⚠️ **No se encontraron partidos activos o cuotas disponibles.**\n\n"
@@ -1092,13 +1187,11 @@ with pestana_radar:
                    "casas de apuestas internacionales aún no han abierto sus líneas. "
                    "Intenta cambiando el rango a **72 Horas** o agregando una liga europea como control.")
     else:
-        # Indicador de frescura de los datos
         if st.session_state.get('ultima_consulta'):
             _delta_min = int((datetime.now() - st.session_state.ultima_consulta).total_seconds() // 60)
             _txt_frescura = "hace instantes" if _delta_min < 1 else (f"hace {_delta_min} minuto" + ("s" if _delta_min != 1 else ""))
             st.caption(f"🕐 Última actualización: {_txt_frescura}")
 
-        # Buscador Dinámico de Equipos (Mejora 3 - UI/UX)
         col_busq, col_valor, col_orden = st.columns([2.2, 1.3, 1.5])
         with col_busq:
             busqueda_equipo = st.text_input("🔍 Buscador rápido por nombre de equipo:", "").strip().lower()
@@ -1108,7 +1201,6 @@ with pestana_radar:
         with col_orden:
             orden_sel = st.selectbox("Ordenar por:", ["🕐 Hora del partido", "📈 Mayor probabilidad"])
 
-        # Recolectar todas las casas de apuestas vistas en la consulta actual
         casas_disponibles = sorted(set(
             casa for p in dict_partidos.values() for m in p['mercados'].values()
             for tuplas in m.get('todas_cuotas', {}).values() for _, casa in tuplas
@@ -1152,14 +1244,12 @@ with pestana_radar:
             probs = [op['prob_real'] for m in p['mercados'].values() for op in m['value_bets'].values()]
             return max(probs) if probs else 0
 
-        # Filtrado por búsqueda en el diccionario temporal
         dict_partidos_filtrados = {}
         for p_id, p in dict_partidos.items():
             if busqueda_equipo in p['local'].lower() or busqueda_equipo in p['visitante'].lower():
                 if not solo_valor or _partido_tiene_valor(p):
                     dict_partidos_filtrados[p_id] = p
 
-        # --- DISEÑO PARALELO SI HAY RESULTADOS ---
         col_izquierda, col_derecha = st.columns([6.5, 3.5])
 
         with col_izquierda:
@@ -1189,7 +1279,7 @@ with pestana_radar:
                                 st.session_state.versiones_partidos[part['id']] = 0
                             v_partido = st.session_state.versiones_partidos[part['id']]
 
-                            with st.container(border=True):
+                            with st.container(border=True, key=f"match_{part['id']}"):
                                 col_borrar, col_info = st.columns([0.6, 5.4])
                                 with col_borrar:
                                     if st.button("🗑️", key=f"clear_{part['id']}"):
@@ -1197,8 +1287,9 @@ with pestana_radar:
                                         st.rerun()
 
                                 with col_info:
-                                    st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
-                                    st.caption(f"📅 Hora Local: {part['fecha_str']}")
+                                    st.markdown(f"<span class='liga-chip'>🏆 {part['liga_origen']}</span>", unsafe_allow_html=True)
+                                    st.markdown(f"<div class='match-header'>⚽ {part['local']} <span style='color:#8a94a6; font-weight:500;'>vs</span> {part['visitante']}</div>", unsafe_allow_html=True)
+                                    st.markdown(f"<span class='kickoff-chip'>📅 {part['fecha_str']}</span>", unsafe_allow_html=True)
 
                                 mercados_del_partido = list(part['mercados'].keys())
                                 sub_tabs_mercados = st.tabs(mercados_del_partido)
@@ -1213,7 +1304,6 @@ with pestana_radar:
                                         elif text_m == "Ambos Anotan (BTTS)": orden_estricto = ["Sí", "No"]
                                         else: orden_estricto = sorted(opciones_disponibles, key=lambda x: 0 if "Más" in x else 1)
 
-                                        # Gráfico comparativo de cuotas entre casas de apuestas
                                         if st.checkbox("📊 Comparar cuotas entre casas", key=f"cmp_{part['id']}_{text_m}"):
                                             filas_cmp = {}
                                             for opcion, tuplas in m_info.get('todas_cuotas', {}).items():
@@ -1235,7 +1325,7 @@ with pestana_radar:
                                                         continue
 
                                                     info_val = m_info['value_bets'][plantilla_opcion]
-                                                    lbl_val = "🔥 VALOR" if info_val['es_value'] else ""
+                                                    lbl_val = "**🔥 VALOR**" if info_val['es_value'] else ""
 
                                                     cuota_ant = _cuota_anterior(part['id'], text_m, plantilla_opcion)
                                                     if cuota_ant is not None:
@@ -1279,13 +1369,20 @@ with pestana_radar:
                 cuota_acumulada = 1.0
                 texto_whatsapp = "🚀 *TICKET PARLAY SUGERIDO DESDE RADAR GLOBAL* 🚀\n\n"
 
-                with st.container(border=True):
+                with st.container(border=True, key="ticket_card"):
+                    st.markdown("<div class='ticket-titulo'>🎟️ Boleto Parlay</div>", unsafe_allow_html=True)
                     for ap in apuestas_seleccionadas:
                         cuota_acumulada *= float(ap['cuota'])
-                        st.markdown(f"✔️ **{ap['evento']}**<br><small>{ap['liga']}</small><br>➔ `{ap['seleccion']}` | *{ap['mercado']}* (x{ap['cuota']})", unsafe_allow_html=True)
+                        st.markdown(
+                            f"<div class='ticket-item'>✔️ <b>{ap['evento']}</b><br>"
+                            f"<small style='color:#8a94a6;'>{ap['liga']}</small><br>"
+                            f"➔ <code>{ap['seleccion']}</code> | <i>{ap['mercado']}</i> "
+                            f"<span class='ticket-cuota-tag'>x{ap['cuota']}</span></div>",
+                            unsafe_allow_html=True
+                        )
                         texto_whatsapp += f"⚽ *{ap['evento']}*\n🏆 {ap['liga']}\n🎯 {ap['mercado']}: *{ap['seleccion']}* (x{ap['cuota']}) - 🏢 {ap['casa']}\n\n"
 
-                    st.markdown("---")
+                    st.markdown("<hr style='border-top: 1px dashed #232a38;'>", unsafe_allow_html=True)
                     ganancia_estimada = cuota_acumulada * monto_inversion
                     ganancia_neta = ganancia_estimada - monto_inversion
 
