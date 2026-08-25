@@ -1236,14 +1236,15 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                     with pestanas_ligas[p_idx]:
                         partidos_f = [p for p in dict_partidos_filtrados.values() if p['liga_origen'] == liga_p]
                         for part in partidos_f:
+                            override_data = st.session_state.overrides_live.get(part['id'], {})
                             with st.container(border=True, key=f"match_{part['id']}"):
                                 col_enc_1, col_enc_2 = st.columns([4, 1.5])
                                 with col_enc_1:
                                     st.markdown(f"<span class='liga-chip'>🏆 {part['liga_origen']}</span>", unsafe_allow_html=True)
                                     if part.get('es_en_vivo'):
-                                        m_loc = part.get('marcador_local', 0)
-                                        m_vis = part.get('marcador_visita', 0)
-                                        min_v = part.get('minuto_en_vivo', "LIVE")
+                                        m_loc = override_data.get('goles_loc', part.get('marcador_local', 0))
+                                        m_vis = override_data.get('goles_vis', part.get('marcador_visita', 0))
+                                        min_v = f"{override_data.get('minuto', part.get('minuto_num', 30))}'"
                                         st.markdown(f"<div class='match-header'>⚽ {part['local']} <span style='color:#00d2d3; font-weight:800;'>{m_loc} - {m_vis}</span> {part['visitante']}</div>", unsafe_allow_html=True)
                                         st.markdown(f"<span style='background:#e74c3c; color:white; padding:2px 8px; border-radius:12px; font-weight:bold; font-size:11px;'>🔴 EN VIVO</span> <span class='kickoff-chip'>⏱️ {min_v}</span>", unsafe_allow_html=True)
                                     else:
@@ -1254,19 +1255,33 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                 if part.get('es_en_vivo'):
                                     with st.expander("⏱️ Ajustar Minuto y Marcador en Vivo (Live Override)", expanded=False):
                                         c_ov1, c_ov2, c_ov3 = st.columns([2, 1, 1])
-                                        min_actual = part.get('minuto_num', 30)
-                                        nuevo_minuto = c_ov1.slider("Minuto real del partido:", min_value=1, max_value=90, value=min_actual, key=f"sl_min_{part['id']}")
-                                        goles_l = c_ov2.number_input(f"Goles {part['local']}:", min_value=0, value=int(part.get('marcador_local', 0)), key=f"gl_{part['id']}")
-                                        goles_v = c_ov3.number_input(f"Goles {part['visitante']}:", min_value=0, value=int(part.get('marcador_visita', 0)), key=f"gv_{part['id']}")
+                                        min_actual = override_data.get('minuto', part.get('minuto_num', 30))
+                                        g_loc_act = override_data.get('goles_loc', part.get('marcador_local', 0))
+                                        g_vis_act = override_data.get('goles_vis', part.get('marcador_visita', 0))
                                         
-                                        if (nuevo_minuto != min_actual or goles_l != part.get('marcador_local') or goles_v != part.get('marcador_visita')):
+                                        nuevo_minuto = c_ov1.slider("Minuto real del partido:", min_value=1, max_value=90, value=min_actual, key=f"sl_min_{part['id']}")
+                                        goles_l = c_ov2.number_input(f"Goles {part['local']}:", min_value=0, value=int(g_loc_act), key=f"gl_{part['id']}")
+                                        goles_v = c_ov3.number_input(f"Goles {part['visitante']}:", min_value=0, value=int(g_vis_act), key=f"gv_{part['id']}")
+                                        
+                                        if st.button("🔄 Recalcular Modelo Poisson Live", key=f"btn_recalc_{part['id']}", type="primary"):
                                             st.session_state.overrides_live[part['id']] = {
                                                 'minuto': nuevo_minuto,
                                                 'goles_loc': goles_l,
                                                 'goles_vis': goles_v
                                             }
-                                            if st.button("🔄 Recalcular Modelo Poisson Live", key=f"btn_recalc_{part['id']}", type="primary"):
-                                                st.rerun()
+                                            part['marcador_local'] = goles_l
+                                            part['marcador_visita'] = goles_v
+                                            part['minuto_num'] = nuevo_minuto
+                                            part['minuto_en_vivo'] = f"{nuevo_minuto}'"
+
+                                            nuevas_probs = calcular_poisson_live(nuevo_minuto, goles_l, goles_v)
+                                            for m_nombre, m_data in part['mercados'].items():
+                                                for op_key, val_dict in m_data['value_bets'].items():
+                                                    if op_key in nuevas_probs:
+                                                        val_dict['prob_poisson'] = nuevas_probs[op_key]
+
+                                            st.toast("⚡ ¡Poisson Live recalculado exitosamente!", icon="🎯")
+                                            st.rerun()
 
                                     with st.expander("⚡ Cobertura en Vivo / Hedging Automático (Live Trigger)", expanded=False):
                                         c_h1, c_h2 = st.columns(2)
