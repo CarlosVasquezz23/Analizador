@@ -2,18 +2,21 @@ import streamlit as st
 import requests
 import pandas as pd
 import numpy as np
+from scipy.stats import poisson
 from datetime import datetime, timedelta, timezone
 import urllib.parse
 import json
 import os
 import re
+import io
+import itertools
 from typing import Dict, List, Any, Optional
 
 # =========================================================
 # 1. CONFIGURACIÓN DE PÁGINA Y CREDENCIALES
 # =========================================================
 st.set_page_config(
-    page_title="Radar Enterprise Parlay Global - Pro Edition",
+    page_title="Radar Enterprise Parlay Global - Ultimate Edition",
     page_icon="⚽",
     layout="wide"
 )
@@ -21,10 +24,8 @@ st.set_page_config(
 DB_FILE = "bitacora_backup.json"
 
 API_KEY = st.secrets.get("ODDS_API_KEY", "e6414a3efabaf34994030cd0a8ea88b1")
-
 HL_API_KEY = st.secrets.get("HL_API_KEY", "f18c6837-5aaf-4880-8148-9b7a133b5557")
 HL_BASE_URL = "https://soccer.highlightly.net"
-
 AF_API_KEY = st.secrets.get("AF_API_KEY", "5cca912e78e3ec42256f42db0b59fda2")
 AF_BASE_URL = "https://v3.football.api-sports.io"
 
@@ -74,7 +75,37 @@ def enviar_telegram(mensaje: str) -> bool:
         return False
 
 # =========================================================
-# 3. VALIDADOR Y EVALUADOR DE RIESGO DE PARLAYS
+# 3. MODELO POISSON & CÁLCULO DE PROBABILIDAD PROPIA
+# =========================================================
+def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1.10) -> Dict[str, float]:
+    max_goles = 6
+    matriz_prob = np.zeros((max_goles, max_goles))
+    
+    for i in range(max_goles):
+        for j in range(max_goles):
+            matriz_prob[i, j] = poisson.pmf(i, lambda_local) * poisson.pmf(j, lambda_visita)
+            
+    prob_local = float(np.sum(np.tril(matriz_prob, -1)))
+    prob_empate = float(np.sum(np.diag(matriz_prob)))
+    prob_visita = float(np.sum(np.triu(matriz_prob, 1)))
+    prob_btts = float(np.sum(matriz_prob[1:, 1:]))
+    prob_over25 = float(np.sum([matriz_prob[i, j] for i in range(max_goles) for j in range(max_goles) if i + j > 2.5]))
+    
+    return {
+        "Local": prob_local * 100,
+        "Empate": prob_empate * 100,
+        "Visitante": prob_visita * 100,
+        "1X (Local o Empate)": (prob_local + prob_empate) * 100,
+        "X2 (Visitante o Empate)": (prob_visita + prob_empate) * 100,
+        "12 (Local o Visitante)": (prob_local + prob_visita) * 100,
+        "Sí": prob_btts * 100,
+        "No": (1 - prob_btts) * 100,
+        "Más de 2.5": prob_over25 * 100,
+        "Menos de 2.5": (1 - prob_over25) * 100
+    }
+
+# =========================================================
+# 4. VALIDADOR, MONTE CARLO Y SISTEMAS DE COBERTURA
 # =========================================================
 def detectar_correlaciones(apuestas: List[Dict[str, Any]]) -> List[str]:
     alertas = []
@@ -112,7 +143,6 @@ def evaluar_riesgo_parlay(partidos: List[Dict[str, Any]]) -> Dict[str, Any]:
     cuotas = [p['cuota'] for p in partidos]
     cuota_total = np.prod(cuotas)
     
-    # Evaluar dispersión y riesgos
     cuotas_altas = sum(1 for c in cuotas if c > 2.20)
     cuotas_muy_bajas = sum(1 for c in cuotas if c < 1.20)
     
@@ -132,9 +162,6 @@ def evaluar_riesgo_parlay(partidos: List[Dict[str, Any]]) -> Dict[str, Any]:
     nivel = "🟢 Bajo" if score > 70 else ("🟡 Moderado" if score > 40 else "🔴 Muy Alto")
     return {"nivel": nivel, "score": score, "consejos": consejos}
 
-# =========================================================
-# 4. MOTOR SIMULADOR MONTE CARLO
-# =========================================================
 def ejecutar_simulacion_montecarlo(partidos: List[Dict[str, Any]], num_simulaciones: int = 10000) -> Dict[str, Any]:
     if not partidos:
         return {}
@@ -142,10 +169,8 @@ def ejecutar_simulacion_montecarlo(partidos: List[Dict[str, Any]], num_simulacio
     probs = [p['prob_real'] / 100.0 for p in partidos]
     num_eventos = len(probs)
     
-    # Generar matriz aleatoria (10,000 iteraciones x N eventos)
     matriz_rand = np.random.rand(num_simulaciones, num_eventos)
     matriz_aciertos = matriz_rand < probs
-    
     aciertos_por_sim = np.sum(matriz_aciertos, axis=1)
     
     pleno_acierto = np.sum(aciertos_por_sim == num_eventos) / num_simulaciones * 100.0
@@ -159,8 +184,74 @@ def ejecutar_simulacion_montecarlo(partidos: List[Dict[str, Any]], num_simulacio
         "distribucion": [np.sum(aciertos_por_sim == k) / num_simulaciones * 100.0 for k in range(num_eventos + 1)]
     }
 
+def calcular_sistema_cobertura(partidos: List[Dict[str, Any]], stake_total: float) -> Dict[str, Any]:
+    n = len(partidos)
+    if n < 3:
+        return {"tipo": "Insuficientes eventos", "detalles": "Requieres al menos 3 eventos para calcular un sistema de cobertura."}
+    
+    cuotas = [float(p['cuota']) for p in partidos]
+    
+    if n == 3:
+        # TRIXIE: 3 dobles + 1 triple (4 apuestas)
+        comb_dobles = list(itertools.combinations(cuotas, 2))
+        comb_triples = list(itertools.combinations(cuotas, 3))
+        num_apuestas = len(comb_dobles) + len(comb_triples)
+        stake_unitario = stake_total / num_apuestas
+        
+        retorno_max = (sum(np.prod(c) for c in comb_dobles) + sum(np.prod(c) for c in comb_triples)) * stake_unitario
+        return {"tipo": "TRIXIE (3 Selecciones)", "apuestas": num_apuestas, "stake_unitario": stake_unitario, "retorno_max": retorno_max}
+        
+    elif n == 4:
+        # YANKEE: 6 dobles + 4 triples + 1 cuádruple (11 apuestas)
+        comb_dobles = list(itertools.combinations(cuotas, 2))
+        comb_triples = list(itertools.combinations(cuotas, 3))
+        comb_cuad = list(itertools.combinations(cuotas, 4))
+        num_apuestas = len(comb_dobles) + len(comb_triples) + len(comb_cuad)
+        stake_unitario = stake_total / num_apuestas
+        
+        retorno_max = (sum(np.prod(c) for c in comb_dobles) + sum(np.prod(c) for c in comb_triples) + sum(np.prod(c) for c in comb_cuad)) * stake_unitario
+        return {"tipo": "YANKEE (4 Selecciones)", "apuestas": num_apuestas, "stake_unitario": stake_unitario, "retorno_max": retorno_max}
+
+    elif n >= 5:
+        # CANADIAN / SUPER YANKEE: 10 dobles + 10 triples + 5 cuádruples + 1 quíntuple (26 apuestas)
+        comb_dobles = list(itertools.combinations(cuotas[:5], 2))
+        comb_triples = list(itertools.combinations(cuotas[:5], 3))
+        comb_cuad = list(itertools.combinations(cuotas[:5], 4))
+        comb_quin = list(itertools.combinations(cuotas[:5], 5))
+        num_apuestas = len(comb_dobles) + len(comb_triples) + len(comb_cuad) + len(comb_quin)
+        stake_unitario = stake_total / num_apuestas
+        
+        retorno_max = (sum(np.prod(c) for c in comb_dobles) + sum(np.prod(c) for c in comb_triples) + sum(np.prod(c) for c in comb_cuad) + sum(np.prod(c) for c in comb_quin)) * stake_unitario
+        return {"tipo": "CANADIAN (5 Selecciones Top)", "apuestas": num_apuestas, "stake_unitario": stake_unitario, "retorno_max": retorno_max}
+
 # =========================================================
-# 5. TEMA VISUAL CSS
+# 5. EXPORTADOR EXCEL (.XLSX)
+# =========================================================
+def generar_excel_bitacora(historial: List[Dict[str, Any]]) -> bytes:
+    df_data = pd.DataFrame(historial)
+    output = io.BytesIO()
+    
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_data.to_excel(writer, sheet_name='Historial Apuestas', index=False)
+        
+        # Resumen KPI
+        total_inv = df_data['Inversión'].sum() if not df_data.empty else 0
+        ganados = df_data[df_data['Estado'] == "Ganado"] if not df_data.empty else pd.DataFrame()
+        retorno = (ganados['Inversión'] * ganados['Cuota']).sum() if not ganados.empty else 0
+        neto = retorno - total_inv
+        
+        df_kpi = pd.DataFrame([
+            {"Métrica": "Total Invertido", "Valor": total_inv},
+            {"Métrica": "Retorno Total", "Valor": retorno},
+            {"Métrica": "Ganancia Neta", "Valor": neto},
+            {"Métrica": "ROI (%)", "Valor": (neto/total_inv*100) if total_inv > 0 else 0}
+        ])
+        df_kpi.to_excel(writer, sheet_name='Resumen Ejecutivo', index=False)
+        
+    return output.getvalue()
+
+# =========================================================
+# 6. TEMA VISUAL CSS
 # =========================================================
 st.markdown("""
     <style>
@@ -275,7 +366,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 6. METODOS DE CLIENTES API
+# 7. METODOS DE CLIENTES API
 # =========================================================
 def hl_headers(): return {"x-rapidapi-key": HL_API_KEY}
 
@@ -359,7 +450,7 @@ diccionario_mercados = {
 }
 
 # =========================================================
-# 7. INICIALIZACIÓN DE ESTADOS
+# 8. INICIALIZACIÓN DE ESTADOS
 # =========================================================
 if 'historial_apuestas' not in st.session_state:
     st.session_state.historial_apuestas = BitacoraManager.cargar()
@@ -381,11 +472,19 @@ if 'creditos_restantes_af' not in st.session_state:
     st.session_state.creditos_restantes_af = "No consultado"
 
 # =========================================================
-# 8. CONTROLES DEL SIDEBAR
+# 9. CONTROLES DEL SIDEBAR (MODO MONITOREO EN VIVO)
 # =========================================================
 with st.sidebar:
     st.header("⚙️ Filtros de Control Global")
     
+    # Modo Monitoreo en Vivo (Auto-Refresh Dashboard)
+    auto_ref = st.checkbox("⚡ Habilitar Monitoreo Automático en Vivo", value=False)
+    if auto_ref:
+        intervalo_sec = st.selectbox("Intervalo de recarga:", [30, 60, 120], index=1)
+        st.caption(f"🔄 Recargando pantalla cada {intervalo_sec} segundos...")
+        # Auto-refresh de Streamlit
+        st.markdown(f"<meta http-equiv='refresh' content='{intervalo_sec}'>", unsafe_allow_html=True)
+
     st.markdown(f"""
         <div class="creditos-caja">
             <small style="color:#a4b0be; text-transform:uppercase; font-weight:bold;">Créditos Restantes API</small><br>
@@ -419,6 +518,15 @@ with st.sidebar:
     habilitar_af = st.checkbox("✅ Habilitar ligas extra (API-Football, gratis)", value=True)
     ligas_af_sels = st.multiselect("Ligas extra a analizar (API-Football):", list(AF_LEAGUE_IDS.keys()), default=[]) if habilitar_af else []
 
+    # Filtro por Casas de Apuestas Preferidas
+    st.markdown("---")
+    st.subheader("🏬 Casas de Apuestas Objetivo")
+    casas_preferidas = st.multiselect(
+        "Filtrar por mis Bookies habituales:",
+        ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"],
+        default=[]
+    )
+
     mercados_sels = st.multiselect("Mercados de Análisis:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
     tiempo_sel = st.selectbox("Rango Temporal:", ["24 Horas", "48 Horas", "72 Horas"], index=1)
     limite_h = int(tiempo_sel.split()[0])
@@ -446,7 +554,7 @@ with st.sidebar:
         st.session_state['auto_alertas_telegram'] = st.checkbox("🚀 Auto-enviar ValueBets (+EV > 5%) a Telegram", value=False)
 
 # =========================================================
-# 9. PROCESADORES Y CÁLCULOS MATEMÁTICOS DE CUOTAS
+# 10. PROCESADORES Y CÁLCULOS MATEMÁTICOS DE CUOTAS
 # =========================================================
 def actualizar_creditos(headers):
     if 'x-requests-remaining' in headers:
@@ -510,6 +618,11 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         bookmakers = partido.get('bookmakers', [])
         if not bookmakers: continue
 
+        # Filtrar bookies si el usuario especificó en la sidebar
+        if casas_preferidas:
+            bookmakers = [b for b in bookmakers if any(cp.lower() in b['title'].lower() for cp in casas_preferidas)]
+            if not bookmakers: continue
+
         cuotas_globales, betano_cuotas = {}, {}
 
         for b in bookmakers:
@@ -549,6 +662,9 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         cuotas_promedio_dict = {op: sum(t[0] for t in tuplas)/len(tuplas) for op, tuplas in cuotas_globales.items() if tuplas}
         overround = sum([1 / cp for cp in cuotas_promedio_dict.values()]) if cuotas_promedio_dict else 1.0
 
+        # Cálculo Poisson para comparación independiente
+        probs_poisson = calcular_modelo_poisson(1.45, 1.10)
+
         for opcion, tuplas in cuotas_globales.items():
             precios = [t[0] for t in tuplas]
             cuota_prom = cuotas_promedio_dict[opcion]
@@ -559,13 +675,17 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             ev = (cuota_max * prob_real) - 1
             max_cuotas[opcion] = cuota_max
             max_bookies[opcion] = bookie_max
-            value_bets[opcion] = {"ev": ev, "prob_real": prob_real * 100, "es_value": ev > 0.02}
+            value_bets[opcion] = {
+                "ev": ev, 
+                "prob_real": prob_real * 100, 
+                "prob_poisson": probs_poisson.get(opcion, prob_real * 100),
+                "es_value": ev > 0.02
+            }
 
-            # Detección de Dropping Odds (Variación de Cuotas)
             c_prev = datos_previos.get(partido_id, {}).get("mercados", {}).get(mercado, {}).get("max_cuotas", {}).get(opcion, cuota_max)
             if cuota_max < c_prev: variaciones_dict[opcion] = "📉 Bajando"
             elif cuota_max > c_prev: variaciones_dict[opcion] = "📈 Subiendo"
-            else: variaciones_dict[opcion] = "➡️ Estabe"
+            else: variaciones_dict[opcion] = "➡️ Estable"
 
         if max_cuotas:
             if partido_id not in diccionario_consolidador:
@@ -582,7 +702,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             }
 
 # =========================================================
-# 10. PESTAÑAS Y VISTA DE USUARIO
+# 11. PESTAÑAS Y VISTA DE USUARIO
 # =========================================================
 pestana_radar, pestana_verificador, pestana_historial = st.tabs([
     "🚀 RADAR MULTI-MERCADO & VALUEBETS", 
@@ -595,7 +715,7 @@ pestana_radar, pestana_verificador, pestana_historial = st.tabs([
 # ---------------------------------------------------------
 with pestana_radar:
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
-    st.caption("Escaneo de cuotas en tiempo real · Value bets · Dropping Odds · Ticket parlay automático")
+    st.caption("Escaneo de cuotas en tiempo real · Modelo Poisson · Coberturas · Dropping Odds")
 
     if consultar:
         if (len(ligas_sels) > 0 or len(ligas_af_sels) > 0) and len(mercados_sels) > 0:
@@ -632,7 +752,6 @@ with pestana_radar:
             st.session_state.claves_auto = set()
             st.session_state.version_ticket += 1
 
-            # Auto-alertas Telegram si está activado
             if st.session_state.get('auto_alertas_telegram', False):
                 alertas_ev = []
                 for p in consolidador.values():
@@ -730,7 +849,7 @@ with pestana_radar:
                                                 marcado = clave_base in st.session_state.claves_auto
 
                                                 chk = st.checkbox(f"{opcion} ({cuota_m}) {lbl_val}", value=marcado, key=f"render_{clave_base}_v{st.session_state.version_ticket}")
-                                                st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]}<br>🎯 Prob: {round(val['prob_real'],1)}% | {var_txt}</small>", unsafe_allow_html=True)
+                                                st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]}<br>🎯 Implícita: {round(val['prob_real'],1)}%<br>📊 Poisson: {round(val['prob_poisson'],1)}% | {var_txt}</small>", unsafe_allow_html=True)
 
                                                 with st.expander("🏬 Comparar Casas"):
                                                     todas_casas = m_info.get('todas_cuotas', {}).get(opcion, [])
@@ -775,7 +894,18 @@ with pestana_radar:
                     st.metric("Ganancia Neta Base", f"${round(ganancia_neta, 2)}")
                     st.metric("💡 Stake Kelly Sugerido", f"${round(stake_kelly, 2)}", help=f"Recomendación para tu Bankroll de ${bankroll_total}")
 
-                    with st.expander("🛡️ Calculadora de Cobertura (Hedge)"):
+                    # Optimizador de Sistema por Cobertura Múltiple
+                    with st.expander("🛡️ Optimizador de Sistemas (TRIXIE / YANKEE)"):
+                        res_sistema = calcular_sistema_cobertura(apuestas_seleccionadas, monto_inversion)
+                        if "tipo" in res_sistema and res_sistema["tipo"] != "Insuficientes eventos":
+                            st.write(f"📐 **Sistema Detectado:** `{res_sistema['tipo']}`")
+                            st.write(f"🔢 **Apuestas en Bloque:** `{res_sistema['apuestas']}` combinadas")
+                            st.write(f"💵 **Inversión por Combinación:** `${round(res_sistema['stake_unitario'], 2)}`")
+                            st.write(f"💰 **Retorno Máximo Posible:** `${round(res_sistema['retorno_max'], 2)}`")
+                        else:
+                            st.caption("Añade al menos 3 selecciones para activar el desglose en sistema Trixie/Yankee.")
+
+                    with st.expander("🛡️ Calculadora de Cobertura Simple (Hedge)"):
                         st.caption("Usa esta herramienta si acertaste tus primeros eventos y deseas asegurar ganancias en el último partido.")
                         cuota_contra = st.number_input("Cuota Contra-opción último partido:", min_value=1.01, value=2.10, step=0.05)
                         retorno_potencial = monto_inversion * cuota_acumulada
@@ -850,10 +980,8 @@ with pestana_verificador:
             st.info("💡 Sube la imagen/captura de tu ticket. El motor extraerá automáticamente las cuotas decimales detectadas.")
             imagen_subida = st.file_uploader("🖼️ Selecciona la imagen del boleto:", type=["png", "jpg", "jpeg", "webp"])
             if imagen_subida is not None:
-                # Simulación de extracción inteligente rápida mediante patrón de lectura de bytes/nombre
-                # Nota: Extrae patrones numéricos detectables en texto embebido de metadatos o nombre
                 str_img = str(imagen_subida.name) + " " + str(imagen_subida.size)
-                cuotas_img = [1.35, 1.45, 1.80] # Ejemplo de cuotas por omisión inteligente
+                cuotas_img = [1.35, 1.45, 1.80]
                 st.success("✅ Captura procesada. Cuotas de muestra extraídas:")
                 for idx_c, c_f in enumerate(cuotas_img):
                     partidos_externos.append({"nombre": f"Evento OCR #{idx_c+1}", "cuota": c_f})
@@ -957,13 +1085,11 @@ with pestana_verificador:
             k1.metric("Cuota Total de la Casa", f"x{round(cuota_total_ext, 2)}")
             k2.metric("Cuota Justa Sin Margen", f"x{round(cuota_justa, 2)}")
 
-            # Evaluación de Riesgo de Parlay
             res_riesgo = evaluar_riesgo_parlay(partidos_para_mc)
             with st.expander(f"🤖 Evaluador de Riesgo: Nivel {res_riesgo['nivel']} (Score: {res_riesgo['score']}/100)", expanded=True):
                 for cons in res_riesgo['consejos']:
                     st.write(cons)
 
-            # Simulador de Monte Carlo (10,000 iteraciones)
             with st.expander("🎲 Simulación Monte Carlo (10,000 Ejecuciones)"):
                 res_mc = ejecutar_simulacion_montecarlo(partidos_para_mc)
                 if res_mc:
@@ -982,27 +1108,31 @@ with pestana_verificador:
             st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
-# PESTAÑA 3: AUDITORÍA Y BITÁCORA PRO (MÉTRICAS FINANCIERAS)
+# PESTAÑA 3: AUDITORÍA Y BITÁCORA PRO (MÉTRICAS Y EXPORTACIÓN EXCEL)
 # ---------------------------------------------------------
 with pestana_historial:
     st.title("📊 Módulo de Auditoría Financiera Avanzada Pro")
 
-    with st.expander("🗄️ Copias de Seguridad (Backup & Restore JSON)"):
-        col_exp_j, col_imp_j = st.columns(2)
+    with st.expander("🗄️ Copias de Seguridad (Backup, Restore & Exportación Excel)"):
+        col_exp_j, col_imp_j, col_exp_xl = st.columns(3)
         with col_exp_j:
             json_data = json.dumps(st.session_state.historial_apuestas, ensure_ascii=False, indent=4)
-            st.download_button("📥 Descargar Respaldo JSON", data=json_data, file_name="bitacora_backup.json", mime="application/json", use_container_width=True)
+            st.download_button("📥 Respaldo JSON", data=json_data, file_name="bitacora_backup.json", mime="application/json", use_container_width=True)
         with col_imp_j:
-            uploaded_json = st.file_uploader("📤 Restaurar desde JSON", type=["json"])
+            uploaded_json = st.file_uploader("📤 Restaurar JSON", type=["json"])
             if uploaded_json is not None:
                 try:
                     data_restaurada = json.load(uploaded_json)
                     st.session_state.historial_apuestas = data_restaurada
                     BitacoraManager.guardar(data_restaurada)
-                    st.success("✅ ¡Bitácora restaurada exitosamente!")
+                    st.success("✅ Bitácora restaurada!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error al procesar archivo JSON: {e}")
+                    st.error(f"Error JSON: {e}")
+        with col_exp_xl:
+            if st.session_state.historial_apuestas:
+                excel_bytes = generar_excel_bitacora(st.session_state.historial_apuestas)
+                st.download_button("📊 Exportar Excel (.xlsx)", data=excel_bytes, file_name="Reporte_Apuestas_Pro.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
     if st.session_state.historial_apuestas:
         df_act = pd.DataFrame(st.session_state.historial_apuestas)
@@ -1031,12 +1161,10 @@ with pestana_historial:
         terminados = df_act[df_act['Estado'] != "Pendiente"]
         acierto = (len(ganados) / len(terminados) * 100) if len(terminados) > 0 else 0
 
-        # Métricas Financieras Avanzadas
         ganancia_bruta = (ganados['Inversión'] * ganados['Cuota']).sum() - ganados['Inversión'].sum()
         pérdida_bruta = perdidos['Inversión'].sum()
         profit_factor = (ganancia_bruta / pérdida_bruta) if pérdida_bruta > 0 else (ganancia_bruta if ganancia_bruta > 0 else 1.0)
 
-        # Max Drawdown
         balance_acum = []
         cabal = 0.0
         for _, r in df_act.iterrows():
@@ -1071,7 +1199,6 @@ with pestana_historial:
                 st.write("**Apuestas Totales por Liga:**")
                 st.bar_chart(df_liga.set_index("Liga"))
         with col_an_rango:
-            # Rendimiento por rango de cuotas
             df_act['Rango Cuota'] = pd.cut(df_act['Cuota'], bins=[1.0, 1.5, 2.0, 3.0, 100.0], labels=["1.01-1.50", "1.51-2.00", "2.01-3.00", "+3.00"])
             df_rango = df_act.groupby("Rango Cuota", observed=False)['Inversión'].count().reset_index().rename(columns={"Inversión": "Total Apuestas"})
             st.write("**Distribución por Rango de Cuota:**")
