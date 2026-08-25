@@ -285,7 +285,7 @@ ligas_locales = {
     "🇧🇷 Brasileirao Serie A": "soccer_brazil_campeonato",
     "🇧🇷 Copa de Brasil": "soccer_brazil_copa_do_brasil",
     "🇲🇽 Liga MX (México)": "soccer_mexico_liga_mx",
-    "🇪🇸 La Liga (España)": "soccer_spain_la_liga",
+    "🇪檐 La Liga (España)": "soccer_spain_la_liga",
     "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League (Inglaterra)": "soccer_epl",
     "🇮🇹 Serie A (Italia)": "soccer_italy_serie_a",
     "🇩🇪 Bundesliga (Alemania)": "soccer_germany_bundesliga",
@@ -746,7 +746,7 @@ with pestana_radar:
                             st.toast("¡Enviado a Telegram!", icon="📤")
 
 # ---------------------------------------------------------
-# PESTAÑA 2: CALCULADORA DE PARLAY EXTERNO (CON PEGADO RÁPIDO Y MODO MANUAL)
+# PESTAÑA 2: CALCULADORA DE PARLAY EXTERNO (REGEX CORREGIDO)
 # ---------------------------------------------------------
 with pestana_verificador:
     st.title("🧮 Analizador & Verificador de Parlays Externos")
@@ -786,20 +786,21 @@ with pestana_verificador:
                     if not linea_clean:
                         continue
                     
-                    # Normalizar prefijos (x1.37, X1.37, @1.37) sin romper decimales
-                    linea_norm = re.sub(r'(?<=\s|^)[xX@]\s*(?=\d)', '', linea_clean)
-                    linea_norm = linea_norm.replace('x', '').replace('X', '').replace(',', '.')
+                    # 1. Normalizar prefijos (evita look-behind variable para ser compatible con re de Python)
+                    linea_norm = re.sub(r'([^\w\d]|^)[xX@]\s*(?=\d)', r'\1', linea_clean)
+                    linea_norm = linea_norm.replace(',', '.')
                     
-                    # Extraer números decimales o enteros válidos
+                    # 2. Extraer cuotas decimales o numéricas
                     cuotas_encontradas = re.findall(r'\b\d+\.\d+|\b\d+\b', linea_norm)
                     cuotas_validas = [float(c) for c in cuotas_encontradas if float(c) > 1.0]
                     
                     if cuotas_validas:
-                        cuota_val = cuotas_validas[-1]
+                        cuota_val = cuotas_validas[-1] # Tomar la cuota al final de la línea
                         
-                        # Limpiar el nombre del partido quitando símbolos y el valor numérico de la cuota
-                        nombre_txt = re.sub(r'[\|\-\>\:]', '', linea_clean)
-                        nombre_txt = re.sub(r'\b[xX]?\s*\d+[\.,]?\d*\b', '', nombre_txt).strip()
+                        # Limpiar el texto descriptivo omitiendo símbolos y valores numéricos
+                        nombre_txt = re.sub(r'[\|\-\>\:]', ' ', linea_clean)
+                        nombre_txt = re.sub(r'\b[xX@]?\s*\d+[\.,]?\d*\b', '', nombre_txt)
+                        nombre_txt = re.sub(r'\s+', ' ', nombre_txt).strip()
                         
                         if not nombre_txt:
                             nombre_txt = f"Selección #{len(partidos_externos)+1}"
