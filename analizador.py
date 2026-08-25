@@ -704,6 +704,8 @@ if 'creditos_restantes' not in st.session_state:
     st.session_state.creditos_restantes = "No consultado"
 if 'creditos_restantes_af' not in st.session_state:
     st.session_state.creditos_restantes_af = "No consultado"
+if 'overrides_live' not in st.session_state:
+    st.session_state.overrides_live = {}
 
 # Carga de preferencias persistentes del usuario
 if 'casas_preferidas' not in st.session_state:
@@ -920,15 +922,27 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
 
         horas = (fecha_utc - ahora_utc).total_seconds() / 3600
         
-        es_en_vivo = partido.get('in_play', False) or (horas <= 0 and horas >= -2.5)
+        # Detección de In-Play dinámica según tiempo transcurrido
+        es_en_vivo = partido.get('in_play', False) or (horas <= 0 and horas >= -2.2)
         marcador_local = partido.get('scores', {}).get('home', 0) if es_en_vivo else None
         marcador_visita = partido.get('scores', {}).get('away', 0) if es_en_vivo else None
         
-        min_raw = partido.get('minute', '30') if es_en_vivo else None
+        # Estimación en tiempo real del minuto de juego si transcurrió el kickoff
+        minuto_estimado = 30
+        if es_en_vivo and horas < 0:
+            minutos_transcurridos = int(abs(horas) * 60)
+            if minutos_transcurridos <= 45:
+                minuto_estimado = max(1, minutos_transcurridos)
+            elif minutos_transcurridos <= 60:
+                minuto_estimado = 45 # Entretiempo
+            else:
+                minuto_estimado = min(89, minutos_transcurridos - 15)
+        
+        min_raw = partido.get('minute', minuto_estimado) if es_en_vivo else None
         try:
             minuto_num = int(str(min_raw).replace("'", "").replace("+", ""))
         except Exception:
-            minuto_num = 30
+            minuto_num = minuto_estimado
         minuto_en_vivo = f"{minuto_num}'" if es_en_vivo else None
 
         if limite_horas < 900000 and not es_en_vivo and (horas < -48.0 or horas > (limite_horas + 48)): 
@@ -981,8 +995,14 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         cuotas_promedio_dict = {op: sum(t[0] for t in tuplas)/len(tuplas) for op, tuplas in cuotas_globales.items() if tuplas}
         overround = sum([1 / cp for cp in cuotas_promedio_dict.values()]) if cuotas_promedio_dict else 1.0
 
+        # Revisión de sobreescritura manual en la interfaz
+        override_data = st.session_state.overrides_live.get(partido_id, {})
+        minuto_final_calc = override_data.get('minuto', minuto_num)
+        goles_loc_final = override_data.get('goles_loc', marcador_local or 0)
+        goles_vis_final = override_data.get('goles_vis', marcador_visita or 0)
+
         if es_en_vivo:
-            probs_poisson = calcular_poisson_live(minuto_num, marcador_local or 0, marcador_visita or 0)
+            probs_poisson = calcular_poisson_live(minuto_final_calc, goles_loc_final, goles_vis_final)
         else:
             probs_poisson = calcular_modelo_poisson(1.45, 1.10, usar_dixon_coles=True)
 
@@ -1026,9 +1046,10 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                     "fecha_ts": fecha_utc.timestamp(),
                     "local": home, "visitante": away,
                     "es_en_vivo": es_en_vivo,
-                    "marcador_local": marcador_local,
-                    "marcador_visita": marcador_visita,
-                    "minuto_en_vivo": minuto_en_vivo,
+                    "marcador_local": goles_loc_final,
+                    "marcador_visita": goles_vis_final,
+                    "minuto_en_vivo": f"{minuto_final_calc}'",
+                    "minuto_num": minuto_final_calc,
                     "mercados": {}
                 }
             diccionario_consolidador[partido_id]["mercados"][mercado] = {
@@ -1222,14 +1243,31 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                     if part.get('es_en_vivo'):
                                         m_loc = part.get('marcador_local', 0)
                                         m_vis = part.get('marcador_visita', 0)
+                                        min_v = part.get('minuto_en_vivo', "LIVE")
                                         st.markdown(f"<div class='match-header'>⚽ {part['local']} <span style='color:#00d2d3; font-weight:800;'>{m_loc} - {m_vis}</span> {part['visitante']}</div>", unsafe_allow_html=True)
-                                        st.markdown(f"<span style='background:#e74c3c; color:white; padding:2px 8px; border-radius:12px; font-weight:bold; font-size:11px;'>🔴 EN VIVO</span> <span class='kickoff-chip'>⏱️ {part.get('minuto_en_vivo', 'LIVE')}</span>", unsafe_allow_html=True)
+                                        st.markdown(f"<span style='background:#e74c3c; color:white; padding:2px 8px; border-radius:12px; font-weight:bold; font-size:11px;'>🔴 EN VIVO</span> <span class='kickoff-chip'>⏱️ {min_v}</span>", unsafe_allow_html=True)
                                     else:
                                         st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
                                         st.markdown(f"<span class='kickoff-chip'>📅 {part['fecha_str']}</span>", unsafe_allow_html=True)
 
-                                # CALCULADORA Y ALERTA DE COBERTURA LIVE
+                                # PANEL INTERACTIVO DE CONTROL EN VIVO (Ajuste de Minuto / Marcador)
                                 if part.get('es_en_vivo'):
+                                    with st.expander("⏱️ Ajustar Minuto y Marcador en Vivo (Live Override)", expanded=False):
+                                        c_ov1, c_ov2, c_ov3 = st.columns([2, 1, 1])
+                                        min_actual = part.get('minuto_num', 30)
+                                        nuevo_minuto = c_ov1.slider("Minuto real del partido:", min_value=1, max_value=90, value=min_actual, key=f"sl_min_{part['id']}")
+                                        goles_l = c_ov2.number_input(f"Goles {part['local']}:", min_value=0, value=int(part.get('marcador_local', 0)), key=f"gl_{part['id']}")
+                                        goles_v = c_ov3.number_input(f"Goles {part['visitante']}:", min_value=0, value=int(part.get('marcador_visita', 0)), key=f"gv_{part['id']}")
+                                        
+                                        if (nuevo_minuto != min_actual or goles_l != part.get('marcador_local') or goles_v != part.get('marcador_visita')):
+                                            st.session_state.overrides_live[part['id']] = {
+                                                'minuto': nuevo_minuto,
+                                                'goles_loc': goles_l,
+                                                'goles_vis': goles_v
+                                            }
+                                            if st.button("🔄 Recalcular Modelo Poisson Live", key=f"btn_recalc_{part['id']}", type="primary"):
+                                                st.rerun()
+
                                     with st.expander("⚡ Cobertura en Vivo / Hedging Automático (Live Trigger)", expanded=False):
                                         c_h1, c_h2 = st.columns(2)
                                         monto_prev = c_h1.number_input("Inversión previa ($):", min_value=1.0, value=10.0, key=f"h_inv_{part['id']}")
@@ -1294,7 +1332,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
 
                                                 chk = st.checkbox(f"{opcion} ({cuota_m}) {lbl_val}", value=marcado, key=f"render_{clave_base}_v{st.session_state.version_ticket}")
                                                 
-                                                lbl_modelo = "⏱️ Poisson Live" if part.get('es_en_vivo') else "📊 Dixon-Coles"
+                                                lbl_modelo = f"⏱️ Poisson Live ({part.get('minuto_en_vivo', '30\'')})" if part.get('es_en_vivo') else "📊 Dixon-Coles"
                                                 st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]}<br>🎯 Implícita: {round(val['prob_real'],1)}%<br>{lbl_modelo}: {round(val['prob_poisson'],1)}% | {var_txt}</small>", unsafe_allow_html=True)
 
                                                 with st.expander("🏬 Comparar Casas"):
@@ -1520,7 +1558,6 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
                         linea_norm = re.sub(r'([^\w\d]|^)[xX@]\s*(?=\d)', r'\1', linea_clean)
                         linea_norm = linea_norm.replace(',', '.')
                         
-                        # Extraer solo cuotas decimales flotantes reales
                         cuotas_encontradas = re.findall(r'\b\d+\.\d+\b', linea_norm)
                         cuotas_validas = [float(c) for c in cuotas_encontradas if 1.01 <= float(c) <= 100.0]
                         
@@ -1666,9 +1703,9 @@ elif vista_seleccionada == "📊 ESTADÍSTICAS & H2H":
 
     c_h1, c_h2 = st.columns(2)
     with c_h1:
-        eq_local = st.text_input("⚽ Equipo Local:", value="Independiente del Valle")
+        eq_local = st.text_input("⚽ Equipo Local:", value="Valencia")
     with c_h2:
-        eq_visit = st.text_input("⚽ Equipo Visitante:", value="Deportes Tolima")
+        eq_visit = st.text_input("⚽ Equipo Visitante:", value="Real Betis")
 
     if eq_local and eq_visit:
         st.subheader(f"⚔️ Comparativa Directa: {eq_local} vs {eq_visit}")
@@ -1951,7 +1988,7 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
             st.caption("Escanea partidos desde el panel lateral para habilitar este módulo.")
 
 # ---------------------------------------------------------
-# PESTAÑA 7: GENERADOR DE CARTEL (RENDERIZADO HTML FIX)
+# PESTAÑA 7: GENERADOR DE CARTEL
 # ---------------------------------------------------------
 elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.title("🎨 Generador Visual de Pronósticos para Redes")
