@@ -460,7 +460,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 7. CLIENTES API Y MAPEO DE TORNEOS
+# 7. CLIENTES API Y MAPEO CON FALLBACK DE TORNEOS EUROPEOS
 # =========================================================
 def hl_headers(): return {"x-rapidapi-key": HL_API_KEY}
 
@@ -512,20 +512,21 @@ AF_LEAGUE_IDS = {
     "🇵🇾 División Profesional Paraguay - Clausura": 252,
 }
 
+# MAPEO DE CLAVES TÉCNICAS CON FALLBACK PARA ELIMINATORIAS Y FASES PREVIAS
 todas_las_ligas = {
-    "EU Champions League": "soccer_uefa_champions_league",
-    "EU Europa League": "soccer_uefa_europa_league",
-    "Copa Libertadores": "soccer_conmebol_copa_libertadores",
-    "Copa Sudamericana": "soccer_conmebol_copa_sudamericana",
-    "Argentina Primera Division": "soccer_argentina_primera_division",
-    "Chile Primera Division": "soccer_chile_campeonato",
-    "Brasil Brasileirao": "soccer_brazil_campeonato",
-    "Mexico Liga MX": "soccer_mexico_liga_mx",
-    "Spain La Liga": "soccer_spain_la_liga",
-    "England Premier League": "soccer_epl",
-    "Italy Serie A": "soccer_italy_serie_a",
-    "Germany Bundesliga": "soccer_germany_bundesliga",
-    "France Ligue 1": "soccer_france_ligue_one"
+    "EU Champions League": ["soccer_uefa_champions_league", "soccer_uefa_champions_league_qualification"],
+    "EU Europa League": ["soccer_uefa_europa_league", "soccer_uefa_europa_league_qualification"],
+    "Copa Libertadores": ["soccer_conmebol_copa_libertadores"],
+    "Copa Sudamericana": ["soccer_conmebol_copa_sudamericana"],
+    "Argentina Primera Division": ["soccer_argentina_primera_division"],
+    "Chile Primera Division": ["soccer_chile_campeonato"],
+    "Brasil Brasileirao": ["soccer_brazil_campeonato"],
+    "Mexico Liga MX": ["soccer_mexico_liga_mx"],
+    "Spain La Liga": ["soccer_spain_la_liga"],
+    "England Premier League": ["soccer_epl"],
+    "Italy Serie A": ["soccer_italy_serie_a"],
+    "Germany Bundesliga": ["soccer_germany_bundesliga"],
+    "France Ligue 1": ["soccer_france_ligue_one"]
 }
 
 diccionario_mercados = {
@@ -655,6 +656,13 @@ def consultar_api_odds(sport_key, market_key):
     except Exception:
         return []
 
+def consultar_api_odds_con_fallback(sport_keys_list, market_key):
+    for key in sport_keys_list:
+        data = consultar_api_odds(key, market_key)
+        if data and isinstance(data, list) and len(data) > 0:
+            return data
+    return []
+
 @st.cache_data(ttl=60)
 def consultar_api_odds_evento(sport_key, event_id, market_key):
     if not sport_key or not event_id: return None
@@ -681,7 +689,6 @@ def filtrar_partidos_por_fecha(datos, limite_horas):
     return res
 
 def calcular_doble_oportunidad_sintetica(raw_h2h_data):
-    """Genera sintéticamente el mercado de Doble Oportunidad a partir de las cuotas 1X2"""
     if not raw_h2h_data or not isinstance(raw_h2h_data, list): return []
     datos_sinteticos = []
     for partido in raw_h2h_data:
@@ -846,28 +853,28 @@ with pestana_radar:
 
             with st.status(f"🔄 Consultando {total_ligas} liga(s)...", expanded=True) as status_consulta:
                 for idx_liga, liga in enumerate(ligas_sels, start=1):
-                    sport_key = todas_las_ligas.get(liga)
+                    sport_keys_list = todas_las_ligas.get(liga, [])
                     status_consulta.update(label=f"🔄 Consultando ({idx_liga}/{total_ligas}): {liga}")
                     
-                    if sport_key:
-                        raw_h2h = consultar_api_odds(sport_key, market_key="h2h")
+                    if sport_keys_list:
+                        raw_h2h = consultar_api_odds_con_fallback(sport_keys_list, market_key="h2h")
                         
                         if "1X2 (Ganador)" in mercados_sels:
                             procesar_e_inyectar_mercado(raw_h2h, "1X2 (Ganador)", limite_h, liga, consolidador)
 
                         if "Doble Oportunidad" in mercados_sels:
-                            raw_dc = consultar_api_odds(sport_key, market_key="double_chance")
+                            raw_dc = consultar_api_odds_con_fallback(sport_keys_list, market_key="double_chance")
                             if not raw_dc or len(raw_dc) == 0:
                                 raw_dc = calcular_doble_oportunidad_sintetica(raw_h2h)
                             procesar_e_inyectar_mercado(raw_dc, "Doble Oportunidad", limite_h, liga, consolidador)
 
                         if "Goles Más/Menos 2.5" in mercados_sels:
-                            raw_totals = consultar_api_odds(sport_key, market_key="totals")
+                            raw_totals = consultar_api_odds_con_fallback(sport_keys_list, market_key="totals")
                             procesar_e_inyectar_mercado(raw_totals, "Goles Más/Menos 2.5", limite_h, liga, consolidador)
 
                         if "Ambos Anotan (BTTS)" in mercados_sels:
                             for p_base in filtrar_partidos_por_fecha(raw_h2h, limite_h):
-                                datos_evento = consultar_api_odds_evento(sport_key, p_base['id'], "btts")
+                                datos_evento = consultar_api_odds_evento(sport_keys_list[0], p_base['id'], "btts")
                                 if datos_evento:
                                     procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
 
