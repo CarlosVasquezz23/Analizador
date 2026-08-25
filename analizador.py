@@ -18,7 +18,6 @@ st.set_page_config(
 
 DB_FILE = "bitacora_backup.json"
 
-# Uso de st.secrets con fallback a tus llaves actuales
 API_KEY = st.secrets.get("ODDS_API_KEY", "e6414a3efabaf34994030cd0a8ea88b1")
 
 HL_API_KEY = st.secrets.get("HL_API_KEY", "f18c6837-5aaf-4880-8148-9b7a133b5557")
@@ -73,7 +72,41 @@ def enviar_telegram(mensaje: str) -> bool:
         return False
 
 # =========================================================
-# 3. TEMA VISUAL CSS
+# 3. VALIDADOR DE CORRELACIONES (CONFLICTOS DE APUESTAS)
+# =========================================================
+def detectar_correlaciones(apuestas: List[Dict[str, Any]]) -> List[str]:
+    alertas = []
+    eventos_map = {}
+    for ap in apuestas:
+        ev = ap['evento']
+        eventos_map.setdefault(ev, []).append(ap)
+
+    for ev, selecciones in eventos_map.items():
+        if len(selecciones) > 1:
+            mercados = [s['mercado'] for s in selecciones]
+            opciones = [s['seleccion'] for s in selecciones]
+
+            # Conflicto en 1X2
+            if mercados.count("1X2 (Ganador)") > 1:
+                alertas.append(f"⚠️ **{ev}**: Selección contradictoria en el mercado 1X2 ({', '.join(opciones)}).")
+
+            # Conflicto 1X2 vs Doble Oportunidad opuesta
+            if "1X2 (Ganador)" in mercados and "Doble Oportunidad" in mercados:
+                for s in selecciones:
+                    if s['seleccion'] == "Local" and any(x in ["X2 (Visitante o Empate)"] for x in opciones):
+                        alertas.append(f"⚠️ **{ev}**: Incompatibilidad entre Local y X2.")
+                    elif s['seleccion'] == "Visitante" and any(x in ["1X (Local o Empate)"] for x in opciones):
+                        alertas.append(f"⚠️ **{ev}**: Incompatibilidad entre Visitante y 1X.")
+
+            # Conflicto Under 2.5 vs BTTS Sí
+            if "Goles Más/Menos 2.5" in mercados and "Ambos Anotan (BTTS)" in mercados:
+                if "Menos de 2.5" in opciones and "Sí" in opciones:
+                    alertas.append(f"⚠️ **{ev}**: Conflicto de alta correlación negativa (Menos de 2.5 Goles y Ambos Anotan Sí).")
+
+    return alertas
+
+# =========================================================
+# 4. TEMA VISUAL CSS
 # =========================================================
 st.markdown("""
     <style>
@@ -182,70 +215,26 @@ st.markdown("""
         border: 1px solid var(--rg-border); border-radius: 18px; padding: 28px 30px; text-align: left;
     }
     .welcome-card h3 { margin-top: 0; }
-    .welcome-step { display: flex; align-items: center; gap: 12px; margin: 10px 0; color: #cfd8e3; font-size: 14.5px; }
-    .welcome-step .num {
-        flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; background: rgba(0,210,211,0.12);
-        border: 1px solid rgba(0,210,211,0.4); color: var(--rg-accent); font-weight: 700; font-size: 12.5px;
-        display: flex; align-items: center; justify-content: center;
-    }
 
     div[data-testid="stAlert"] { border-radius: 12px !important; border: 1px solid var(--rg-border) !important; }
     div[data-testid="stExpander"] { border: 1px solid var(--rg-border) !important; border-radius: 12px !important; background: var(--rg-card-alt); overflow: hidden; }
-    div[data-testid="stExpander"] summary { font-weight: 600 !important; }
 
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, textarea {
         border-radius: 10px !important; background: var(--rg-card-alt) !important; border-color: var(--rg-border) !important;
     }
-    span[data-baseweb="tag"] { border-radius: 6px !important; background: rgba(0,210,211,0.16) !important; }
-    hr { border-color: var(--rg-border) !important; opacity: 0.7; }
-
-    .empty-card {
-        background: linear-gradient(160deg, #1c1712 0%, #14110d 100%);
-        border: 1px solid rgba(241,196,15,0.25); border-radius: 16px; padding: 22px 26px;
-    }
-
-    div[class*="st-key-telegram_btn"] button {
-        background: linear-gradient(90deg, #229ED9, #1B8FC9) !important; color: white !important; border: none !important;
-    }
-
-    div[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; border: 1px solid var(--rg-border); }
-
-    div[class*="st-key-chip_"] {
-        border: 1px solid var(--rg-border); background: var(--rg-card-alt);
-        border-radius: 12px; padding: 8px 10px 10px 10px; margin-bottom: 8px;
-        transition: border-color .15s ease, background .15s ease;
-    }
-    div[class*="st-key-chip_"]:hover { border-color: rgba(0,210,211,0.5); }
-    div[class*="st-key-chip_"]:has(input:checked) {
-        background: rgba(0,210,211,0.10); border-color: var(--rg-accent); box-shadow: 0 0 0 1px rgba(0,210,211,0.18);
-    }
-    div[class*="st-key-chip_"] div[data-testid="stCheckbox"] label { font-weight: 600 !important; }
 
     .kpi-card {
         border-radius: 14px; padding: 16px 18px; border: 1px solid var(--rg-border);
         background: linear-gradient(160deg, var(--rg-card) 0%, #0f131b 100%); height: 100%;
     }
-    .kpi-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--rg-text-soft); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+    .kpi-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--rg-text-soft); margin-bottom: 6px; }
     .kpi-value { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700; line-height: 1.1; }
     .kpi-sub { font-size: 12.5px; margin-top: 4px; font-weight: 600; }
-
-    @media (max-width: 640px) {
-        .match-header { font-size: 14px; }
-        .creditos-caja { padding: 8px 10px 8px 12px; margin-bottom: 8px; }
-        .creditos-caja span { font-size: 15px !important; }
-        div[data-testid="stMetricValue"] { font-size: 18px; }
-        div.stButton > button { font-size: 13px !important; padding: 6px 8px !important; }
-        small { font-size: 11px; }
-        .welcome-card { padding: 18px 16px; }
-        .liga-chip, .kickoff-chip { font-size: 10px !important; }
-        .kpi-value { font-size: 20px; }
-        .kpi-card { padding: 10px 12px; }
-    }
     </style>
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 4. METODOS DE CLIENTES API
+# 5. METODOS DE CLIENTES API
 # =========================================================
 def hl_headers(): return {"x-rapidapi-key": HL_API_KEY}
 
@@ -256,29 +245,6 @@ def hl_buscar_ligas(country_name):
     try:
         r = requests.get(url, headers=hl_headers(), params={"countryName": country_name, "limit": 100}, timeout=10)
         return r.json().get("data", []) if r.status_code == 200 else []
-    except Exception:
-        return []
-
-@st.cache_data(ttl=300)
-def hl_consultar_matches(league_id, fecha_str):
-    if not league_id: return []
-    url = f"{HL_BASE_URL}/matches"
-    try:
-        r = requests.get(url, headers=hl_headers(), params={"leagueId": league_id, "date": fecha_str, "limit": 100}, timeout=10)
-        return r.json().get("data", []) if r.status_code == 200 else []
-    except Exception:
-        return []
-
-@st.cache_data(ttl=300)
-def hl_consultar_odds(match_id):
-    if not match_id: return []
-    url = f"{HL_BASE_URL}/odds"
-    try:
-        r = requests.get(url, headers=hl_headers(), params={"matchId": match_id, "oddsType": "prematch", "limit": 5}, timeout=10)
-        if r.status_code == 200:
-            data = r.json().get("data", [])
-            return data[0].get("odds", []) if data else []
-        return []
     except Exception:
         return []
 
@@ -308,51 +274,6 @@ def af_buscar_ligas(country_name):
         return r.json().get("response", []) if r.status_code == 200 else []
     except Exception:
         return []
-
-@st.cache_data(ttl=300)
-def af_consultar_fixtures(league_id, season, fecha_desde, fecha_hasta):
-    if not league_id: return []
-    url = f"{AF_BASE_URL}/fixtures"
-    try:
-        r = requests.get(url, headers=af_headers(), params={"league": league_id, "season": season, "from": fecha_desde, "to": fecha_hasta}, timeout=10)
-        _actualizar_creditos_af(r.headers)
-        return r.json().get("response", []) if r.status_code == 200 else []
-    except Exception:
-        return []
-
-@st.cache_data(ttl=300)
-def af_consultar_odds(fixture_id):
-    if not fixture_id: return []
-    url = f"{AF_BASE_URL}/odds"
-    try:
-        r = requests.get(url, headers=af_headers(), params={"fixture": fixture_id}, timeout=10)
-        _actualizar_creditos_af(r.headers)
-        if r.status_code == 200:
-            data = r.json().get("response", [])
-            return data[0].get("bookmakers", []) if data else []
-        return []
-    except Exception:
-        return []
-
-@st.cache_data(ttl=60)
-def af_consultar_status():
-    try:
-        r = requests.get(f"{AF_BASE_URL}/status", headers=af_headers(), timeout=10)
-        _actualizar_creditos_af(r.headers)
-        return r.status_code, r.json() if r.text else {}
-    except Exception as e:
-        return None, {"error": str(e)}
-
-@st.cache_data(ttl=60)
-def af_prueba_liga_grande():
-    hoy = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    hasta = (datetime.now(timezone.utc) + timedelta(days=10)).strftime("%Y-%m-%d")
-    try:
-        r = requests.get(f"{AF_BASE_URL}/fixtures", headers=af_headers(), params={"league": 71, "season": datetime.now(timezone.utc).year, "from": hoy, "to": hasta}, timeout=10)
-        _actualizar_creditos_af(r.headers)
-        return r.status_code, r.json() if r.text else {}
-    except Exception as e:
-        return None, {"error": str(e)}
 
 AF_LEAGUE_IDS = {
     "🇨🇴 Primera A (Colombia)": 239,
@@ -397,7 +318,7 @@ diccionario_mercados = {
 }
 
 # =========================================================
-# 5. INICIALIZACIÓN DE ESTADOS
+# 6. INICIALIZACIÓN DE ESTADOS
 # =========================================================
 if 'historial_apuestas' not in st.session_state:
     st.session_state.historial_apuestas = BitacoraManager.cargar()
@@ -419,7 +340,7 @@ if 'creditos_restantes_af' not in st.session_state:
     st.session_state.creditos_restantes_af = "No consultado"
 
 # =========================================================
-# 6. CONTROLES DEL SIDEBAR
+# 7. CONTROLES DEL SIDEBAR
 # =========================================================
 with st.sidebar:
     st.header("⚙️ Filtros de Control Global")
@@ -457,34 +378,6 @@ with st.sidebar:
     habilitar_af = st.checkbox("✅ Habilitar ligas extra (API-Football, gratis)", value=True)
     ligas_af_sels = st.multiselect("Ligas extra a analizar (API-Football):", list(AF_LEAGUE_IDS.keys()), default=[]) if habilitar_af else []
 
-    with st.expander("🔬 Diagnóstico API-Football"):
-        if st.button("Ejecutar diagnóstico"):
-            cod1, data1 = af_consultar_status()
-            st.write(f"**/status:** HTTP {cod1}")
-            st.json(data1)
-            cod2, data2 = af_prueba_liga_grande()
-            st.write(f"**Brasileirao:** HTTP {cod2}")
-            st.json(data2)
-
-    with st.expander("🔧 Buscar League ID en API-Football"):
-        pais_busqueda_af = st.text_input("País (ej: Colombia)", "", key="pais_busqueda_af")
-        if st.button("Buscar ligas en API-Football"):
-            resultados_af = af_buscar_ligas(pais_busqueda_af)
-            for liga_af in resultados_af:
-                st.write(f"**ID {liga_af.get('league', {}).get('id')}** — {liga_af.get('league', {}).get('name')}")
-
-    st.markdown("---")
-    st.caption("🌎 Ligas extra vía Highlightly (requiere plan PRO)")
-    habilitar_hl = st.checkbox("🔒 Habilitar ligas extra (Highlightly)", value=False)
-    ligas_hl_sels = st.multiselect("Ligas extra a analizar (Highlightly):", list(HL_LEAGUE_IDS.keys()), default=[]) if habilitar_hl else []
-
-    with st.expander("🔧 Buscar League ID en Highlightly"):
-        pais_busqueda = st.text_input("País (ej: Colombia)", "")
-        if st.button("Buscar ligas en Highlightly"):
-            resultados_hl = hl_buscar_ligas(pais_busqueda)
-            for liga_hl in resultados_hl:
-                st.write(f"**ID {liga_hl.get('id')}** — {liga_hl.get('name')}")
-
     mercados_sels = st.multiselect("Mercados de Análisis:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
     tiempo_sel = st.selectbox("Rango Temporal:", ["24 Horas", "48 Horas", "72 Horas"], index=1)
     limite_h = int(tiempo_sel.split()[0])
@@ -506,28 +399,12 @@ with st.sidebar:
     generar_auto = st.button("🎲 ¡Pre-seleccionar Muestras!", use_container_width=True)
 
     st.markdown("---")
-    habilitar_autorefresh = st.checkbox("🔁 Auto-refresco automático", value=False)
-    intervalo_min = st.number_input("Minutos entre refrescos:", min_value=1, max_value=60, value=5, disabled=not habilitar_autorefresh)
-    autorefresh_disparo = False
-    if habilitar_autorefresh:
-        try:
-            from streamlit_autorefresh import st_autorefresh
-            _contador_ref = st_autorefresh(interval=int(intervalo_min * 60 * 1000), key="autorefresh_radar_key")
-            if 'ultimo_contador_autorefresh' not in st.session_state:
-                st.session_state.ultimo_contador_autorefresh = _contador_ref
-            elif _contador_ref != st.session_state.ultimo_contador_autorefresh:
-                st.session_state.ultimo_contador_autorefresh = _contador_ref
-                autorefresh_disparo = True
-        except ImportError:
-            st.warning("⚠️ Falta paquete 'streamlit-autorefresh'.")
-
-    st.markdown("---")
     with st.expander("🔔 Notificaciones por Telegram"):
         st.session_state['tg_token'] = st.text_input("Bot Token:", value=st.session_state.get('tg_token', ''), type="password")
         st.session_state['tg_chat_id'] = st.text_input("Chat ID:", value=st.session_state.get('tg_chat_id', ''))
 
 # =========================================================
-# 7. PROCESADORES Y CÁLCULOS MATEMÁTICOS DE CUOTAS
+# 8. PROCESADORES Y CÁLCULOS MATEMÁTICOS DE CUOTAS
 # =========================================================
 def actualizar_creditos(headers):
     if 'x-requests-remaining' in headers:
@@ -604,17 +481,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                         elif o_name in ["home_away", "home or away", "12", f"{home} or {away}"]: o_name = "12 (Local o Visitante)"
                         cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
                         if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
-                elif "h2h" in dict_b_markets:
-                    precios_h2h = {o['name']: float(o['price']) for o in dict_b_markets["h2h"]}
-                    draw_key = next((k for k in precios_h2h if k not in [home, away]), None)
-                    if home in precios_h2h and away in precios_h2h and draw_key:
-                        cH, cD, cA = precios_h2h[home], precios_h2h[draw_key], precios_h2h[away]
-                        c1X = round((cH * cD) / (cH + cD), 2)
-                        cX2 = round((cA * cD) / (cA + cD), 2)
-                        c12 = round((cH * cA) / (cH + cA), 2)
-                        cuotas_globales.setdefault("1X (Local o Empate)", []).append((c1X, b['title']))
-                        cuotas_globales.setdefault("X2 (Visitante o Empate)", []).append((cX2, b['title']))
-                        cuotas_globales.setdefault("12 (Local o Visitante)", []).append((c12, b['title']))
 
             elif mercado == "Ambos Anotan (BTTS)" and "btts" in dict_b_markets:
                 for o in dict_b_markets["btts"]:
@@ -666,7 +532,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             }
 
 # =========================================================
-# 8. PESTAÑAS Y VISTA DE USUARIO
+# 9. PESTAÑAS Y VISTA DE USUARIO
 # =========================================================
 pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
 
@@ -674,14 +540,14 @@ with pestana_radar:
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
     st.caption("Escaneo de cuotas en tiempo real · Value bets · Ticket parlay automático")
 
-    if consultar or autorefresh_disparo:
-        if (len(ligas_sels) > 0 or len(ligas_hl_sels) > 0 or len(ligas_af_sels) > 0) and len(mercados_sels) > 0:
+    if consultar:
+        if (len(ligas_sels) > 0 or len(ligas_af_sels) > 0) and len(mercados_sels) > 0:
             st.cache_data.clear()
             consolidador = {}
             st.session_state.ha_consultado = True
 
             mercados_featured = [m for m in mercados_sels if diccionario_mercados[m] in ("h2h", "totals")]
-            total_ligas = len(ligas_sels) + len(ligas_hl_sels) + len(ligas_af_sels)
+            total_ligas = len(ligas_sels) + len(ligas_af_sels)
 
             with st.status(f"🔄 Consultando {total_ligas} liga(s)...", expanded=True) as status_consulta:
                 for idx_liga, liga in enumerate(ligas_sels, start=1):
@@ -708,56 +574,43 @@ with pestana_radar:
             st.session_state.datos_cargados = consolidador
             st.session_state.claves_auto = set()
             st.session_state.version_ticket += 1
-            st.session_state.ultima_consulta = datetime.now()
 
     dict_partidos = st.session_state.datos_cargados
     dict_previos = st.session_state.datos_cargados_previos
 
-    # LÓGICA CON MODOS DE ESTRATEGIA Y PERFIL DE RIESGO
-    if generar_auto:
-        if dict_partidos:
-            opciones_todas = []
-            for p_id, part in dict_partidos.items():
-                for nombre_m, m_info in part['mercados'].items():
-                    for opcion, val_data in m_info['value_bets'].items():
-                        cuota_op = m_info['max_cuotas'][opcion]
-                        prob_op = val_data['prob_real']
-                        ev_op = val_data['ev']
-                        
-                        cumple_perfil = True
-                        if "Conservador" in perfil_estrategia:
-                            cumple_perfil = prob_op >= 65.0
-                        elif "Value Hunter" in perfil_estrategia:
-                            cumple_perfil = ev_op > 0.02
-                        elif "Equilibrado" in perfil_estrategia:
-                            cumple_perfil = nombre_m == "Doble Oportunidad"
+    if generar_auto and dict_partidos:
+        opciones_todas = []
+        for p_id, part in dict_partidos.items():
+            for nombre_m, m_info in part['mercados'].items():
+                for opcion, val_data in m_info['value_bets'].items():
+                    cuota_op = m_info['max_cuotas'][opcion]
+                    prob_op = val_data['prob_real']
+                    ev_op = val_data['ev']
+                    
+                    cumple_perfil = True
+                    if "Conservador" in perfil_estrategia: cumple_perfil = prob_op >= 65.0
+                    elif "Value Hunter" in perfil_estrategia: cumple_perfil = ev_op > 0.02
+                    elif "Equilibrado" in perfil_estrategia: cumple_perfil = nombre_m == "Doble Oportunidad"
 
-                        if cumple_perfil and (rango_cuota_auto[0] <= cuota_op <= rango_cuota_auto[1]) and (prob_op >= prob_min_auto):
-                            opciones_todas.append({
-                                "partido_id": part['id'],
-                                "clave": f"ap_{part['id']}_{nombre_m}_{opcion}",
-                                "prob_real": prob_op,
-                                "mercado": nombre_m,
-                                "seleccion": opcion
-                            })
-            
-            opciones_todas = sorted(opciones_todas, key=lambda x: x['prob_real'], reverse=True)
-            
-            partidos_usados = set()
-            mejores_opciones = []
-            for op in opciones_todas:
-                if op['partido_id'] not in partidos_usados:
-                    partidos_usados.add(op['partido_id'])
-                    mejores_opciones.append(op)
-                if len(mejores_opciones) == num_eventos_auto:
-                    break
-            
-            if mejores_opciones:
-                st.session_state.claves_auto = set([x['clave'] for x in mejores_opciones])
-                st.session_state.version_ticket += 1
-                st.success(f"🎯 Marcados automáticamente {len(mejores_opciones)} eventos ({perfil_estrategia}).")
-            else:
-                st.warning("⚠️ Ninguna selección cumple los filtros de la estrategia seleccionada.")
+                    if cumple_perfil and (rango_cuota_auto[0] <= cuota_op <= rango_cuota_auto[1]) and (prob_op >= prob_min_auto):
+                        opciones_todas.append({
+                            "partido_id": part['id'], "clave": f"ap_{part['id']}_{nombre_m}_{opcion}",
+                            "prob_real": prob_op, "mercado": nombre_m, "seleccion": opcion
+                        })
+        
+        opciones_todas = sorted(opciones_todas, key=lambda x: x['prob_real'], reverse=True)
+        partidos_usados = set()
+        mejores_opciones = []
+        for op in opciones_todas:
+            if op['partido_id'] not in partidos_usados:
+                partidos_usados.add(op['partido_id'])
+                mejores_opciones.append(op)
+            if len(mejores_opciones) == num_eventos_auto: break
+        
+        if mejores_opciones:
+            st.session_state.claves_auto = set([x['clave'] for x in mejores_opciones])
+            st.session_state.version_ticket += 1
+            st.success(f"🎯 Marcados automáticamente {len(mejores_opciones)} eventos.")
 
     apuestas_seleccionadas = []
 
@@ -773,9 +626,7 @@ with pestana_radar:
     else:
         col_busq, col_valor, col_orden = st.columns([2.2, 1.3, 1.5])
         with col_busq: busqueda_equipo = st.text_input("🔍 Buscador rápido por equipo:", "").strip().lower()
-        with col_valor: solo_valor = st.checkbox("🔥 Solo VALOR")
-        with col_orden: orden_sel = st.selectbox("Ordenar por:", ["🕐 Hora del partido", "📈 Mayor probabilidad"])
-
+        
         dict_partidos_filtrados = {
             p_id: p for p_id, p in dict_partidos.items()
             if busqueda_equipo in p['local'].lower() or busqueda_equipo in p['visitante'].lower()
@@ -809,28 +660,14 @@ with pestana_radar:
                                                 clave_base = f"ap_{part['id']}_{text_m}_{opcion}"
                                                 marcado = clave_base in st.session_state.claves_auto
 
-                                                txt_mov = ""
-                                                if dict_previos and part['id'] in dict_previos and text_m in dict_previos[part['id']]['mercados']:
-                                                    cuotas_v = dict_previos[part['id']]['mercados'][text_m]['max_cuotas']
-                                                    if opcion in cuotas_v:
-                                                        c_ant = cuotas_v[opcion]
-                                                        diff = cuota_m - c_ant
-                                                        if diff > 0.01:
-                                                            txt_mov = f"<span class='movimiento-sube'>▲ +{round(diff,2)}</span>"
-                                                        elif diff < -0.01:
-                                                            txt_mov = f"<span class='movimiento-baja'>▼ {round(diff,2)}</span>"
-
                                                 chk = st.checkbox(f"{opcion} ({cuota_m}) {lbl_val}", value=marcado, key=f"render_{clave_base}_v{st.session_state.version_ticket}")
-                                                st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]} {txt_mov}<br>🎯 Prob: {round(val['prob_real'],1)}%</small>", unsafe_allow_html=True)
+                                                st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]}<br>🎯 Prob: {round(val['prob_real'],1)}%</small>", unsafe_allow_html=True)
 
-                                                # MATRIZ MULTI-CASA (ODDS COMPARISON GRID)
                                                 with st.expander("🏬 Comparar Casas"):
                                                     todas_casas = m_info.get('todas_cuotas', {}).get(opcion, [])
                                                     if todas_casas:
                                                         df_casas = pd.DataFrame(todas_casas, columns=["Cuota", "Casa de Apuestas"]).sort_values("Cuota", ascending=False)
                                                         st.dataframe(df_casas, use_container_width=True, hide_index=True)
-                                                    else:
-                                                        st.caption("No hay datos de otras casas.")
 
                                                 if chk:
                                                     apuestas_seleccionadas.append({
@@ -843,6 +680,11 @@ with pestana_radar:
         with col_der:
             st.subheader("🎟️ Configuración de Parlay")
             if apuestas_seleccionadas:
+                # 🔀 NUEVO: DETECCIÓN DE APUESTAS CORRELACIONADAS
+                alertas_correlacion = detectar_correlaciones(apuestas_seleccionadas)
+                for al in alertas_correlacion:
+                    st.error(al)
+
                 cuota_acumulada = 1.0
                 prob_combinada = 1.0
                 texto_whatsapp = "🚀 *TICKET PARLAY SUGERIDO DESDE RADAR GLOBAL* 🚀\n\n"
@@ -879,7 +721,8 @@ with pestana_radar:
                         st.session_state.historial_apuestas.append({
                             "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
                             "Detalles": f"{len(apuestas_seleccionadas)} combinadas",
-                            "Market": "Multi-Mercado",
+                            "Liga": apuestas_seleccionadas[0]['liga'] if apuestas_seleccionadas else "Varias",
+                            "Market": apuestas_seleccionadas[0]['mercado'] if len(apuestas_seleccionadas)==1 else "Multi-Mercado",
                             "Cuota": cuota_acumulada,
                             "Inversión": monto_inversion,
                             "Estado": "Pendiente",
@@ -889,6 +732,24 @@ with pestana_radar:
                         st.toast("¡Guardado localmente!", icon="💾")
                         st.rerun()
 
+                    # 📄 NUEVO: EXPORTACIÓN DEL BOLETO IMPRIMIBLE/PDF
+                    html_ticket = f"""
+                    <div style="font-family: Arial; border:2px solid #00d2d3; padding:15px; border-radius:10px; background-color:#12161f; color:white;">
+                        <h3 style="color:#00d2d3; text-align:center;">🎟️ BOLETO DE APUESTAS PARLAY</h3>
+                        <p><b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p><hr>
+                    """
+                    for ap in apuestas_seleccionadas:
+                        html_ticket += f"<p>⚽ <b>{ap['evento']}</b><br>🎯 {ap['mercado']} - {ap['seleccion']} (x{ap['cuota']})</p>"
+                    html_ticket += f"<hr><h4>Cuota Total: x{round(cuota_acumulada,2)} | Inversión: ${monto_inversion}</h4></div>"
+                    
+                    st.download_button(
+                        "📄 Descargar Boleto HTML/PDF",
+                        data=html_ticket,
+                        file_name=f"Boleto_Parlay_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
+                        mime="text/html",
+                        use_container_width=True
+                    )
+
                     msg_encoded = urllib.parse.quote(texto_whatsapp)
                     st.markdown(f'<a href="https://api.whatsapp.com/send?text={msg_encoded}" target="_blank" style="text-decoration:none;"><button style="border:none; background-color:#25D366; color:white; padding:10px; border-radius:8px; font-weight:bold; width:100%; cursor:pointer;">📲 Compartir en WhatsApp</button></a>', unsafe_allow_html=True)
 
@@ -897,10 +758,28 @@ with pestana_radar:
                             st.toast("¡Enviado a Telegram!", icon="📤")
 
 # =========================================================
-# 9. PESTAÑA AUDITORÍA Y BITÁCORA
+# 10. PESTAÑA AUDITORÍA, BITÁCORA Y PERFORMANCE ANALYTICS
 # =========================================================
 with pestana_historial:
     st.title("📊 Módulo de Auditoría Financiera Avanzada")
+
+    # 🗄️ NUEVO: RESPALDO Y RESTAURACIÓN JSON (IMPORT/EXPORT)
+    with st.expander("🗄️ Copias de Seguridad (Backup & Restore JSON)"):
+        col_exp_j, col_imp_j = st.columns(2)
+        with col_exp_j:
+            json_data = json.dumps(st.session_state.historial_apuestas, ensure_ascii=False, indent=4)
+            st.download_button("📥 Descargar Respaldo JSON", data=json_data, file_name="bitacora_backup.json", mime="application/json", use_container_width=True)
+        with col_imp_j:
+            uploaded_json = st.file_uploader("📤 Restaurar desde JSON", type=["json"])
+            if uploaded_json is not None:
+                try:
+                    data_restaurada = json.load(uploaded_json)
+                    st.session_state.historial_apuestas = data_restaurada
+                    BitacoraManager.guardar(data_restaurada)
+                    st.success("✅ ¡Bitácora restaurada exitosamente!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al procesar archivo JSON: {e}")
 
     if st.session_state.historial_apuestas:
         df_act = pd.DataFrame(st.session_state.historial_apuestas)
@@ -947,6 +826,20 @@ with pestana_historial:
         
         df_act['Balance Acumulado ($)'] = balance_acumulado
         st.line_chart(df_act['Balance Acumulado ($)'], use_container_width=True)
+
+        # 📊 NUEVO: DESGLOSE DE RENDIMIENTO POR LIGA Y MERCADO (PERFORMANCE ANALYTICS)
+        st.subheader("📊 Análisis de Rendimiento por Liga y Mercado")
+        col_an_liga, col_an_mercado = st.columns(2)
+        with col_an_liga:
+            if "Liga" in df_act.columns:
+                df_liga = df_act.groupby("Liga")['Inversión'].count().reset_index().rename(columns={"Inversión": "Total Apuestas"})
+                st.write("**Apuestas Totales por Liga:**")
+                st.bar_chart(df_liga.set_index("Liga"))
+        with col_an_mercado:
+            if "Market" in df_act.columns:
+                df_market = df_act.groupby("Market")['Inversión'].count().reset_index().rename(columns={"Inversión": "Total Apuestas"})
+                st.write("**Apuestas Totales por Mercado:**")
+                st.bar_chart(df_market.set_index("Market"))
 
         st.dataframe(df_act, use_container_width=True)
 
