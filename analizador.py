@@ -102,8 +102,8 @@ st.markdown("""
     .prob-alta { color: var(--rg-success); font-weight: 700; }
     .prob-media { color: var(--rg-warn); font-weight: 700; }
     .prob-baja { color: var(--rg-danger); font-weight: 700; }
-    .movimiento-sube { color: var(--rg-success); font-weight: bold; }
-    .movimiento-baja { color: var(--rg-danger); font-weight: bold; }
+    .movimiento-sube { color: var(--rg-success); font-weight: bold; font-size: 11px; }
+    .movimiento-baja { color: var(--rg-danger); font-weight: bold; font-size: 11px; }
 
     .match-header { font-size: 18px; font-weight: 700; margin-bottom: 2px; letter-spacing: -0.01em; }
     .liga-chip {
@@ -405,6 +405,8 @@ if 'version_ticket' not in st.session_state:
     st.session_state.version_ticket = 0
 if 'datos_cargados' not in st.session_state:
     st.session_state.datos_cargados = {}
+if 'datos_cargados_previos' not in st.session_state:
+    st.session_state.datos_cargados_previos = {}
 if 'ha_consultado' not in st.session_state:
     st.session_state.ha_consultado = False
 if 'versiones_partidos' not in st.session_state:
@@ -486,10 +488,20 @@ with st.sidebar:
     mercados_sels = st.multiselect("Mercados de Análisis:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
     tiempo_sel = st.selectbox("Rango Temporal:", ["24 Horas", "48 Horas", "72 Horas"], index=1)
     limite_h = int(tiempo_sel.split()[0])
+    
+    st.markdown("---")
+    st.subheader("🧮 Gestión Financiera (Kelly)")
+    bankroll_total = st.number_input("Banca Total ($):", min_value=10.0, value=200.0, step=10.0)
+    fraccion_kelly = st.slider("Fracción de Kelly:", min_value=0.1, max_value=1.0, value=0.25, step=0.05, help="0.25 = Cuarto de Kelly (Conservador)")
     monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0)
 
     consultar = st.button("🔍 Consultar Radar Múltiple", type="primary", use_container_width=True)
-    num_eventos_auto = st.slider("Eventos para el Generador Automático:", min_value=2, max_value=6, value=3)
+    
+    st.markdown("---")
+    st.subheader("🎯 Filtros Parlay Automático")
+    num_eventos_auto = st.slider("Eventos:", min_value=2, max_value=6, value=3)
+    rango_cuota_auto = st.slider("Rango de Cuota por Selección:", min_value=1.10, max_value=3.50, value=(1.25, 2.20), step=0.05)
+    prob_min_auto = st.slider("Probabilidad Mínima (%):", min_value=40, max_value=90, value=55, step=5)
     generar_auto = st.button("🎲 ¡Pre-seleccionar Muestras!", use_container_width=True)
 
     st.markdown("---")
@@ -698,21 +710,27 @@ with pestana_radar:
             st.session_state.ultima_consulta = datetime.now()
 
     dict_partidos = st.session_state.datos_cargados
+    dict_previos = st.session_state.datos_cargados_previos
 
-    # LÓGICA MEJORADA: ELECCIÓN DE LA MEJOR OPCIÓN DE PROBABILIDAD POR PARTIDO ENTRE MERCADOS ACTIVOS
+    # LÓGICA MEJORADA CON FILTROS DE RIESGO AVANZADOS
     if generar_auto:
         if dict_partidos:
             opciones_todas = []
             for p_id, part in dict_partidos.items():
                 for nombre_m, m_info in part['mercados'].items():
                     for opcion, val_data in m_info['value_bets'].items():
-                        opciones_todas.append({
-                            "partido_id": part['id'],
-                            "clave": f"ap_{part['id']}_{nombre_m}_{opcion}",
-                            "prob_real": val_data['prob_real'],
-                            "mercado": nombre_m,
-                            "seleccion": opcion
-                        })
+                        cuota_op = m_info['max_cuotas'][opcion]
+                        prob_op = val_data['prob_real']
+                        
+                        # Filtro de Riesgo (Cuotas y Probabilidad)
+                        if (rango_cuota_auto[0] <= cuota_op <= rango_cuota_auto[1]) and (prob_op >= prob_min_auto):
+                            opciones_todas.append({
+                                "partido_id": part['id'],
+                                "clave": f"ap_{part['id']}_{nombre_m}_{opcion}",
+                                "prob_real": prob_op,
+                                "mercado": nombre_m,
+                                "seleccion": opcion
+                            })
             
             # Ordenar todas por probabilidad descendente
             opciones_todas = sorted(opciones_todas, key=lambda x: x['prob_real'], reverse=True)
@@ -730,7 +748,9 @@ with pestana_radar:
             if mejores_opciones:
                 st.session_state.claves_auto = set([x['clave'] for x in mejores_opciones])
                 st.session_state.version_ticket += 1
-                st.success(f"🎯 Marcados automáticamente los {len(mejores_opciones)} eventos con mayor probabilidad real de éxito.")
+                st.success(f"🎯 Marcados automáticamente {len(mejores_opciones)} eventos ajustados a tu rango de riesgo.")
+            else:
+                st.warning("⚠️ Ninguna selección cumple los filtros de riesgo actuales. Intenta ampliar los rangos.")
 
     apuestas_seleccionadas = []
 
@@ -782,31 +802,54 @@ with pestana_radar:
                                                 clave_base = f"ap_{part['id']}_{text_m}_{opcion}"
                                                 marcado = clave_base in st.session_state.claves_auto
 
+                                                # CÁLCULO DE MOVIMIENTO DE CUOTA (ODDS MOVEMENT)
+                                                txt_mov = ""
+                                                if dict_previos and part['id'] in dict_previos and text_m in dict_previos[part['id']]['mercados']:
+                                                    cuotas_v = dict_previos[part['id']]['mercados'][text_m]['max_cuotas']
+                                                    if opcion in cuotas_v:
+                                                        c_ant = cuotas_v[opcion]
+                                                        diff = cuota_m - c_ant
+                                                        if diff > 0.01:
+                                                            txt_mov = f"<span class='movimiento-sube'>▲ +{round(diff,2)}</span>"
+                                                        elif diff < -0.01:
+                                                            txt_mov = f"<span class='movimiento-baja'>▼ {round(diff,2)}</span>"
+
                                                 chk = st.checkbox(f"{opcion} ({cuota_m}) {lbl_val}", value=marcado, key=f"render_{clave_base}_v{st.session_state.version_ticket}")
-                                                st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]}<br>🎯 Prob: {round(val['prob_real'],1)}%</small>", unsafe_allow_html=True)
+                                                st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]} {txt_mov}<br>🎯 Prob: {round(val['prob_real'],1)}%</small>", unsafe_allow_html=True)
 
                                                 if chk:
                                                     apuestas_seleccionadas.append({
                                                         "evento": f"{part['local']} vs {part['visitante']}",
                                                         "liga": part['liga_origen'], "mercado": text_m,
-                                                        "seleccion": opcion, "cuota": cuota_m, "casa": m_info['max_bookies'][opcion]
+                                                        "seleccion": opcion, "cuota": cuota_m, "casa": m_info['max_bookies'][opcion],
+                                                        "prob_real": val['prob_real']
                                                     })
 
         with col_der:
             st.subheader("🎟️ Configuración de Parlay")
             if apuestas_seleccionadas:
                 cuota_acumulada = 1.0
+                prob_combinada = 1.0
                 texto_whatsapp = "🚀 *TICKET PARLAY SUGERIDO DESDE RADAR GLOBAL* 🚀\n\n"
                 with st.container(border=True, key="ticket_card"):
                     st.markdown("<div class='ticket-titulo'>🎟️ Boleto Parlay</div>", unsafe_allow_html=True)
                     for ap in apuestas_seleccionadas:
                         cuota_acumulada *= float(ap['cuota'])
+                        prob_combinada *= (float(ap['prob_real']) / 100.0)
                         st.markdown(f"<div class='ticket-item'>✔️ <b>{ap['evento']}</b><br>➔ <code>{ap['seleccion']}</code> | <span class='ticket-cuota-tag'>x{ap['cuota']}</span></div>", unsafe_allow_html=True)
                         texto_whatsapp += f"⚽ *{ap['evento']}*\n🎯 {ap['mercado']}: *{ap['seleccion']}* (x{ap['cuota']}) - 🏢 {ap['casa']}\n\n"
 
+                    # CÁLCULO DE KELLY INTEGRADO
+                    b = cuota_acumulada - 1.0
+                    p = prob_combinada
+                    q = 1.0 - p
+                    f_kelly = ((b * p) - q) / b if b > 0 else 0
+                    stake_kelly = max(0.0, f_kelly * fraccion_kelly * bankroll_total)
+
                     ganancia_neta = (cuota_acumulada * monto_inversion) - monto_inversion
                     st.metric("Cuota Final", f"x{round(cuota_acumulada, 2)}")
-                    st.metric("Ganancia Neta", f"${round(ganancia_neta, 2)}")
+                    st.metric("Ganancia Neta Base", f"${round(ganancia_neta, 2)}")
+                    st.metric("💡 Stake Kelly Sugerido", f"${round(stake_kelly, 2)}", help=f"Recomendación para tu Bankroll de ${bankroll_total}")
 
                     if st.button("💾 Registrar en Bitácora", type="primary", use_container_width=True):
                         st.session_state.historial_apuestas.append({
