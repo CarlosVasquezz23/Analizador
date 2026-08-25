@@ -460,7 +460,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 7. CLIENTES API Y MAPEO OFICIAL
+# 7. CLIENTES API Y MAPEO DE TORNEOS
 # =========================================================
 def hl_headers(): return {"x-rapidapi-key": HL_API_KEY}
 
@@ -512,7 +512,6 @@ AF_LEAGUE_IDS = {
     "🇵🇾 División Profesional Paraguay - Clausura": 252,
 }
 
-# MAPEO DE CLAVES ESTÁNDAR PARA THE ODDS API
 todas_las_ligas = {
     "EU Champions League": "soccer_uefa_champions_league",
     "EU Europa League": "soccer_uefa_europa_league",
@@ -639,7 +638,7 @@ with st.sidebar:
         st.session_state['auto_alertas_telegram'] = st.checkbox("🚀 Auto-alertas (+EV > 5%)", value=False)
 
 # =========================================================
-# 10. PROCESAMIENTO DE CUOTAS Y FILTRADO ROBUSTO
+# 10. PROCESAMIENTO DE CUOTAS Y GENERADOR SINTÉTICO
 # =========================================================
 def actualizar_creditos(headers):
     if 'x-requests-remaining' in headers:
@@ -680,6 +679,39 @@ def filtrar_partidos_por_fecha(datos, limite_horas):
         if -48.0 <= horas <= (limite_horas + 48):
             res.append(p)
     return res
+
+def calcular_doble_oportunidad_sintetica(raw_h2h_data):
+    """Genera sintéticamente el mercado de Doble Oportunidad a partir de las cuotas 1X2"""
+    if not raw_h2h_data or not isinstance(raw_h2h_data, list): return []
+    datos_sinteticos = []
+    for partido in raw_h2h_data:
+        p_copy = json.loads(json.dumps(partido))
+        bookies_sinteticos = []
+        for b in p_copy.get('bookmakers', []):
+            h2h_market = next((m for m in b.get('markets', []) if m['key'] == 'h2h'), None)
+            if not h2h_market: continue
+            
+            c_local = next((o['price'] for o in h2h_market['outcomes'] if o['name'] == p_copy['home_team']), None)
+            c_visita = next((o['price'] for o in h2h_market['outcomes'] if o['name'] == p_copy['away_team']), None)
+            c_empate = next((o['price'] for o in h2h_market['outcomes'] if o['name'] == 'Draw'), None)
+
+            if c_local and c_visita and c_empate:
+                dc_1x = round(1.0 / ((1.0 / c_local) + (1.0 / c_empate)), 2)
+                dc_x2 = round(1.0 / ((1.0 / c_visita) + (1.0 / c_empate)), 2)
+                dc_12 = round(1.0 / ((1.0 / c_local) + (1.0 / c_visita)), 2)
+
+                b['markets'] = [{
+                    'key': 'double_chance',
+                    'outcomes': [
+                        {'name': 'home_draw', 'price': dc_1x},
+                        {'name': 'away_draw', 'price': dc_x2},
+                        {'name': 'home_away', 'price': dc_12}
+                    ]
+                }]
+                bookies_sinteticos.append(b)
+        p_copy['bookmakers'] = bookies_sinteticos
+        datos_sinteticos.append(p_copy)
+    return datos_sinteticos
 
 def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
     ahora_utc = datetime.now(timezone.utc)
@@ -815,20 +847,26 @@ with pestana_radar:
             with st.status(f"🔄 Consultando {total_ligas} liga(s)...", expanded=True) as status_consulta:
                 for idx_liga, liga in enumerate(ligas_sels, start=1):
                     sport_key = todas_las_ligas.get(liga)
-                    status_consulta.update(label=f"🔄 Consultando ({idx_liga}/{total_ligas}): {liga} [{sport_key}]")
+                    status_consulta.update(label=f"🔄 Consultando ({idx_liga}/{total_ligas}): {liga}")
                     
                     if sport_key:
-                        for m_sel in mercados_featured:
-                            raw_data = consultar_api_odds(sport_key, market_key=diccionario_mercados[m_sel])
-                            procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
+                        raw_h2h = consultar_api_odds(sport_key, market_key="h2h")
+                        
+                        if "1X2 (Ganador)" in mercados_sels:
+                            procesar_e_inyectar_mercado(raw_h2h, "1X2 (Ganador)", limite_h, liga, consolidador)
 
                         if "Doble Oportunidad" in mercados_sels:
-                            base_h2h = consultar_api_odds(sport_key, market_key="h2h")
-                            procesar_e_inyectar_mercado(base_h2h, "Doble Oportunidad", limite_h, liga, consolidador)
+                            raw_dc = consultar_api_odds(sport_key, market_key="double_chance")
+                            if not raw_dc or len(raw_dc) == 0:
+                                raw_dc = calcular_doble_oportunidad_sintetica(raw_h2h)
+                            procesar_e_inyectar_mercado(raw_dc, "Doble Oportunidad", limite_h, liga, consolidador)
+
+                        if "Goles Más/Menos 2.5" in mercados_sels:
+                            raw_totals = consultar_api_odds(sport_key, market_key="totals")
+                            procesar_e_inyectar_mercado(raw_totals, "Goles Más/Menos 2.5", limite_h, liga, consolidador)
 
                         if "Ambos Anotan (BTTS)" in mercados_sels:
-                            base_para_filtrar = consultar_api_odds(sport_key, market_key="h2h")
-                            for p_base in filtrar_partidos_por_fecha(base_para_filtrar, limite_h):
+                            for p_base in filtrar_partidos_por_fecha(raw_h2h, limite_h):
                                 datos_evento = consultar_api_odds_evento(sport_key, p_base['id'], "btts")
                                 if datos_evento:
                                     procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
