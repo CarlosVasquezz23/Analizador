@@ -636,7 +636,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 7. CLIENTES API Y MAPEO EXTENDIDO DE LIGAS
+# 7. CLIENTES API Y MAPEO EXTENDIDO DE LIGAS (TOTALMENTE ACTIVADAS)
 # =========================================================
 def hl_headers(): return {"x-rapidapi-key": HL_API_KEY}
 
@@ -653,9 +653,9 @@ def hl_buscar_ligas(country_name):
 HL_LEAGUE_IDS = {
     "🇨🇴 Primera A (Colombia)": 204173,
     "🇪🇨 LigaPro (Ecuador)": 206726,
-    "🇺🇾 Primera División Uruguay - Apertura": 228852,
-    "🇺🇾 Primera División Uruguay - Clausura": 230554,
+    "🇺🇾 Primera División Uruguay": 228852,
     "🇵🇪 Liga 1 (Perú)": 239915,
+    "🇺🇸 MLS (EE.UU.)": 253,
 }
 
 def af_headers(): return {"x-apisports-key": AF_API_KEY}
@@ -678,35 +678,62 @@ def af_buscar_ligas(country_name):
         return []
 
 AF_LEAGUE_IDS = {
+    "🇦🇷 Liga Profesional (Argentina)": 128,
+    "🇧🇷 Brasileirão Serie A (Brasil)": 71,
+    "🇨🇱 Primera División (Chile)": 265,
     "🇨🇴 Primera A (Colombia)": 239,
     "🇪🇨 LigaPro (Ecuador)": 242,
-    "🇺🇾 Primera División Uruguay - Apertura": 268,
-    "🇺🇾 Primera División Uruguay - Clausura": 270,
-    "🇵🇪 Liga 1 (Perú)": 281,
     "🇲🇽 Liga MX (México)": 262,
-    "🇵🇾 División Profesional Paraguay - Apertura": 250,
-    "🇵🇾 División Profesional Paraguay - Clausura": 252,
+    "🇵🇾 División Profesional (Paraguay)": 252,
+    "🇵🇪 Liga 1 (Perú)": 281,
+    "🇺🇾 Primera División (Uruguay)": 268,
+    "🇺🇸 MLS (Estados Unidos)": 253,
+    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League (Inglaterra)": 39,
+    "🇪🇸 LaLiga (España)": 140,
+    "🇮🇹 Serie A (Italia)": 135,
+    "🇩🇪 Bundesliga (Alemania)": 78,
+    "🇫🇷 Ligue 1 (Francia)": 61,
+    "🇵🇹 Primeira Liga (Portugal)": 94,
+    "🇳🇱 Eredivisie (Países Bajos)": 88,
+    "🏆 Champions League": 2,
+    "🏆 Europa League": 3,
+    "🏆 Copa Libertadores": 13,
+    "🏆 Copa Sudamericana": 11
 }
 
 todas_las_ligas = {
-    "EU Champions League": ["soccer_uefa_champions_league", "soccer_uefa_champions_league_qualification"],
-    "EU Europa League": ["soccer_uefa_europa_league", "soccer_uefa_europa_league_qualification"],
-    "Copa Libertadores": ["soccer_conmebol_copa_libertadores"],
-    "Copa Sudamericana": ["soccer_conmebol_copa_sudamericana"],
-    "Argentina Primera Division": ["soccer_argentina_primera_division"],
-    "Chile Primera Division": ["soccer_chile_campeonato"],
-    "Brasil Brasileirao": ["soccer_brazil_campeonato"],
-    "Mexico Liga MX": ["soccer_mexico_liga_mx"],
-    "Colombia Primera A": ["soccer_colombia_primera_a"],
-    "Ecuador LigaPro": ["soccer_ecuador_serie_a"],
-    "Peru Liga 1": ["soccer_peru_liga_1"],
-    "Uruguay Primera Division": ["soccer_uruguay_primera_division"],
-    "Paraguay Primera Division": ["soccer_paraguay_primera_division"],
-    "Spain La Liga": ["soccer_spain_la_liga"],
-    "England Premier League": ["soccer_epl"],
-    "Italy Serie A": ["soccer_italy_serie_a"],
-    "Germany Bundesliga": ["soccer_germany_bundesliga"],
-    "France Ligue 1": ["soccer_france_ligue_one"]
+    "🇺🇸 USA MLS": ["soccer_usa_mls"],
+    "🇲🇽 Mexico Liga MX": ["soccer_mexico_liga_mx"],
+    "🇪🇨 Ecuador LigaPro": ["soccer_ecuador_serie_a"],
+    "🇨🇴 Colombia Primera A": ["soccer_colombia_primera_a"],
+    "🇺🇾 Uruguay Primera Division": ["soccer_uruguay_primera_division"],
+    "🇵🇪 Peru Liga 1": ["soccer_peru_liga_1"],
+    "🇦🇷 Argentina Primera Division": ["soccer_argentina_primera_division"],
+    "🇧🇷 Brasil Brasileirao": ["soccer_brazil_campeonato"],
+    "🇨🇱 Chile Primera Division": ["soccer_chile_campeonato"],
+    "🇵🇾 Paraguay Primera Division": ["soccer_paraguay_primera_division"],
+    "🏆 EU Champions League": ["soccer_uefa_champions_league", "soccer_uefa_champions_league_qualification"],
+    "🏆 EU Europa League": ["soccer_uefa_europa_league", "soccer_uefa_europa_league_qualification"],
+    "🏆 EU Conference League": ["soccer_uefa_europa_conference_league"],
+    "🏆 Copa Libertadores": ["soccer_conmebol_copa_libertadores"],
+    "🏆 Copa Sudamericana": ["soccer_conmebol_copa_sudamericana"],
+    "🇪🇸 Spain La Liga": ["soccer_spain_la_liga"],
+    "🇪🇸 Spain La Liga 2": ["soccer_spain_segunda_division"],
+    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England Premier League": ["soccer_epl"],
+    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England Championship": ["soccer_efl_champ"],
+    "🇮🇹 Italy Serie A": ["soccer_italy_serie_a"],
+    "🇮🇹 Italy Serie B": ["soccer_italy_serie_b"],
+    "🇩🇪 Germany Bundesliga": ["soccer_germany_bundesliga"],
+    "🇩🇪 Germany Bundesliga 2": ["soccer_germany_bundesliga2"],
+    "🇫🇷 France Ligue 1": ["soccer_france_ligue_one"],
+    "🇫🇷 France Ligue 2": ["soccer_france_ligue_two"],
+    "🇵🇹 Portugal Primeira Liga": ["soccer_portugal_primeira_liga"],
+    "🇳🇱 Netherlands Eredivisie": ["soccer_netherlands_eredivisie"],
+    "🇧🇪 Belgium Pro League": ["soccer_belgium_first_div"],
+    "🇹🇷 Turkey Super Lig": ["soccer_turkey_super_league"],
+    "🇯🇵 Japan J-League": ["soccer_japan_j_league"],
+    "🇰🇷 South Korea K-League": ["soccer_korea_k_league"],
+    "🇦🇺 Australia A-League": ["soccer_australia_aleague"]
 }
 
 diccionario_mercados = {
