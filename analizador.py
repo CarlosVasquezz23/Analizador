@@ -81,7 +81,6 @@ def poisson_pmf(k: int, mu: float) -> float:
     return (math.pow(mu, k) * math.exp(-mu)) / math.factorial(k)
 
 def dixon_coles_factor(i: int, j: int, lambda_l: float, lambda_v: float, rho: float = -0.13) -> float:
-    """Ajuste de correlación para marcadores bajos en Dixon-Coles."""
     if i == 0 and j == 0:
         return 1.0 - (lambda_l * lambda_v * rho)
     elif i == 1 and j == 0:
@@ -513,7 +512,6 @@ AF_LEAGUE_IDS = {
     "🇵🇾 División Profesional Paraguay - Clausura": 252,
 }
 
-# CORRECCIÓN DE LLAVE OFICIAL DE LA LIBERTADORES
 ligas_top = {
     "🇪🇺 Champions League (Europa)": "soccer_uefa_champions_league",
     "🇪🇺 Europa League (Europa)": "soccer_uefa_europa_league",
@@ -573,13 +571,11 @@ if 'creditos_restantes_af' not in st.session_state:
 with st.sidebar:
     st.header("⚙️ Control Global")
     
-    # Monitoreo
     auto_ref = st.checkbox("⚡ Monitoreo en Vivo", value=False)
     if auto_ref:
         intervalo_sec = st.selectbox("Recarga cada:", [30, 60, 120], index=1)
         st.markdown(f"<meta http-equiv='refresh' content='{intervalo_sec}'>", unsafe_allow_html=True)
 
-    # Badges
     st.markdown(f"""
         <div class="creditos-caja-pro">
             <div>
@@ -597,7 +593,6 @@ with st.sidebar:
         </div>
     """, unsafe_allow_html=True)
 
-    # Acordeón 1: Torneos
     with st.expander("⚽ Selección de Torneos", expanded=True):
         if 'ligas_sels_widget' not in st.session_state:
             st.session_state.ligas_sels_widget = []
@@ -617,7 +612,6 @@ with st.sidebar:
         habilitar_af = st.checkbox("Habilitar Ligas LATAM (API-Football)", value=True)
         ligas_af_sels = st.multiselect("Ligas extra:", list(AF_LEAGUE_IDS.keys()), default=[]) if habilitar_af else []
 
-    # Acordeón 2: Filtros de Mercado
     with st.expander("🏬 Casas y Mercados"):
         casas_preferidas = st.multiselect(
             "Mis Bookies:",
@@ -632,16 +626,13 @@ with st.sidebar:
         else:
             limite_h = int(tiempo_sel.split()[0])
 
-    # Acordeón 3: Gestión Financiera
     with st.expander("🧮 Banca & Criterio Kelly"):
         bankroll_total = st.number_input("Banca Total ($):", min_value=10.0, value=200.0, step=10.0)
         fraccion_kelly = st.slider("Fracción de Kelly:", min_value=0.1, max_value=1.0, value=0.25, step=0.05)
         monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0)
 
-    # Botón Principal de Consulta
     consultar = st.button("🔍 Escanear Mercado Now", type="primary", use_container_width=True)
 
-    # Acordeón 4: Parlay Auto
     with st.expander("🎯 Generator Auto-Parlay"):
         perfil_estrategia = st.selectbox("Estrategia:", ["📈 Mayor Probabilidad", "🛡️ Conservador", "🔥 Cazador de Valor (+EV)", "⚖️ Doble Oportunidad"])
         num_eventos_auto = st.slider("Selecciones:", min_value=2, max_value=6, value=3)
@@ -649,7 +640,6 @@ with st.sidebar:
         prob_min_auto = st.slider("Probabilidad Mínima (%):", min_value=40, max_value=90, value=55, step=5)
         generar_auto = st.button("🎲 Pre-seleccionar", use_container_width=True)
 
-    # Acordeón 5: Notificaciones
     with st.expander("🔔 Alertas Telegram"):
         st.session_state['tg_token'] = st.text_input("Bot Token:", value=st.session_state.get('tg_token', ''), type="password")
         st.session_state['tg_chat_id'] = st.text_input("Chat ID:", value=st.session_state.get('tg_chat_id', ''))
@@ -694,7 +684,8 @@ def filtrar_partidos_por_fecha(datos, limite_horas):
         except (ValueError, KeyError):
             continue
         horas = (fecha_utc - ahora_utc).total_seconds() / 3600
-        if -12.0 <= horas <= (limite_horas + 24):
+        # Tolerancia para partidos en curso o recientes (-24h a +limite_horas)
+        if -24.0 <= horas <= (limite_horas + 48):
             res.append(p)
     return res
 
@@ -714,7 +705,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             continue
 
         horas = (fecha_utc - ahora_utc).total_seconds() / 3600
-        if horas < -12.0 or horas > (limite_horas + 24): continue
+        if horas < -24.0 or horas > (limite_horas + 48): continue
 
         fecha_local = fecha_utc - timedelta(hours=5)
         bookmakers = partido.get('bookmakers', [])
