@@ -76,7 +76,7 @@ def enviar_telegram(mensaje: str) -> bool:
         return False
 
 # =========================================================
-# 3. MODELADO MATEMÁTICO: POISSON, DIXON-COLES & IMPACTO DE BAJAS
+# 3. MODELADO MATEMÁTICO: POISSON, DIXON-COLES & LIVE POISSON
 # =========================================================
 def poisson_pmf(k: int, mu: float) -> float:
     return (math.pow(mu, k) * math.exp(-mu)) / math.factorial(k)
@@ -93,7 +93,6 @@ def dixon_coles_factor(i: int, j: int, lambda_l: float, lambda_v: float, rho: fl
     return 1.0
 
 def calcular_impacto_bajas(lambda_base: float, peso_bajas: float) -> float:
-    """Aplica un descuento ajustado al lambda ofensivo según la importancia de los lesionados."""
     factor_ajuste = max(0.3, 1.0 - (peso_bajas / 100.0))
     return lambda_base * factor_ajuste
 
@@ -128,6 +127,42 @@ def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1
         "No": (1 - prob_btts) * 100,
         "Más de 2.5": prob_over25 * 100,
         "Menos de 2.5": (1 - prob_over25) * 100
+    }
+
+def calcular_poisson_live(minuto: int, goles_loc: int, goles_vis: int, lambda_l_base: float = 1.45, lambda_v_base: float = 1.10) -> Dict[str, float]:
+    """Recalcula las probabilidades dinámicas según el tiempo restante y el marcador actual."""
+    tiempo_restante_pct = max(0.01, (90 - min(89, minuto)) / 90.0)
+    lambda_l_rem = lambda_l_base * tiempo_restante_pct
+    lambda_v_rem = lambda_v_base * tiempo_restante_pct
+
+    max_goles_rem = 5
+    matriz_prob = np.zeros((max_goles_rem, max_goles_rem))
+
+    for i in range(max_goles_rem):
+        for j in range(max_goles_rem):
+            matriz_prob[i, j] = poisson_pmf(i, lambda_l_rem) * poisson_pmf(j, lambda_v_rem)
+
+    soma = np.sum(matriz_prob)
+    if soma > 0:
+        matriz_prob /= soma
+
+    prob_local_win, prob_empate_win, prob_visita_win = 0.0, 0.0, 0.0
+    for i in range(max_goles_rem):
+        for j in range(max_goles_rem):
+            tot_loc = goles_loc + i
+            tot_vis = goles_vis + j
+            if tot_loc > tot_vis: prob_local_win += matriz_prob[i, j]
+            elif tot_loc == tot_vis: prob_empate_win += matriz_prob[i, j]
+            else: prob_visita_win += matriz_prob[i, j]
+
+    return {
+        "Local": float(prob_local_win * 100),
+        "Empate": float(prob_empate_win * 100),
+        "Visitante": float(prob_visita_win * 100),
+        "1X (Local o Empate)": float((prob_local_win + prob_empate_win) * 100),
+        "X2 (Visitante o Empate)": float((prob_visita_win + prob_empate_win) * 100),
+        "12 (Local o Visitante)": float((prob_local_win + prob_visita_win) * 100),
+        "Sí": 50.0, "No": 50.0, "Más de 2.5": 50.0, "Menos de 2.5": 50.0
     }
 
 # =========================================================
@@ -290,7 +325,7 @@ def generar_csv_bitacora(historial: List[Dict[str, Any]]) -> bytes:
     return df_data.to_csv(index=False).encode('utf-8')
 
 # =========================================================
-# 6. TEMA VISUAL CSS AVANZADO (ULTRACLEAN ALL-TABS EDITION)
+# 6. TEMA VISUAL CSS AVANZADO
 # =========================================================
 st.markdown("""
     <style>
@@ -321,7 +356,6 @@ st.markdown("""
         max-width: 98% !important;
     }
 
-    /* TÍTULO PRINCIPAL CON GLOW SUTIL */
     h1 {
         font-family: 'Inter', sans-serif;
         font-weight: 800 !important;
@@ -333,7 +367,6 @@ st.markdown("""
         margin-bottom: 0.2rem !important;
     }
 
-    /* ESTILIZADO DEL CONTROL RADIO DE NAVEGACIÓN DUAL */
     div[data-testid="stRadio"] > div {
         flex-direction: row !important;
         gap: 6px !important;
@@ -362,7 +395,6 @@ st.markdown("""
         color: #ffffff !important;
     }
 
-    /* PESTAÑAS Y TABS CON SCROLL HORIZONTAL FLUIDO */
     div[data-baseweb="tab-list"] {
         gap: 4px !important;
         margin-bottom: 18px !important;
@@ -401,7 +433,6 @@ st.markdown("""
         box-shadow: 0 0 10px var(--rg-accent);
     }
 
-    /* TARJETAS DE PASOS DEL INICIO (EMPTY STATE) */
     .empty-state-card {
         background: linear-gradient(135deg, #121722 0%, #0d1017 100%);
         border: 1px solid var(--rg-border);
@@ -440,14 +471,12 @@ st.markdown("""
         margin-bottom: 12px;
     }
 
-    /* ALERTAS Y MENSAJES DE ST.WARNING/INFO */
     div[data-testid="stNotification"] {
         border-radius: 10px !important;
         border: 1px solid var(--rg-border) !important;
         background-color: var(--rg-card-alt) !important;
     }
 
-    /* INPUTS COMPACTOS */
     div[data-baseweb="input"] {
         border-radius: 8px !important;
         border: 1px solid var(--rg-border) !important;
@@ -464,7 +493,6 @@ st.markdown("""
         color: #cfd8e3;
     }
 
-    /* ELEMENTOS DEL RADAR */
     .match-header { font-size: 16px; font-weight: 700; margin-bottom: 2px; letter-spacing: -0.01em; }
     .liga-chip {
         display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
@@ -477,7 +505,6 @@ st.markdown("""
         padding: 2px 8px; margin-top: 2px;
     }
 
-    /* CAJAS DE CRÉDITO SIDEBAR */
     .creditos-caja-pro {
         background: linear-gradient(135deg, #151b26 0%, #0f131a 100%);
         padding: 8px 12px;
@@ -513,14 +540,12 @@ st.markdown("""
         background: rgba(0,210,211,0.08); border-radius: 6px; padding: 1px 6px; font-size: 12px;
     }
 
-    /* ESTILIZADO DE SEGMENTED CONTROL (MÉTODO DE INGRESO) */
     div[data-testid="stSegmentedControl"] button {
         border-radius: 8px !important;
         font-weight: 600 !important;
         font-size: 12px !important;
     }
 
-    /* BOTONES */
     div.stButton > button {
         border-radius: 8px !important;
         font-weight: 600 !important;
@@ -543,7 +568,6 @@ st.markdown("""
         border-radius: 10px; padding: 8px 12px;
     }
 
-    /* TARJETAS KPI Y RESULTADOS (ESTANDARIZADAS) */
     .kpi-card {
         border-radius: 12px;
         padding: 16px;
@@ -645,6 +669,8 @@ if 'datos_cargados' not in st.session_state:
     st.session_state.datos_cargados = {}
 if 'datos_cargados_previos' not in st.session_state:
     st.session_state.datos_cargados_previos = {}
+if 'historico_cuotas_live' not in st.session_state:
+    st.session_state.historico_cuotas_live = {}
 if 'ha_consultado' not in st.session_state:
     st.session_state.ha_consultado = False
 if 'versiones_partidos' not in st.session_state:
@@ -828,11 +854,16 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
 
         horas = (fecha_utc - ahora_utc).total_seconds() / 3600
         
-        # Detección de estado En Vivo y Marcador Parcial
         es_en_vivo = partido.get('in_play', False) or (horas <= 0 and horas >= -2.5)
         marcador_local = partido.get('scores', {}).get('home', 0) if es_en_vivo else None
         marcador_visita = partido.get('scores', {}).get('away', 0) if es_en_vivo else None
-        minuto_en_vivo = partido.get('minute', 'LIVE') if es_en_vivo else None
+        
+        min_raw = partido.get('minute', '30') if es_en_vivo else None
+        try:
+            minuto_num = int(str(min_raw).replace("'", "").replace("+", ""))
+        except Exception:
+            minuto_num = 30
+        minuto_en_vivo = f"{minuto_num}'" if es_en_vivo else None
 
         if limite_horas < 900000 and not es_en_vivo and (horas < -48.0 or horas > (limite_horas + 48)): 
             continue
@@ -884,7 +915,10 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         cuotas_promedio_dict = {op: sum(t[0] for t in tuplas)/len(tuplas) for op, tuplas in cuotas_globales.items() if tuplas}
         overround = sum([1 / cp for cp in cuotas_promedio_dict.values()]) if cuotas_promedio_dict else 1.0
 
-        probs_poisson = calcular_modelo_poisson(1.45, 1.10, usar_dixon_coles=True)
+        if es_en_vivo:
+            probs_poisson = calcular_poisson_live(minuto_num, marcador_local or 0, marcador_visita or 0)
+        else:
+            probs_poisson = calcular_modelo_poisson(1.45, 1.10, usar_dixon_coles=True)
 
         for opcion, tuplas in cuotas_globales.items():
             precios = [t[0] for t in tuplas]
@@ -907,6 +941,14 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             if cuota_max < c_prev: variaciones_dict[opcion] = "📉 Bajando"
             elif cuota_max > c_prev: variaciones_dict[opcion] = "📈 Subiendo"
             else: variaciones_dict[opcion] = "➡️ Estable"
+
+            # Registro de histórico de cuotas para Sparkline Chart
+            clave_hist = f"{partido_id}_{mercado}_{opcion}"
+            if clave_hist not in st.session_state.historico_cuotas_live:
+                st.session_state.historico_cuotas_live[clave_hist] = []
+            st.session_state.historico_cuotas_live[clave_hist].append(cuota_max)
+            if len(st.session_state.historico_cuotas_live[clave_hist]) > 10:
+                st.session_state.historico_cuotas_live[clave_hist].pop(0)
 
         info_surebet = detectar_surebet(max_cuotas)
 
@@ -931,7 +973,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             }
 
 # =========================================================
-# 11. VISTAS Y NAVEGACIÓN (3 PRINCIPALES + MENÚ DESPLEGABLE)
+# 11. VISTAS Y NAVEGACIÓN
 # =========================================================
 col_nav_rapida, col_nav_extra = st.columns([3, 1.5])
 
@@ -967,7 +1009,7 @@ else:
 # ---------------------------------------------------------
 if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
-    st.caption("Escaneo de cuotas en tiempo real · Modelo Dixon-Coles · SureBets · Coberturas · Dropping Odds")
+    st.caption("Escaneo de cuotas en tiempo real · Modelo Dixon-Coles / Poisson Live · SureBets · Coberturas · Dropping Odds")
 
     if consultar:
         if (len(ligas_sels) > 0 or len(ligas_af_sels) > 0) and len(mercados_sels) > 0:
@@ -1120,13 +1162,56 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                         st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
                                         st.markdown(f"<span class='kickoff-chip'>📅 {part['fecha_str']}</span>", unsafe_allow_html=True)
 
+                                # MEJORA 1: CALCULADORA Y ALERTA DE COBERTURA LIVE (HEDGING AUTO-TRIGGER)
+                                if part.get('es_en_vivo'):
+                                    with st.expander("⚡ Cobertura en Vivo / Hedging Automático (Live Trigger)", expanded=False):
+                                        c_h1, c_h2 = st.columns(2)
+                                        monto_prev = c_h1.number_input("Inversión previa ($):", min_value=1.0, value=10.0, key=f"h_inv_{part['id']}")
+                                        cuota_prev = c_h2.number_input("Cuota previa lograda:", min_value=1.01, value=2.50, key=f"h_cuota_{part['id']}")
+                                        
+                                        ret_esperado = monto_prev * cuota_prev
+                                        st.caption(f"Retorno esperado si gana tu apuesta inicial: **${round(ret_esperado, 2)}**")
+                                        
+                                        m_1x2 = part['mercados'].get("1X2 (Ganador)", {})
+                                        if m_1x2:
+                                            cuota_contra_live = min(m_1x2.get('max_cuotas', {}).values()) if m_1x2.get('max_cuotas') else 2.0
+                                            stake_hedge_live = ret_esperado / cuota_contra_live
+                                            ganancia_asegurada_live = ret_esperado - monto_prev - stake_hedge_live
+                                            
+                                            if ganancia_asegurada_live > 0:
+                                                st.success(f"🔥 **¡Oportunidad de Cobertura!** Apuesta **${round(stake_hedge_live, 2)}** a la contra-opción (x{cuota_contra_live}) para **asegurar ${round(ganancia_asegurada_live, 2)} libres de riesgo**.")
+                                            else:
+                                                st.info(f"💡 Apostar **${round(stake_hedge_live, 2)}** a la contraopción equilibra pérdidas si el marcador cambia.")
+
                                 sub_tabs = st.tabs(list(part['mercados'].keys()))
                                 for m_idx, text_m in enumerate(part['mercados'].keys()):
                                     with sub_tabs[m_idx]:
                                         m_info = part['mercados'][text_m]
                                         
                                         if m_info.get("surebet", {}).get("es_surebet", False):
-                                            st.success(f"💰 **SUREBET / ARBITRAJE DETECTADO!** Rendimiento asegurable: +{round(m_info['surebet']['lucro'], 2)}%")
+                                            c_sb_left, c_sb_right = st.columns([4, 1])
+                                            c_sb_left.success(f"💰 **SUREBET / ARBITRAJE DETECTADO!** Rendimiento asegurable: +{round(m_info['surebet']['lucro'], 2)}%")
+                                            
+                                            # MEJORA 5: BOTÓN DE DISPARO DIRECTO A BITÁCORA
+                                            if c_sb_right.button("⚡ Disparo a Bitácora", key=f"disparo_sb_{part['id']}_{text_m}"):
+                                                c_max_par = max(m_info['max_cuotas'].values())
+                                                st.session_state.historial_apuestas.append({
+                                                    "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                                                    "Detalles": f"SureBet Live (+{round(m_info['surebet']['lucro'], 2)}%) - {part['local']} vs {part['visitante']}",
+                                                    "Liga": part['liga_origen'],
+                                                    "Market": text_m,
+                                                    "Cuota": c_max_par,
+                                                    "Inversión": monto_inversion,
+                                                    "Estado": "Pendiente",
+                                                    "Ganancia Potencial": (c_max_par * monto_inversion) - monto_inversion
+                                                })
+                                                BitacoraManager.guardar(st.session_state.historial_apuestas)
+                                                st.toast("⚡ ¡SureBet registrada directamente en Bitácora!", icon="🚀")
+
+                                        # MEJORA 2: ALERTA DE MOMENTUM / DROPPING ODDS LIVE
+                                        for op_k, var_k in m_info.get('variaciones', {}).items():
+                                            if "Bajando" in var_k and part.get('es_en_vivo'):
+                                                st.warning(f"⚡ **MOMENTUM LIVE:** Caída drástica de cuota en **{op_k}** ({m_info['max_cuotas'][op_k]}). ¡El mercado está entrando fuerte!")
 
                                         todas_opciones = list(m_info['max_cuotas'].keys())
                                         if text_m == "1X2 (Ganador)":
@@ -1144,13 +1229,23 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                                 marcado = clave_base in st.session_state.claves_auto
 
                                                 chk = st.checkbox(f"{opcion} ({cuota_m}) {lbl_val}", value=marcado, key=f"render_{clave_base}_v{st.session_state.version_ticket}")
-                                                st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]}<br>🎯 Implícita: {round(val['prob_real'],1)}%<br>📊 Dixon-Coles: {round(val['prob_poisson'],1)}% | {var_txt}</small>", unsafe_allow_html=True)
+                                                
+                                                # MEJORA 3: INDICADOR DE MODELO ADAPTATIVO LIVE VS PRE-MATCH
+                                                lbl_modelo = "⏱️ Poisson Live" if part.get('es_en_vivo') else "📊 Dixon-Coles"
+                                                st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]}<br>🎯 Implícita: {round(val['prob_real'],1)}%<br>{lbl_modelo}: {round(val['prob_poisson'],1)}% | {var_txt}</small>", unsafe_allow_html=True)
 
                                                 with st.expander("🏬 Comparar Casas"):
                                                     todas_casas = m_info.get('todas_cuotas', {}).get(opcion, [])
                                                     if todas_casas:
                                                         df_casas = pd.DataFrame(todas_casas, columns=["Cuota", "Casa de Apuestas"]).sort_values("Cuota", ascending=False)
                                                         st.dataframe(df_casas, use_container_width=True, hide_index=True)
+                                                    
+                                                    # MEJORA 4: HISTÓRICO DE CUOTAS LIVE (SPARKLINE CHART)
+                                                    clave_hist = f"{part['id']}_{text_m}_{opcion}"
+                                                    hist_pts = st.session_state.historico_cuotas_live.get(clave_hist, [])
+                                                    if len(hist_pts) > 1:
+                                                        st.caption("📈 **Tendencia de Cuota Live:**")
+                                                        st.line_chart(hist_pts, height=100)
 
                                                 if chk:
                                                     apuestas_seleccionadas.append({
@@ -1466,7 +1561,7 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
                 st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
-# PESTAÑA 3: ANÁLISIS ESTADÍSTICO & H2H (INCLUYE SIMULADOR xG E IMPACTO DE BAJAS)
+# PESTAÑA 3: ANÁLISIS ESTADÍSTICO & H2H
 # ---------------------------------------------------------
 elif vista_seleccionada == "📊 ESTADÍSTICAS & H2H":
     st.title("📊 Análisis Estadístico, Simulador xG y H2H")
@@ -1793,7 +1888,7 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
             st.caption("Escanea partidos desde el panel lateral para habilitar este módulo.")
 
 # ---------------------------------------------------------
-# PESTAÑA 7: GENERADOR DE CARTEL / EXPORTADOR TIPSTER
+# PESTAÑA 7: GENERADOR DE CARTEL
 # ---------------------------------------------------------
 elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.title("🎨 Generador Visual de Pronósticos para Redes")
