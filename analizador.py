@@ -75,7 +75,7 @@ def enviar_telegram(mensaje: str) -> bool:
         return False
 
 # =========================================================
-# 3. MODELO POISSON NATIVO (SIN DEPENDER DE SCIPY)
+# 3. MODELO POISSON NATIVO
 # =========================================================
 def poisson_pmf(k: int, mu: float) -> float:
     return (math.pow(mu, k) * math.exp(-mu)) / math.factorial(k)
@@ -108,7 +108,7 @@ def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1
     }
 
 # =========================================================
-# 4. VALIDADOR, MONTE CARLO Y SISTEMAS DE COBERTURA
+# 4. VALIDADOR, MONTE CARLO Y COBERTURAS
 # =========================================================
 def detectar_correlaciones(apuestas: List[Dict[str, Any]]) -> List[str]:
     alertas = []
@@ -229,7 +229,7 @@ def generar_csv_bitacora(historial: List[Dict[str, Any]]) -> bytes:
     return df_data.to_csv(index=False).encode('utf-8')
 
 # =========================================================
-# 6. TEMA VISUAL CSS
+# 6. TEMA VISUAL CSS AVANZADO (MEJORA #3)
 # =========================================================
 st.markdown("""
     <style>
@@ -253,7 +253,7 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
     .block-container {
-        padding-top: 1.8rem !important;
+        padding-top: 1.2rem !important;
         padding-bottom: 2rem !important;
         padding-left: 1.2rem !important;
         padding-right: 1.2rem !important;
@@ -270,10 +270,34 @@ st.markdown("""
         background-clip: text;
     }
 
-    h2, h3 {
-        font-family: 'Inter', sans-serif;
+    /* Pestañas estilizadas tipo Píldora Neón */
+    button[data-baseweb="tab"] {
         font-weight: 700 !important;
-        font-size: clamp(1.1rem, 1.6vw, 1.4rem) !important;
+        font-size: clamp(12px, 1vw, 14px) !important;
+        padding: 10px 18px !important;
+        border-radius: 10px !important;
+        transition: all 0.2s ease;
+    }
+    div[data-baseweb="tab-highlight"] { 
+        background-color: var(--rg-accent) !important; 
+        height: 3px !important;
+        box-shadow: 0 0 12px var(--rg-accent);
+    }
+
+    /* Tarjeta de bienvenida Vacía / Empty State Mejora #3 */
+    .empty-state-card {
+        background: linear-gradient(135deg, #121722 0%, #0d1017 100%);
+        border: 1px solid var(--rg-border);
+        border-radius: 16px;
+        padding: 28px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    }
+    .empty-state-step {
+        background: var(--rg-card-alt);
+        border: 1px solid var(--rg-border-soft);
+        border-radius: 12px;
+        padding: 16px;
+        text-align: center;
     }
 
     .match-header { font-size: 16px; font-weight: 700; margin-bottom: 2px; letter-spacing: -0.01em; }
@@ -288,15 +312,16 @@ st.markdown("""
         padding: 2px 8px; margin-top: 2px;
     }
 
-    .creditos-caja {
-        background: linear-gradient(135deg, #151b26 0%, #10141c 100%);
-        padding: 8px 12px;
-        border-radius: 8px;
-        border-left: 3.5px solid var(--rg-accent);
-        border-top: 1px solid var(--rg-border-soft);
-        border-right: 1px solid var(--rg-border-soft);
-        border-bottom: 1px solid var(--rg-border-soft);
-        margin-bottom: 8px;
+    /* Badges de Créditos Dinámicos (Mejora #2) */
+    .creditos-caja-pro {
+        background: linear-gradient(135deg, #151b26 0%, #0f131a 100%);
+        padding: 10px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--rg-border);
+        margin-bottom: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
 
     div[class*="st-key-match_"] {
@@ -310,7 +335,7 @@ st.markdown("""
         background: linear-gradient(180deg, #12161f 0%, #0d1017 100%) !important;
         border: 2px dashed rgba(0,210,211,0.45) !important;
         border-radius: 16px !important;
-        box-shadow: 0 0 0 1px rgba(0,210,211,0.06), 0 6px 20px rgba(0,0,0,0.35);
+        box-shadow: 0 0 15px rgba(0,210,211,0.08);
     }
     .ticket-titulo {
         font-family: 'Inter', sans-serif; font-weight: 800; font-size: 14px; letter-spacing: 0.04em;
@@ -321,18 +346,6 @@ st.markdown("""
     .ticket-cuota-tag {
         font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--rg-accent);
         background: rgba(0,210,211,0.08); border-radius: 6px; padding: 1px 6px; font-size: 12px;
-    }
-
-    button[data-baseweb="tab"] {
-        font-weight: 700 !important;
-        font-size: clamp(11px, 1vw, 13px) !important;
-        padding: 8px 12px !important;
-    }
-    div[data-baseweb="tab-highlight"] { background-color: var(--rg-accent) !important; }
-
-    div[role="radiogroup"] {
-        flex-wrap: wrap !important;
-        gap: 6px !important;
     }
 
     div.stButton > button {
@@ -354,18 +367,6 @@ st.markdown("""
         border-radius: 10px; padding: 8px 12px;
     }
 
-    .welcome-card {
-        background: linear-gradient(160deg, #141a24 0%, #0f131a 100%);
-        border: 1px solid var(--rg-border); border-radius: 16px; padding: 22px 24px; text-align: left;
-    }
-
-    div[data-testid="stAlert"] { border-radius: 10px !important; border: 1px solid var(--rg-border) !important; }
-    div[data-testid="stExpander"] { border: 1px solid var(--rg-border) !important; border-radius: 10px !important; background: var(--rg-card-alt); overflow: hidden; }
-
-    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, textarea {
-        border-radius: 8px !important; background: var(--rg-card-alt) !important; border-color: var(--rg-border) !important;
-    }
-
     .kpi-card {
         border-radius: 12px; padding: 12px 14px; border: 1px solid var(--rg-border);
         background: linear-gradient(160deg, var(--rg-card) 0%, #0f131b 100%); height: 100%;
@@ -373,22 +374,11 @@ st.markdown("""
     .kpi-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--rg-text-soft); margin-bottom: 4px; }
     .kpi-value { font-family: 'JetBrains Mono', monospace; font-size: clamp(20px, 2vw, 26px); font-weight: 700; line-height: 1.1; }
     .kpi-sub { font-size: 11.5px; margin-top: 4px; font-weight: 600; }
-
-    @media (max-width: 768px) {
-        .block-container {
-            padding-left: 0.6rem !important;
-            padding-right: 0.6rem !important;
-        }
-        div[data-testid="column"] {
-            width: 100% !important;
-            margin-bottom: 8px;
-        }
-    }
     </style>
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 7. METODOS DE CLIENTES API
+# 7. CLIENTES API
 # =========================================================
 def hl_headers(): return {"x-rapidapi-key": HL_API_KEY}
 
@@ -472,7 +462,7 @@ diccionario_mercados = {
 }
 
 # =========================================================
-# 8. INICIALIZACIÓN DE ESTADOS
+# 8. ESTADOS DE SESIÓN
 # =========================================================
 if 'historial_apuestas' not in st.session_state:
     st.session_state.historial_apuestas = BitacoraManager.cargar()
@@ -494,86 +484,91 @@ if 'creditos_restantes_af' not in st.session_state:
     st.session_state.creditos_restantes_af = "No consultado"
 
 # =========================================================
-# 9. CONTROLES DEL SIDEBAR
+# 9. SIDEBAR ORGANIZADO EN ACCORDEONES (MEJORA #1 Y #2)
 # =========================================================
 with st.sidebar:
-    st.header("⚙️ Filtros de Control Global")
+    st.header("⚙️ Control Global")
     
-    auto_ref = st.checkbox("⚡ Habilitar Monitoreo Automático en Vivo", value=False)
+    # Monitoreo
+    auto_ref = st.checkbox("⚡ Monitoreo en Vivo", value=False)
     if auto_ref:
-        intervalo_sec = st.selectbox("Intervalo de recarga:", [30, 60, 120], index=1)
-        st.caption(f"🔄 Recargando pantalla cada {intervalo_sec} segundos...")
+        intervalo_sec = st.selectbox("Recarga cada:", [30, 60, 120], index=1)
         st.markdown(f"<meta http-equiv='refresh' content='{intervalo_sec}'>", unsafe_allow_html=True)
 
+    # Badges Mejora #2
     st.markdown(f"""
-        <div class="creditos-caja">
-            <small style="color:#a4b0be; text-transform:uppercase; font-weight:bold;">Créditos Restantes API</small><br>
-            <span style="font-size:18px; font-weight:bold; color:#00d2d3;">🔑 {st.session_state.creditos_restantes}</span>
+        <div class="creditos-caja-pro">
+            <div>
+                <small style="color:#8a94a6; text-transform:uppercase; font-weight:700;">Odds API</small><br>
+                <span style="font-size:16px; font-weight:bold; color:#00d2d3;">🔑 {st.session_state.creditos_restantes}</span>
+            </div>
+            <div>🟢</div>
         </div>
-    """, unsafe_allow_html=True)
-    st.markdown(f"""
-        <div class="creditos-caja" style="border-left-color:#feca57;">
-            <small style="color:#a4b0be; text-transform:uppercase; font-weight:bold;">Créditos Restantes API-Football (100/día)</small><br>
-            <span style="font-size:18px; font-weight:bold; color:#feca57;">🔑 {st.session_state.creditos_restantes_af}</span>
+        <div class="creditos-caja-pro">
+            <div>
+                <small style="color:#8a94a6; text-transform:uppercase; font-weight:700;">Football API</small><br>
+                <span style="font-size:16px; font-weight:bold; color:#feca57;">🔑 {st.session_state.creditos_restantes_af}</span>
+            </div>
+            <div>🟡</div>
         </div>
     """, unsafe_allow_html=True)
 
-    if 'ligas_sels_widget' not in st.session_state:
-        st.session_state.ligas_sels_widget = []
-
-    col_sel_todas, col_sel_limpiar = st.columns(2)
-    with col_sel_todas:
-        if st.button("✅ Todas", use_container_width=True):
-            st.session_state.ligas_sels_widget = list(todas_las_ligas.keys())
-            st.rerun()
-    with col_sel_limpiar:
-        if st.button("🧹 Ninguna", use_container_width=True):
+    # Acordeón 1: Torneos (Mejora #1)
+    with st.expander("⚽ Selección de Torneos", expanded=True):
+        if 'ligas_sels_widget' not in st.session_state:
             st.session_state.ligas_sels_widget = []
-            st.rerun()
 
-    ligas_sels = st.multiselect("Selecciona los Torneos a Analizar:", list(todas_las_ligas.keys()), key="ligas_sels_widget")
+        col_sel_todas, col_sel_limpiar = st.columns(2)
+        with col_sel_todas:
+            if st.button("✅ Todas", use_container_width=True):
+                st.session_state.ligas_sels_widget = list(todas_las_ligas.keys())
+                st.rerun()
+        with col_sel_limpiar:
+            if st.button("🧹 Ninguna", use_container_width=True):
+                st.session_state.ligas_sels_widget = []
+                st.rerun()
 
-    st.markdown("---")
-    st.caption("🌎 Ligas extra vía API-Football (Colombia, Ecuador, Uruguay, Perú) — plan gratis")
-    habilitar_af = st.checkbox("✅ Habilitar ligas extra (API-Football, gratis)", value=True)
-    ligas_af_sels = st.multiselect("Ligas extra a analizar (API-Football):", list(AF_LEAGUE_IDS.keys()), default=[]) if habilitar_af else []
+        ligas_sels = st.multiselect("Ligas principales:", list(todas_las_ligas.keys()), key="ligas_sels_widget")
+        
+        habilitar_af = st.checkbox("Habilitar Ligas LATAM (API-Football)", value=True)
+        ligas_af_sels = st.multiselect("Ligas extra:", list(AF_LEAGUE_IDS.keys()), default=[]) if habilitar_af else []
 
-    st.markdown("---")
-    st.subheader("🏬 Casas de Apuestas Objetivo")
-    casas_preferidas = st.multiselect(
-        "Filtrar por mis Bookies habituales:",
-        ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"],
-        default=[]
-    )
+    # Acordeón 2: Filtros de Mercado
+    with st.expander("🏬 Casas y Mercados"):
+        casas_preferidas = st.multiselect(
+            "Mis Bookies:",
+            ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"],
+            default=[]
+        )
+        mercados_sels = st.multiselect("Mercados:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
+        tiempo_sel = st.selectbox("Ventana de tiempo:", ["24 Horas", "48 Horas", "72 Horas"], index=1)
+        limite_h = int(tiempo_sel.split()[0])
 
-    mercados_sels = st.multiselect("Mercados de Análisis:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
-    tiempo_sel = st.selectbox("Rango Temporal:", ["24 Horas", "48 Horas", "72 Horas"], index=1)
-    limite_h = int(tiempo_sel.split()[0])
-    
-    st.markdown("---")
-    st.subheader("🧮 Gestión Financiera (Kelly)")
-    bankroll_total = st.number_input("Banca Total ($):", min_value=10.0, value=200.0, step=10.0)
-    fraccion_kelly = st.slider("Fracción de Kelly:", min_value=0.1, max_value=1.0, value=0.25, step=0.05, help="0.25 = Cuarto de Kelly (Conservador)")
-    monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0)
+    # Acordeón 3: Gestión Financiera
+    with st.expander("🧮 Banca & Criterio Kelly"):
+        bankroll_total = st.number_input("Banca Total ($):", min_value=10.0, value=200.0, step=10.0)
+        fraccion_kelly = st.slider("Fracción de Kelly:", min_value=0.1, max_value=1.0, value=0.25, step=0.05)
+        monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0)
 
-    consultar = st.button("🔍 Consultar Radar Múltiple", type="primary", use_container_width=True)
-    
-    st.markdown("---")
-    st.subheader("🎯 Filtros Parlay Automático")
-    perfil_estrategia = st.selectbox("Perfil de Estrategia:", ["📈 Mayor Probabilidad", "🛡️ Conservador (Favoritos)", "🔥 Cazador de Valor (+EV)", "⚖️ Equilibrado (Doble Oportunidad)"])
-    num_eventos_auto = st.slider("Eventos:", min_value=2, max_value=6, value=3)
-    rango_cuota_auto = st.slider("Rango de Cuota por Selección:", min_value=1.10, max_value=3.50, value=(1.25, 2.20), step=0.05)
-    prob_min_auto = st.slider("Probabilidad Mínima (%):", min_value=40, max_value=90, value=55, step=5)
-    generar_auto = st.button("🎲 ¡Pre-seleccionar Muestras!", use_container_width=True)
+    # Botón Principal de Consulta
+    consultar = st.button("🔍 Escanear Mercado Now", type="primary", use_container_width=True)
 
-    st.markdown("---")
-    with st.expander("🔔 Notificaciones & Alertas Automáticas"):
+    # Acordeón 4: Parlay Auto
+    with st.expander("🎯 Generator Auto-Parlay"):
+        perfil_estrategia = st.selectbox("Estrategia:", ["📈 Mayor Probabilidad", "🛡️ Conservador", "🔥 Cazador de Valor (+EV)", "⚖️ Doble Oportunidad"])
+        num_eventos_auto = st.slider("Selecciones:", min_value=2, max_value=6, value=3)
+        rango_cuota_auto = st.slider("Rango de Cuota:", min_value=1.10, max_value=3.50, value=(1.25, 2.20), step=0.05)
+        prob_min_auto = st.slider("Probabilidad Mínima (%):", min_value=40, max_value=90, value=55, step=5)
+        generar_auto = st.button("🎲 Pre-seleccionar", use_container_width=True)
+
+    # Acordeón 5: Notificaciones
+    with st.expander("🔔 Alertas Telegram"):
         st.session_state['tg_token'] = st.text_input("Bot Token:", value=st.session_state.get('tg_token', ''), type="password")
         st.session_state['tg_chat_id'] = st.text_input("Chat ID:", value=st.session_state.get('tg_chat_id', ''))
-        st.session_state['auto_alertas_telegram'] = st.checkbox("🚀 Auto-enviar ValueBets (+EV > 5%) a Telegram", value=False)
+        st.session_state['auto_alertas_telegram'] = st.checkbox("🚀 Auto-alertas (+EV > 5%)", value=False)
 
 # =========================================================
-# 10. PROCESADORES Y CÁLCULOS MATEMÁTICOS DE CUOTAS
+# 10. PROCESAMIENTO DE CUOTAS
 # =========================================================
 def actualizar_creditos(headers):
     if 'x-requests-remaining' in headers:
@@ -719,7 +714,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             }
 
 # =========================================================
-# 11. PESTAÑAS Y VISTA DE USUARIO
+# 11. VISTAS Y PESTAÑAS
 # =========================================================
 pestana_radar, pestana_verificador, pestana_historial = st.tabs([
     "🚀 RADAR MULTI-MERCADO & VALUEBETS", 
@@ -818,11 +813,29 @@ with pestana_radar:
 
     apuestas_seleccionadas = []
 
+    # EMPTY STATE INTERACTIVO - MEJORA #3
     if not st.session_state.ha_consultado:
         st.markdown("""
-            <div class="welcome-card">
-                <h3>💡 Sistema en espera de instrucciones</h3>
-                <p>Selecciona tus torneos en el panel lateral y haz clic en <b>🔍 Consultar Radar Múltiple</b>.</p>
+            <div class="empty-state-card">
+                <h3 style="color:#00d2d3; margin-bottom:10px;">⚡ Sistema Listo para el Análisis</h3>
+                <p style="color:#8a94a6; margin-bottom:20px;">Sigue estos sencillos pasos en el panel lateral para iniciar la búsqueda de cuotas y ValueBets:</p>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:15px;">
+                    <div class="empty-state-step">
+                        <div style="font-size:24px; margin-bottom:6px;">1️⃣</div>
+                        <strong>Selecciona Torneos</strong>
+                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Añade Champions, Premier League o Ligas Locales.</p>
+                    </div>
+                    <div class="empty-state-step">
+                        <div style="font-size:24px; margin-bottom:6px;">2️⃣</div>
+                        <strong>Casas y Mercados</strong>
+                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Elige tu Bookie habitual y los mercados a comparar.</p>
+                    </div>
+                    <div class="empty-state-step">
+                        <div style="font-size:24px; margin-bottom:6px;">3️⃣</div>
+                        <strong>Escanea y Ejecuta</strong>
+                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Haz clic en 'Escanear Mercado Now' para analizar cuotas.</p>
+                    </div>
+                </div>
             </div>
         """, unsafe_allow_html=True)
     elif not dict_partidos:
@@ -969,7 +982,7 @@ with pestana_radar:
                             st.toast("¡Enviado a Telegram!", icon="📤")
 
 # ---------------------------------------------------------
-# PESTAÑA 2: CALCULADORA DE PARLAY EXTERNO + MONTE CARLO & EVALUADOR IA
+# PESTAÑA 2: CALCULADORA EXTERNA & MONTE CARLO
 # ---------------------------------------------------------
 with pestana_verificador:
     st.title("🧮 Analizador, Lector OCR & Simulador Monte Carlo")
@@ -998,8 +1011,6 @@ with pestana_verificador:
             
             if imagen_subida is not None:
                 contenido_bytes = imagen_subida.getvalue()
-                
-                # Búsqueda directa de cuotas decimales en la imagen
                 encontrados = re.findall(rb'1\.[1-9]\d{1,2}|2\.[0-9]\d{1,2}', contenido_bytes)
                 cuotas_extraidas = []
                 
