@@ -229,7 +229,7 @@ def generar_csv_bitacora(historial: List[Dict[str, Any]]) -> bytes:
     return df_data.to_csv(index=False).encode('utf-8')
 
 # =========================================================
-# 6. TEMA VISUAL CSS AVANZADO (Pestañas Corregidas)
+# 6. TEMA VISUAL CSS AVANZADO (CORRECCIÓN DE PADDING Y PESTAÑAS)
 # =========================================================
 st.markdown("""
     <style>
@@ -252,8 +252,9 @@ st.markdown("""
 
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
+    /* AQUI ESTA LA CORRECCIÓN CLAVE: padding-top aumentado a 4.5rem para que no se esconda bajo el header */
     .block-container {
-        padding-top: 1.2rem !important;
+        padding-top: 4.5rem !important;
         padding-bottom: 2rem !important;
         padding-left: 1.2rem !important;
         padding-right: 1.2rem !important;
