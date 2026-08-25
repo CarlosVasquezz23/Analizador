@@ -611,10 +611,17 @@ with st.sidebar:
             default=[]
         )
         mercados_sels = st.multiselect("Mercados:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
-        sin_limite_fecha = st.checkbox("🌐 Traer todo sin filtro de días", value=True)
+        sin_limite_fecha = st.checkbox("🌐 Traer todo sin filtro de días", value=False)
         if not sin_limite_fecha:
-            tiempo_sel = st.selectbox("Ventana de tiempo:", ["7 Días", "14 Días", "21 Días", "30 Días"], index=3)
-            limite_h = int(tiempo_sel.split()[0]) * 24
+            tiempo_sel = st.selectbox(
+                "Ventana de tiempo:", 
+                ["24 Horas", "48 Horas", "7 Días", "14 Días", "21 Días", "30 Días"], 
+                index=2
+            )
+            if "Horas" in tiempo_sel:
+                limite_h = int(tiempo_sel.split()[0])
+            else:
+                limite_h = int(tiempo_sel.split()[0]) * 24
         else:
             limite_h = 999999
 
@@ -933,7 +940,7 @@ with pestana_radar:
                     <div class="empty-state-step">
                         <div style="font-size:24px; margin-bottom:6px;">2️⃣</div>
                         <strong>Casas y Mercados</strong>
-                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Verifica que esté activa la opción 'Traer todo sin filtro de días'.</p>
+                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Selecciona la ventana de tiempo (24h, 48h, 7 días...) o activa 'Traer todo'.</p>
                     </div>
                     <div class="empty-state-step">
                         <div style="font-size:24px; margin-bottom:6px;">3️⃣</div>
@@ -944,7 +951,7 @@ with pestana_radar:
             </div>
         """, unsafe_allow_html=True)
     elif not dict_partidos:
-        st.info("ℹ️ **No hay partidos activos con cuotas publicadas actualmente para los torneos UEFA seleccionados.** Esto ocurre cuando no hay jornadas en los próximos días o los proveedores no han abierto líneas de apuestas. Intenta seleccionar torneos de liga activa como **Spain La Liga**, **England Premier League** o **Copa Libertadores**.")
+        st.info("ℹ️ **No se encontraron partidos en el rango seleccionado.** Si estás buscando torneos europeos fuera de jornada inmediata, activa la casilla **'🌐 Traer todo sin filtro de días'** o amplia la ventana de tiempo.")
     else:
         col_busq, col_valor, col_orden = st.columns([2.2, 1.3, 1.5])
         with col_busq: busqueda_equipo = st.text_input("🔍 Buscador rápido por equipo:", "").strip().lower()
