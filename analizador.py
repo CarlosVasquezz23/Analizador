@@ -75,19 +75,38 @@ def enviar_telegram(mensaje: str) -> bool:
         return False
 
 # =========================================================
-# 3. MODELO POISSON NATIVO
+# 3. MODELADO MATEMÁTICO: POISSON & DIXON-COLES
 # =========================================================
 def poisson_pmf(k: int, mu: float) -> float:
     return (math.pow(mu, k) * math.exp(-mu)) / math.factorial(k)
 
-def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1.10) -> Dict[str, float]:
+def dixon_coles_factor(i: int, j: int, lambda_l: float, lambda_v: float, rho: float = -0.13) -> float:
+    """Ajuste de correlación para marcadores bajos en Dixon-Coles."""
+    if i == 0 and j == 0:
+        return 1.0 - (lambda_l * lambda_v * rho)
+    elif i == 1 and j == 0:
+        return 1.0 + (lambda_v * rho)
+    elif i == 0 and j == 1:
+        return 1.0 + (lambda_l * rho)
+    elif i == 1 and j == 1:
+        return 1.0 - rho
+    return 1.0
+
+def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1.10, usar_dixon_coles: bool = True) -> Dict[str, float]:
     max_goles = 6
     matriz_prob = np.zeros((max_goles, max_goles))
     
     for i in range(max_goles):
         for j in range(max_goles):
-            matriz_prob[i, j] = poisson_pmf(i, lambda_local) * poisson_pmf(j, lambda_visita)
+            p_base = poisson_pmf(i, lambda_local) * poisson_pmf(j, lambda_visita)
+            tau = dixon_coles_factor(i, j, lambda_local, lambda_visita) if usar_dixon_coles else 1.0
+            matriz_prob[i, j] = p_base * tau
             
+    # Normalización de la matriz
+    soma = np.sum(matriz_prob)
+    if soma > 0:
+        matriz_prob /= soma
+
     prob_local = float(np.sum(np.tril(matriz_prob, -1)))
     prob_empate = float(np.sum(np.diag(matriz_prob)))
     prob_visita = float(np.sum(np.triu(matriz_prob, 1)))
@@ -108,8 +127,50 @@ def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1
     }
 
 # =========================================================
-# 4. VALIDADOR, MONTE CARLO Y COBERTURAS
+# 4. VALIDADOR, ARBITRAJE, SHARPE RATIO & RUINA MONTE CARLO
 # =========================================================
+def detectar_surebet(cuotas_max_dict: Dict[str, float]) -> Dict[str, Any]:
+    """Suma las probabilidades implícitas de las máximas cuotas de un mercado completo."""
+    if not cuotas_max_dict or len(cuotas_max_dict) < 2:
+        return {"es_surebet": False, "overround": 1.0, "lucro": 0.0}
+    
+    overround = sum(1.0 / float(c) for c in cuotas_max_dict.values())
+    es_surebet = overround < 1.0
+    lucro = ((1.0 / overround) - 1.0) * 100.0 if es_surebet else 0.0
+    
+    return {"es_surebet": es_surebet, "overround": overround, "lucro": lucro}
+
+def calcular_sharpe_parlay(cuota_total: float, prob_combinada: float) -> float:
+    """Calcula el ratio de Sharpe del Parlay ajustando el Retorno Esperado contra la Desviación Estándar."""
+    ev = (cuota_total * prob_combinada) - 1.0
+    varianza = (prob_combinada * ((cuota_total - 1.0) ** 2)) + ((1.0 - prob_combinada) * ((-1.0) ** 2))
+    desviacion = math.sqrt(varianza) if varianza > 0 else 1.0
+    return ev / desviacion
+
+def simular_riesgo_ruina_banca(bankroll_inicial: float, stake_promedio: float, prob_exito: float, cuota_prom: float, num_apuestas: int = 200, sims: int = 2000) -> Dict[str, float]:
+    """Ejecuta simulación de ruina de banca a largo plazo mediante Monte Carlo."""
+    bancarrota_count = 0
+    final_bankrolls = []
+    
+    for _ in range(sims):
+        b = bankroll_inicial
+        for _ in range(num_apuestas):
+            if b <= 0:
+                bancarrota_count += 1
+                b = 0
+                break
+            # Simular apuesta
+            if np.random.rand() < prob_exito:
+                b += stake_promedio * (cuota_prom - 1.0)
+            else:
+                b -= stake_promedio
+        final_bankrolls.append(b)
+        
+    return {
+        "prob_ruina": (bancarrota_count / sims) * 100.0,
+        "banca_promedio_final": float(np.mean(final_bankrolls))
+    }
+
 def detectar_correlaciones(apuestas: List[Dict[str, Any]]) -> List[str]:
     alertas = []
     eventos_map = {}
@@ -702,7 +763,8 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         cuotas_promedio_dict = {op: sum(t[0] for t in tuplas)/len(tuplas) for op, tuplas in cuotas_globales.items() if tuplas}
         overround = sum([1 / cp for cp in cuotas_promedio_dict.values()]) if cuotas_promedio_dict else 1.0
 
-        probs_poisson = calcular_modelo_poisson(1.45, 1.10)
+        # Implementación de Dixon-Coles activada por defecto
+        probs_poisson = calcular_modelo_poisson(1.45, 1.10, usar_dixon_coles=True)
 
         for opcion, tuplas in cuotas_globales.items():
             precios = [t[0] for t in tuplas]
@@ -726,6 +788,9 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             elif cuota_max > c_prev: variaciones_dict[opcion] = "📈 Subiendo"
             else: variaciones_dict[opcion] = "➡️ Estable"
 
+        # Detección de SureBet en el mercado procesado
+        info_surebet = detectar_surebet(max_cuotas)
+
         if max_cuotas:
             if partido_id not in diccionario_consolidador:
                 diccionario_consolidador[partido_id] = {
@@ -737,7 +802,8 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             diccionario_consolidador[partido_id]["mercados"][mercado] = {
                 "max_cuotas": max_cuotas, "max_bookies": max_bookies,
                 "betano_cuotas": betano_cuotas, "value_bets": value_bets,
-                "variaciones": variaciones_dict, "todas_cuotas": cuotas_globales
+                "variaciones": variaciones_dict, "todas_cuotas": cuotas_globales,
+                "surebet": info_surebet
             }
 
 # =========================================================
@@ -754,7 +820,7 @@ pestana_radar, pestana_verificador, pestana_historial = st.tabs([
 # ---------------------------------------------------------
 with pestana_radar:
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
-    st.caption("Escaneo de cuotas en tiempo real · Modelo Poisson · Coberturas · Dropping Odds")
+    st.caption("Escaneo de cuotas en tiempo real · Modelo Dixon-Coles · SureBets · Coberturas · Dropping Odds")
 
     if consultar:
         if (len(ligas_sels) > 0 or len(ligas_af_sels) > 0) and len(mercados_sels) > 0:
@@ -895,6 +961,11 @@ with pestana_radar:
                                 for m_idx, text_m in enumerate(part['mercados'].keys()):
                                     with sub_tabs[m_idx]:
                                         m_info = part['mercados'][text_m]
+                                        
+                                        # Alerta de Arbitraje / SureBet
+                                        if m_info.get("surebet", {}).get("es_surebet", False):
+                                            st.success(f"💰 **SUREBET / ARBITRAJE DETECTADO!** Rendimiento asegurable: +{round(m_info['surebet']['lucro'], 2)}%")
+
                                         sub_cols = st.columns(len(m_info['max_cuotas']))
                                         for idx, (opcion, cuota_m) in enumerate(m_info['max_cuotas'].items()):
                                             with sub_cols[idx]:
@@ -905,7 +976,7 @@ with pestana_radar:
                                                 marcado = clave_base in st.session_state.claves_auto
 
                                                 chk = st.checkbox(f"{opcion} ({cuota_m}) {lbl_val}", value=marcado, key=f"render_{clave_base}_v{st.session_state.version_ticket}")
-                                                st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]}<br>🎯 Implícita: {round(val['prob_real'],1)}%<br>📊 Poisson: {round(val['prob_poisson'],1)}% | {var_txt}</small>", unsafe_allow_html=True)
+                                                st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]}<br>🎯 Implícita: {round(val['prob_real'],1)}%<br>📊 Dixon-Coles: {round(val['prob_poisson'],1)}% | {var_txt}</small>", unsafe_allow_html=True)
 
                                                 with st.expander("🏬 Comparar Casas"):
                                                     todas_casas = m_info.get('todas_cuotas', {}).get(opcion, [])
@@ -946,9 +1017,14 @@ with pestana_radar:
                     stake_kelly = max(0.0, f_kelly * fraccion_kelly * bankroll_total)
 
                     ganancia_neta = (cuota_acumulada * monto_inversion) - monto_inversion
+                    sharpe_parlay = calcular_sharpe_parlay(cuota_acumulada, prob_combinada)
+
                     st.metric("Cuota Final", f"x{round(cuota_acumulada, 2)}")
                     st.metric("Ganancia Neta Base", f"${round(ganancia_neta, 2)}")
-                    st.metric("💡 Stake Kelly Sugerido", f"${round(stake_kelly, 2)}", help=f"Recomendación para tu Bankroll de ${bankroll_total}")
+                    
+                    c_k1, c_k2 = st.columns(2)
+                    c_k1.metric("💡 Stake Kelly Sugerido", f"${round(stake_kelly, 2)}", help=f"Recomendación para tu Bankroll de ${bankroll_total}")
+                    c_k2.metric("⚡ Sharpe Ratio Parlay", f"{round(sharpe_parlay, 3)}", help="Relación de Rentabilidad Esperanza vs Volatilidad (> 0.05 es aceptable)")
 
                     with st.expander("🛡️ Optimizador de Sistemas (TRIXIE / YANKEE)"):
                         res_sistema = calcular_sistema_cobertura(apuestas_seleccionadas, monto_inversion)
@@ -1276,6 +1352,21 @@ with pestana_historial:
 
         st.markdown("<br>", unsafe_allow_html=True)
         
+        # Simulación de Riesgo de Ruina sobre la Banca
+        with st.expander("📊 Stress Test de Banca (Probabilidad de Ruina a 200 Apuestas)"):
+            if len(terminados) > 0:
+                prob_acierto_hist = (len(ganados) / len(terminados))
+                cuota_prom_hist = terminados['Cuota'].mean() if len(terminados) > 0 else 1.50
+                inv_prom_hist = terminados['Inversión'].mean() if len(terminados) > 0 else 10.0
+                
+                res_ruina = simular_riesgo_ruina_banca(bankroll_total, inv_prom_hist, prob_acierto_hist, cuota_prom_hist)
+                
+                c_r1, c_r2 = st.columns(2)
+                c_r1.metric("📉 Riesgo Estimado de Ruina", f"{round(res_ruina['prob_ruina'], 2)}%", help="Porcentaje de simulaciones donde la banca cayó a $0")
+                c_r2.metric("💵 Banca Promedio Proyectada", f"${round(res_ruina['banca_promedio_final'], 2)}", help="Banca esperada tras 200 apuestas manteniendo tu rendimiento actual")
+            else:
+                st.caption("Registra al menos 1 apuesta finalizada (Ganada/Perdida) para ejecutar la simulación de ruina de banca.")
+
         st.subheader("📈 Curva de Crecimiento de Banca")
         df_act['Balance Acumulado ($)'] = balance_acum
         st.line_chart(df_act['Balance Acumulado ($)'], use_container_width=True)
