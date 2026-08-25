@@ -130,7 +130,6 @@ def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1
     }
 
 def calcular_poisson_live(minuto: int, goles_loc: int, goles_vis: int, lambda_l_base: float = 1.45, lambda_v_base: float = 1.10) -> Dict[str, float]:
-    """Recalcula las probabilidades dinámicas según el tiempo restante y el marcador actual."""
     tiempo_restante_pct = max(0.01, (90 - min(89, minuto)) / 90.0)
     lambda_l_rem = lambda_l_base * tiempo_restante_pct
     lambda_v_rem = lambda_v_base * tiempo_restante_pct
@@ -1884,7 +1883,7 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
             st.caption("Escanea partidos desde el panel lateral para habilitar este módulo.")
 
 # ---------------------------------------------------------
-# PESTAÑA 7: GENERADOR DE CARTEL (100% DINÁMICO & KELLY INTEGRADO)
+# PESTAÑA 7: GENERADOR DE CARTEL (100% DINÁMICO & CORREGIDO)
 # ---------------------------------------------------------
 elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.title("🎨 Generador Visual de Pronósticos para Redes")
@@ -1893,17 +1892,14 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.subheader("🖼️ Diseñador de Tarjeta de Apuesta")
     c_t1, c_t2 = st.columns([1, 1])
 
-    # Lógica de procesamiento de las selecciones realizadas en la pestaña RADAR MULTI-MERCADO
     dict_partidos_cargados = st.session_state.get('datos_cargados', {})
     apuestas_en_boleto = []
     
-    # Recorremos el diccionario global para capturar únicamente los elementos seleccionados
     if dict_partidos_cargados:
         for p_id, part in dict_partidos_cargados.items():
             for nombre_m, m_info in part['mercados'].items():
                 for opcion, val_data in m_info['value_bets'].items():
                     clave_chk = f"ap_{part['id']}_{nombre_m}_{opcion}"
-                    # Verificamos si la casilla fue marcada
                     if st.session_state.get(f"render_{clave_chk}_v{st.session_state.version_ticket}", False) or clave_chk in st.session_state.claves_auto:
                         apuestas_en_boleto.append({
                             "evento": f"{part['local']} vs {part['visitante']}",
@@ -1922,28 +1918,24 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
             cuota_acumulada_cartel *= float(ap['cuota'])
             prob_combinada_cartel *= (float(ap['prob_real']) / 100.0)
             html_eventos += f"""
-            ⚽ <b>{ap['evento']}</b><br>
-            🎯 Selección: <span style="color:#00d2d3; font-weight:bold;">{ap['seleccion']} ({ap['cuota']})</span><br><br>
+            <div style="margin-bottom: 12px;">
+                ⚽ <b>{ap['evento']}</b><br>
+                🎯 Selección: <span style="color:#00d2d3; font-weight:bold;">{ap['seleccion']} ({ap['cuota']})</span>
+            </div>
             """
         
-        # Cálculo del Stake Automático según el Criterio de Kelly
         b = cuota_acumulada_cartel - 1.0
         p = prob_combinada_cartel
         q = 1.0 - p
         f_kelly = ((b * p) - q) / b if b > 0 else 0
         stake_sugerido_monto = max(0.0, f_kelly * fraccion_kelly * bankroll_total)
         
-        # Escala automática de Stake (1 al 10)
         pct_banca = (stake_sugerido_monto / bankroll_total) * 100 if bankroll_total > 0 else 0
-        if pct_banca == 0:
-            stake_auto_escala = 1
-        else:
-            stake_auto_escala = min(10, max(1, int(np.ceil(pct_banca * 2))))
+        stake_auto_escala = 1 if pct_banca == 0 else min(10, max(1, int(np.ceil(pct_banca * 2))))
     else:
-        # Estado por defecto cuando el usuario no ha seleccionado nada en el Radar aún
         html_eventos = """
-        <i>No has marcado selecciones en el Radar.</i><br>
-        <small style="color:#8a94a6;">Ve a la pestaña <b>🚀 RADAR MULTI-MERCADO</b> y marca casillas para generar la tarjeta automáticamente.</small>
+        <p style="font-style: italic; color: #ffffff; margin-bottom: 5px;">No has marcado selecciones en el Radar.</p>
+        <p style="color: #8a94a6; font-size: 12px;">Ve a la pestaña <b>🚀 RADAR MULTI-MERCADO</b> y marca casillas para generar la tarjeta automáticamente.</p>
         """
         cuota_acumulada_cartel = 0.0
         stake_auto_escala = 1
@@ -1963,19 +1955,20 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     with c_t2:
         cuota_txt = f"x{round(cuota_acumulada_cartel, 2)}" if cuota_acumulada_cartel > 0 else "x1.00"
 
-        st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #12161f 0%, #0a0d13 100%); border: 2px solid #00d2d3; padding: 20px; border-radius: 15px; text-align: center;">
-                <h3 style="color: #00d2d3; margin-bottom: 5px;">{titulo_cartel}</h3>
-                <p style="color: #8a94a6; font-size: 12px;">Analista: <b>{analista_nombre}</b> | Stake Recomendado: <b>{monto_sugerido}/10</b></p>
-                <hr style="border-color: #232a38;">
-                <div style="text-align: left; font-size: 14px; margin: 10px 0;">
-                    {html_eventos}
-                </div>
-                <hr style="border-color: #232a38;">
-                <h2 style="color: #ffffff; font-family: 'JetBrains Mono'; margin: 5px 0;">CUOTA TOTAL: {cuota_txt}</h2>
-                <small style="color:#00d2d3;">💵 Inversión sugerida: ${round(stake_sugerido_monto, 2)} USD</small>
+        cartel_html = f"""
+        <div style="background: linear-gradient(135deg, #12161f 0%, #0a0d13 100%); border: 2px solid #00d2d3; padding: 20px; border-radius: 15px; text-align: center;">
+            <h3 style="color: #00d2d3; margin-top: 0; margin-bottom: 5px;">{titulo_cartel}</h3>
+            <p style="color: #8a94a6; font-size: 12px; margin-bottom: 15px;">Analista: <b>{analista_nombre}</b> | Stake Recomendado: <b>{monto_sugerido}/10</b></p>
+            <hr style="border: 0; border-top: 1px solid #232a38; margin: 15px 0;">
+            <div style="text-align: left; font-size: 14px;">
+                {html_eventos}
             </div>
-        """, unsafe_allow_html=True)
+            <hr style="border: 0; border-top: 1px solid #232a38; margin: 15px 0;">
+            <h2 style="color: #ffffff; font-family: 'JetBrains Mono', monospace; margin: 10px 0;">CUOTA TOTAL: {cuota_txt}</h2>
+            <small style="color: #00d2d3;">💵 Inversión sugerida: ${round(stake_sugerido_monto, 2)} USD</small>
+        </div>
+        """
+        st.markdown(cartel_html, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.button("📸 Descargar Imagen del Cartel (PNG)", use_container_width=True)
