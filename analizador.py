@@ -770,35 +770,43 @@ with pestana_verificador:
         )
 
         if "Pegado Rápido" in modo_ingreso:
-            st.info("💡 **Ejemplo de pegado:** Puedes pegar el texto completo que copiaste de tu casa de apuestas, o simplemente escribir las cuotas separadas por espacios o comas.\n\n*Ejemplo 1:* `1.50, 1.65, 1.80, 2.10`\n*Ejemplo 2:* `Real Madrid 1.50\nBarcelona 1.65\nLiga de Quito 1.80`")
+            st.info("💡 **Ejemplo de pegado:** Puedes pegar el texto tal como lo copias de WhatsApp o de la casa de apuestas (acepta cuotas con 'x', comas o puntos).\n\n*Ejemplo:* `Real Madrid vs Sociedad -> Local | x1.37` o `1.37, 1.45, 1.80`")
             
             texto_pegado = st.text_area(
                 "📋 Pega aquí tu boleto o cuotas:",
                 height=150,
-                placeholder="Ejemplo:\nBarcelona vs Emelec - Cuota 1.50\nReal Madrid vs Getafe - Cuota 1.85\n1.45"
+                placeholder="Ejemplo:\nReal Madrid vs Real Sociedad -> Local | x1.37\nBarcelona vs Athletic Bilbao -> Local | x1.37"
             )
 
             if texto_pegado:
                 lineas = texto_pegado.strip().split('\n')
                 
-                for idx, linea in enumerate(lineas):
+                for linea in lineas:
                     linea_clean = linea.strip()
                     if not linea_clean:
                         continue
                     
-                    linea_norm = linea_clean.replace(',', '.')
+                    # Normalizar prefijos (x1.37, X1.37, @1.37) sin romper decimales
+                    linea_norm = re.sub(r'(?<=\s|^)[xX@]\s*(?=\d)', '', linea_clean)
+                    linea_norm = linea_norm.replace('x', '').replace('X', '').replace(',', '.')
+                    
+                    # Extraer números decimales o enteros válidos
                     cuotas_encontradas = re.findall(r'\b\d+\.\d+|\b\d+\b', linea_norm)
                     cuotas_validas = [float(c) for c in cuotas_encontradas if float(c) > 1.0]
                     
                     if cuotas_validas:
                         cuota_val = cuotas_validas[-1]
-                        nombre_txt = re.sub(r'\b\d+[\.,]?\d*\b', '', linea_clean).strip(" -:()")
+                        
+                        # Limpiar el nombre del partido quitando símbolos y el valor numérico de la cuota
+                        nombre_txt = re.sub(r'[\|\-\>\:]', '', linea_clean)
+                        nombre_txt = re.sub(r'\b[xX]?\s*\d+[\.,]?\d*\b', '', nombre_txt).strip()
+                        
                         if not nombre_txt:
                             nombre_txt = f"Selección #{len(partidos_externos)+1}"
                         
                         partidos_externos.append({"nombre": nombre_txt, "cuota": cuota_val})
                     else:
-                        partes = linea_norm.replace(',', ' ').split()
+                        partes = linea_norm.split()
                         for p in partes:
                             try:
                                 val = float(p)
@@ -833,10 +841,7 @@ with pestana_verificador:
                 c = float(p['cuota'])
                 cuota_total_ext *= c
                 
-                # 1. Probabilidad implícita con margen
                 prob_implicita_casa = (1.0 / c)
-                
-                # 2. Probabilidad Real Fair descontando la comisión
                 prob_real_evento = prob_implicita_casa / factor_comision
                 prob_real_total *= prob_real_evento
 
