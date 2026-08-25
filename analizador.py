@@ -499,6 +499,7 @@ with st.sidebar:
     
     st.markdown("---")
     st.subheader("🎯 Filtros Parlay Automático")
+    perfil_estrategia = st.selectbox("Perfil de Estrategia:", ["📈 Mayor Probabilidad", "🛡️ Conservador (Favoritos)", "🔥 Cazador de Valor (+EV)", "⚖️ Equilibrado (Doble Oportunidad)"])
     num_eventos_auto = st.slider("Eventos:", min_value=2, max_value=6, value=3)
     rango_cuota_auto = st.slider("Rango de Cuota por Selección:", min_value=1.10, max_value=3.50, value=(1.25, 2.20), step=0.05)
     prob_min_auto = st.slider("Probabilidad Mínima (%):", min_value=40, max_value=90, value=55, step=5)
@@ -712,7 +713,7 @@ with pestana_radar:
     dict_partidos = st.session_state.datos_cargados
     dict_previos = st.session_state.datos_cargados_previos
 
-    # LÓGICA MEJORADA CON FILTROS DE RIESGO AVANZADOS
+    # LÓGICA CON MODOS DE ESTRATEGIA Y PERFIL DE RIESGO
     if generar_auto:
         if dict_partidos:
             opciones_todas = []
@@ -721,9 +722,17 @@ with pestana_radar:
                     for opcion, val_data in m_info['value_bets'].items():
                         cuota_op = m_info['max_cuotas'][opcion]
                         prob_op = val_data['prob_real']
+                        ev_op = val_data['ev']
                         
-                        # Filtro de Riesgo (Cuotas y Probabilidad)
-                        if (rango_cuota_auto[0] <= cuota_op <= rango_cuota_auto[1]) and (prob_op >= prob_min_auto):
+                        cumple_perfil = True
+                        if "Conservador" in perfil_estrategia:
+                            cumple_perfil = prob_op >= 65.0
+                        elif "Value Hunter" in perfil_estrategia:
+                            cumple_perfil = ev_op > 0.02
+                        elif "Equilibrado" in perfil_estrategia:
+                            cumple_perfil = nombre_m == "Doble Oportunidad"
+
+                        if cumple_perfil and (rango_cuota_auto[0] <= cuota_op <= rango_cuota_auto[1]) and (prob_op >= prob_min_auto):
                             opciones_todas.append({
                                 "partido_id": part['id'],
                                 "clave": f"ap_{part['id']}_{nombre_m}_{opcion}",
@@ -732,10 +741,8 @@ with pestana_radar:
                                 "seleccion": opcion
                             })
             
-            # Ordenar todas por probabilidad descendente
             opciones_todas = sorted(opciones_todas, key=lambda x: x['prob_real'], reverse=True)
             
-            # Seleccionar únicamente la mejor opción por partido (sin repetir partidos)
             partidos_usados = set()
             mejores_opciones = []
             for op in opciones_todas:
@@ -748,9 +755,9 @@ with pestana_radar:
             if mejores_opciones:
                 st.session_state.claves_auto = set([x['clave'] for x in mejores_opciones])
                 st.session_state.version_ticket += 1
-                st.success(f"🎯 Marcados automáticamente {len(mejores_opciones)} eventos ajustados a tu rango de riesgo.")
+                st.success(f"🎯 Marcados automáticamente {len(mejores_opciones)} eventos ({perfil_estrategia}).")
             else:
-                st.warning("⚠️ Ninguna selección cumple los filtros de riesgo actuales. Intenta ampliar los rangos.")
+                st.warning("⚠️ Ninguna selección cumple los filtros de la estrategia seleccionada.")
 
     apuestas_seleccionadas = []
 
@@ -802,7 +809,6 @@ with pestana_radar:
                                                 clave_base = f"ap_{part['id']}_{text_m}_{opcion}"
                                                 marcado = clave_base in st.session_state.claves_auto
 
-                                                # CÁLCULO DE MOVIMIENTO DE CUOTA (ODDS MOVEMENT)
                                                 txt_mov = ""
                                                 if dict_previos and part['id'] in dict_previos and text_m in dict_previos[part['id']]['mercados']:
                                                     cuotas_v = dict_previos[part['id']]['mercados'][text_m]['max_cuotas']
@@ -816,6 +822,15 @@ with pestana_radar:
 
                                                 chk = st.checkbox(f"{opcion} ({cuota_m}) {lbl_val}", value=marcado, key=f"render_{clave_base}_v{st.session_state.version_ticket}")
                                                 st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]} {txt_mov}<br>🎯 Prob: {round(val['prob_real'],1)}%</small>", unsafe_allow_html=True)
+
+                                                # MATRIZ MULTI-CASA (ODDS COMPARISON GRID)
+                                                with st.expander("🏬 Comparar Casas"):
+                                                    todas_casas = m_info.get('todas_cuotas', {}).get(opcion, [])
+                                                    if todas_casas:
+                                                        df_casas = pd.DataFrame(todas_casas, columns=["Cuota", "Casa de Apuestas"]).sort_values("Cuota", ascending=False)
+                                                        st.dataframe(df_casas, use_container_width=True, hide_index=True)
+                                                    else:
+                                                        st.caption("No hay datos de otras casas.")
 
                                                 if chk:
                                                     apuestas_seleccionadas.append({
@@ -839,7 +854,7 @@ with pestana_radar:
                         st.markdown(f"<div class='ticket-item'>✔️ <b>{ap['evento']}</b><br>➔ <code>{ap['seleccion']}</code> | <span class='ticket-cuota-tag'>x{ap['cuota']}</span></div>", unsafe_allow_html=True)
                         texto_whatsapp += f"⚽ *{ap['evento']}*\n🎯 {ap['mercado']}: *{ap['seleccion']}* (x{ap['cuota']}) - 🏢 {ap['casa']}\n\n"
 
-                    # CÁLCULO DE KELLY INTEGRADO
+                    # CÁLCULO DE KELLY
                     b = cuota_acumulada - 1.0
                     p = prob_combinada
                     q = 1.0 - p
@@ -850,6 +865,15 @@ with pestana_radar:
                     st.metric("Cuota Final", f"x{round(cuota_acumulada, 2)}")
                     st.metric("Ganancia Neta Base", f"${round(ganancia_neta, 2)}")
                     st.metric("💡 Stake Kelly Sugerido", f"${round(stake_kelly, 2)}", help=f"Recomendación para tu Bankroll de ${bankroll_total}")
+
+                    # CALCULADORA DE COBERTURA (HEDGE)
+                    with st.expander("🛡️ Calculadora de Cobertura (Hedge)"):
+                        st.caption("Usa esta herramienta si acertaste tus primeros eventos y deseas asegurar ganancias en el último partido.")
+                        cuota_contra = st.number_input("Cuota Contra-opción último partido:", min_value=1.01, value=2.10, step=0.05)
+                        retorno_potencial = monto_inversion * cuota_acumulada
+                        stake_hedge = retorno_potencial / cuota_contra
+                        ganancia_asegurada = retorno_potencial - monto_inversion - stake_hedge
+                        st.info(f"👉 Apostar **${round(stake_hedge, 2)}** a la contraopción para **garantizar ${round(ganancia_asegurada, 2)} libres de riesgo**.")
 
                     if st.button("💾 Registrar en Bitácora", type="primary", use_container_width=True):
                         st.session_state.historial_apuestas.append({
@@ -909,6 +933,21 @@ with pestana_historial:
         kpi3.markdown(f'<div class="kpi-card"><div class="kpi-label">🎯 Tasa Acierto</div><div class="kpi-value">{round(acierto, 1)}%</div></div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
+        
+        # GRÁFICO EVOLUTIVO DE BANKROLL (PATRIMONIO)
+        st.subheader("📈 Curva de Crecimiento de Patrimonio")
+        balance_acumulado = []
+        cabal = 0.0
+        for _, r in df_act.iterrows():
+            if r['Estado'] == "Ganado":
+                cabal += (r['Inversión'] * r['Cuota']) - r['Inversión']
+            elif r['Estado'] == "Perdido":
+                cabal -= r['Inversión']
+            balance_acumulado.append(cabal)
+        
+        df_act['Balance Acumulado ($)'] = balance_acumulado
+        st.line_chart(df_act['Balance Acumulado ($)'], use_container_width=True)
+
         st.dataframe(df_act, use_container_width=True)
 
         col_d, col_b = st.columns([3, 1])
