@@ -99,9 +99,6 @@ def enviar_telegram(mensaje: str) -> bool:
         st.error(f"💥 Error de conexión con Telegram: {e}")
         return False
 
-# =========================================================
-# MEJORA 3: SERVICIO JS DE NOTIFICACIONES Y SONIDO NATIVO
-# =========================================================
 def disparar_alerta_sonora_y_notificacion(titulo: str, mensaje: str):
     js_code = f"""
     <script>
@@ -747,7 +744,11 @@ if 'creditos_restantes_af' not in st.session_state:
 if 'overrides_live' not in st.session_state:
     st.session_state.overrides_live = {}
 
-# MEJORA 2: Timestamp del último escaneo
+# CORRECCIÓN DE PERSISTENCIA: DICCIONARIO PARA TICKET GLOBAL PERSISTENTE
+if 'ticket_persistente' not in st.session_state:
+    st.session_state.ticket_persistente = {}
+
+# Timestamp del último escaneo
 if 'ultimo_escaneo_ts' not in st.session_state:
     st.session_state.ultimo_escaneo_ts = None
 
@@ -760,6 +761,21 @@ if 'tg_token' not in st.session_state:
     st.session_state.tg_token = user_config.get('tg_token', '')
 if 'tg_chat_id' not in st.session_state:
     st.session_state.tg_chat_id = user_config.get('tg_chat_id', '')
+
+# Callback centralizado para alternar selecciones de forma persistente
+def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_val, prob_val, clave_k):
+    if st.session_state.get(clave_k, False):
+        st.session_state.ticket_persistente[clave_k] = {
+            "evento": f"{partido_obj['local']} vs {partido_obj['visitante']}",
+            "liga": partido_obj['liga_origen'],
+            "mercado": mercado_nombre,
+            "seleccion": opcion_nombre,
+            "cuota": cuota_val,
+            "casa": casa_val,
+            "prob_real": prob_val
+        }
+    else:
+        st.session_state.ticket_persistente.pop(clave_k, None)
 
 # =========================================================
 # 9. SIDEBAR ORGANIZADO EN ACCORDEONES
@@ -1064,7 +1080,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                 "es_value": ev > 0.02
             }
 
-            # MEJORA 3: Disparo de notificaciones nativas JS si +EV > 10%
             if ev > 0.10:
                 disparar_alerta_sonora_y_notificacion(
                     f"🔥 OPORTUNIDAD ALTO VALOR (+{round(ev*100,1)}%)",
@@ -1085,7 +1100,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
 
         info_surebet = detectar_surebet(max_cuotas)
 
-        # MEJORA 3: Disparo de notificación nativa si SureBet
         if info_surebet.get("es_surebet"):
             disparar_alerta_sonora_y_notificacion(
                 f"💰 SUREBET ENCONTRADA (+{round(info_surebet['lucro'], 2)}%)",
@@ -1152,7 +1166,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
     st.caption("Escaneo de cuotas en tiempo real · Modelo Dixon-Coles / Poisson Live · SureBets · Coberturas · Dropping Odds")
 
-    # MEJORA 2: Indicador visual de Timestamp y Stale Data Warning
     if st.session_state.ultimo_escaneo_ts is not None:
         segundos_transcurridos = int(time.time() - st.session_state.ultimo_escaneo_ts)
         hora_escaneo = datetime.fromtimestamp(st.session_state.ultimo_escaneo_ts).strftime("%H:%M:%S")
@@ -1204,8 +1217,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             st.session_state.datos_cargados = consolidador
             st.session_state.claves_auto = set()
             st.session_state.version_ticket += 1
-            
-            # MEJORA 2: Actualizar timestamp de escaneo
             st.session_state.ultimo_escaneo_ts = time.time()
 
             if st.session_state.get('auto_alertas_telegram', False):
@@ -1236,9 +1247,17 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                     elif "Equilibrado" in perfil_estrategia: cumple_perfil = nombre_m == "Doble Oportunidad"
 
                     if cumple_perfil and (rango_cuota_auto[0] <= cuota_op <= rango_cuota_auto[1]) and (prob_op >= prob_min_auto):
+                        clave_b = f"ap_{part['id']}_{nombre_m}_{opcion}"
                         opciones_todas.append({
-                            "partido_id": part['id'], "clave": f"ap_{part['id']}_{nombre_m}_{opcion}",
-                            "prob_real": prob_op, "mercado": nombre_m, "seleccion": opcion
+                            "partido_id": part['id'], 
+                            "clave": clave_b,
+                            "partido_obj": part,
+                            "mercado_nombre": nombre_m,
+                            "opcion_nombre": opcion,
+                            "cuota_val": cuota_op,
+                            "casa_val": m_info['max_bookies'][opcion],
+                            "prob_real": prob_op,
+                            "ev": ev_op
                         })
         
         opciones_todas = sorted(opciones_todas, key=lambda x: x['prob_real'], reverse=True)
@@ -1252,10 +1271,18 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
         
         if mejores_opciones:
             st.session_state.claves_auto = set([x['clave'] for x in mejores_opciones])
+            for item_sel in mejores_opciones:
+                st.session_state.ticket_persistente[item_sel['clave']] = {
+                    "evento": f"{item_sel['partido_obj']['local']} vs {item_sel['partido_obj']['visitante']}",
+                    "liga": item_sel['partido_obj']['liga_origen'],
+                    "mercado": item_sel['mercado_nombre'],
+                    "seleccion": item_sel['opcion_nombre'],
+                    "cuota": item_sel['cuota_val'],
+                    "casa": item_sel['casa_val'],
+                    "prob_real": item_sel['prob_real']
+                }
             st.session_state.version_ticket += 1
             st.success(f"🎯 Marcados automáticamente {len(mejores_opciones)} eventos.")
-
-    apuestas_seleccionadas = []
 
     if not st.session_state.ha_consultado:
         st.markdown("""
@@ -1318,7 +1345,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                         st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
                                         st.markdown(f"<span class='kickoff-chip'>📅 {part['fecha_str']}</span>", unsafe_allow_html=True)
 
-                                # PANEL INTERACTIVO DE CONTROL EN VIVO (MEJORA 1: Callbacks on_change)
                                 if part.get('es_en_vivo'):
                                     with st.expander("⏱️ Ajustar Minuto y Marcador en Vivo (Live Override)", expanded=False):
                                         c_ov1, c_ov2, c_ov3 = st.columns([2, 1, 1])
@@ -1412,10 +1438,18 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                                 val = m_info['value_bets'][opcion]
                                                 var_txt = m_info.get('variaciones', {}).get(opcion, "")
                                                 lbl_val = "**🔥 VALOR**" if val['es_value'] else ""
+                                                
+                                                # KEY ESTÁTICA Y CALLBACK DIRECTO DE PERSISTENCIA
                                                 clave_base = f"ap_{part['id']}_{text_m}_{opcion}"
-                                                marcado = clave_base in st.session_state.claves_auto
+                                                val_defecto = clave_base in st.session_state.ticket_persistente or clave_base in st.session_state.claves_auto
 
-                                                chk = st.checkbox(f"{opcion} ({cuota_m}) {lbl_val}", value=marcado, key=f"render_{clave_base}_v{st.session_state.version_ticket}")
+                                                chk = st.checkbox(
+                                                    f"{opcion} ({cuota_m}) {lbl_val}", 
+                                                    value=val_defecto, 
+                                                    key=clave_base,
+                                                    on_change=toggle_apuesta,
+                                                    args=(part, text_m, opcion, cuota_m, m_info['max_bookies'][opcion], val['prob_real'], clave_base)
+                                                )
                                                 
                                                 lbl_modelo = f"⏱️ Poisson Live ({part.get('minuto_en_vivo', '30\'')})" if part.get('es_en_vivo') else "📊 Dixon-Coles"
                                                 st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]}<br>🎯 Implícita: {round(val['prob_real'],1)}%<br>{lbl_modelo}: {round(val['prob_poisson'],1)}% | {var_txt}</small>", unsafe_allow_html=True)
@@ -1432,16 +1466,17 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                                     st.caption("📈 **Tendencia de Cuota Live:**")
                                                     st.line_chart(hist_pts, height=100)
 
-                                                if chk:
-                                                    apuestas_seleccionadas.append({
-                                                        "evento": f"{part['local']} vs {part['visitante']}",
-                                                        "liga": part['liga_origen'], "mercado": text_m,
-                                                        "seleccion": opcion, "cuota": cuota_m, "casa": m_info['max_bookies'][opcion],
-                                                        "prob_real": val['prob_real']
-                                                    })
-
         with col_der:
             st.subheader("🎟️ Configuración de Parlay")
+            
+            # OBTENER SELECCIONES DIRECTAMENTE DEL ESTADO PERSISTENTE
+            apuestas_seleccionadas = list(st.session_state.ticket_persistente.values())
+
+            if st.button("🧹 Limpiar Boleto", use_container_width=True):
+                st.session_state.ticket_persistente.clear()
+                st.session_state.claves_auto.clear()
+                st.rerun()
+
             if apuestas_seleccionadas:
                 alertas_correlacion = detectar_correlaciones(apuestas_seleccionadas)
                 for al in alertas_correlacion:
@@ -1532,6 +1567,8 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                     if st.button("📤 Enviar a Telegram", use_container_width=True, key="telegram_btn"):
                         if enviar_telegram(texto_whatsapp):
                             st.toast("¡Enviado a Telegram!", icon="📤")
+            else:
+                st.info("🎟️ Marca casillas en el radar para construir tu boleto persistente.")
 
 # ---------------------------------------------------------
 # PESTAÑA 2: CALCULADORA EXTERNA & MONTE CARLO
@@ -2114,7 +2151,7 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
             st.caption("Escanea partidos desde el panel lateral para habilitar este módulo.")
 
 # ---------------------------------------------------------
-# PESTAÑA 7: GENERADOR DE CARTEL Y DESCARGA PNG (MEJORA 4)
+# PESTAÑA 7: GENERADOR DE CARTEL Y DESCARGA PNG
 # ---------------------------------------------------------
 elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.title("🎨 Generador Visual de Pronósticos para Redes")
@@ -2123,22 +2160,8 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.subheader("🖼️ Diseñador de Tarjeta de Apuesta")
     c_t1, c_t2 = st.columns([1, 1])
 
-    dict_partidos_cargados = st.session_state.get('datos_cargados', {})
-    apuestas_en_boleto = []
-    
-    if dict_partidos_cargados:
-        for p_id, part in dict_partidos_cargados.items():
-            for nombre_m, m_info in part['mercados'].items():
-                for opcion, val_data in m_info['value_bets'].items():
-                    clave_chk = f"ap_{part['id']}_{nombre_m}_{opcion}"
-                    if st.session_state.get(f"render_{clave_chk}_v{st.session_state.version_ticket}", False) or clave_chk in st.session_state.claves_auto:
-                        apuestas_en_boleto.append({
-                            "evento": f"{part['local']} vs {part['visitante']}",
-                            "mercado": nombre_m,
-                            "seleccion": opcion,
-                            "cuota": m_info['max_cuotas'][opcion],
-                            "prob_real": val_data['prob_real']
-                        })
+    # LECTURA PERSISTENTE PARA EL CARTEL
+    apuestas_en_boleto = list(st.session_state.ticket_persistente.values())
 
     cuota_acumulada_cartel = 1.0
     prob_combinada_cartel = 1.0
@@ -2188,7 +2211,6 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     with c_t2:
         cuota_txt = f"x{round(cuota_acumulada_cartel, 2)}" if cuota_acumulada_cartel > 0 else "x1.00"
 
-        # MEJORA 4: Canvas HTML/JS con html2canvas para exportar la imagen en PNG nativo a 1080x1080
         cartel_componente_html = f"""
         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
         <div id="cartel_container" style="
