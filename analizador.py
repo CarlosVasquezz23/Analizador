@@ -86,11 +86,9 @@ def detectar_correlaciones(apuestas: List[Dict[str, Any]]) -> List[str]:
             mercados = [s['mercado'] for s in selecciones]
             opciones = [s['seleccion'] for s in selecciones]
 
-            # Conflicto en 1X2
             if mercados.count("1X2 (Ganador)") > 1:
                 alertas.append(f"⚠️ **{ev}**: Selección contradictoria en el mercado 1X2 ({', '.join(opciones)}).")
 
-            # Conflicto 1X2 vs Doble Oportunidad opuesta
             if "1X2 (Ganador)" in mercados and "Doble Oportunidad" in mercados:
                 for s in selecciones:
                     if s['seleccion'] == "Local" and any(x in ["X2 (Visitante o Empate)"] for x in opciones):
@@ -98,7 +96,6 @@ def detectar_correlaciones(apuestas: List[Dict[str, Any]]) -> List[str]:
                     elif s['seleccion'] == "Visitante" and any(x in ["1X (Local o Empate)"] for x in opciones):
                         alertas.append(f"⚠️ **{ev}**: Incompatibilidad entre Visitante y 1X.")
 
-            # Conflicto Under 2.5 vs BTTS Sí
             if "Goles Más/Menos 2.5" in mercados and "Ambos Anotan (BTTS)" in mercados:
                 if "Menos de 2.5" in opciones and "Sí" in opciones:
                     alertas.append(f"⚠️ **{ev}**: Conflicto de alta correlación negativa (Menos de 2.5 Goles y Ambos Anotan Sí).")
@@ -132,12 +129,6 @@ st.markdown("""
     h1, h2, h3 { font-family: 'Inter', sans-serif; font-weight: 800 !important; letter-spacing: -0.02em; }
     h1 { background: linear-gradient(90deg, #ffffff 0%, #9fb4c7 100%); -webkit-background-clip: text; background-clip: text; }
 
-    .prob-alta { color: var(--rg-success); font-weight: 700; }
-    .prob-media { color: var(--rg-warn); font-weight: 700; }
-    .prob-baja { color: var(--rg-danger); font-weight: 700; }
-    .movimiento-sube { color: var(--rg-success); font-weight: bold; font-size: 11px; }
-    .movimiento-baja { color: var(--rg-danger); font-weight: bold; font-size: 11px; }
-
     .match-header { font-size: 18px; font-weight: 700; margin-bottom: 2px; letter-spacing: -0.01em; }
     .liga-chip {
         display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase;
@@ -148,12 +139,6 @@ st.markdown("""
         display: inline-block; font-size: 12px; font-weight: 600; color: #cfd8e3;
         background: var(--rg-card-alt); border: 1px solid var(--rg-border); border-radius: 999px;
         padding: 3px 10px; margin-top: 2px;
-    }
-
-    .value-pill {
-        display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.03em;
-        color: #0b0e14; background: linear-gradient(90deg, var(--rg-gold), #ff9f43);
-        border-radius: 999px; padding: 1px 8px; margin-left: 4px; vertical-align: middle;
     }
 
     .creditos-caja {
@@ -214,7 +199,6 @@ st.markdown("""
         background: linear-gradient(160deg, #141a24 0%, #0f131a 100%);
         border: 1px solid var(--rg-border); border-radius: 18px; padding: 28px 30px; text-align: left;
     }
-    .welcome-card h3 { margin-top: 0; }
 
     div[data-testid="stAlert"] { border-radius: 12px !important; border: 1px solid var(--rg-border) !important; }
     div[data-testid="stExpander"] { border: 1px solid var(--rg-border) !important; border-radius: 12px !important; background: var(--rg-card-alt); overflow: hidden; }
@@ -534,8 +518,15 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
 # =========================================================
 # 9. PESTAÑAS Y VISTA DE USUARIO
 # =========================================================
-pestana_radar, pestana_historial = st.tabs(["🚀 RADAR MULTI-MERCADO & VALUEBETS", "📊 BITÁCORA PRO & AUDITORÍA ROI"])
+pestana_radar, pestana_verificador, pestana_historial = st.tabs([
+    "🚀 RADAR MULTI-MERCADO & VALUEBETS", 
+    "🧮 CALCULADORA DE PROBABILIDAD (PARLAY EXTERNO)",
+    "📊 BITÁCORA PRO & AUDITORÍA ROI"
+])
 
+# ---------------------------------------------------------
+# PESTAÑA 1: RADAR AUTOMÁTICO
+# ---------------------------------------------------------
 with pestana_radar:
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
     st.caption("Escaneo de cuotas en tiempo real · Value bets · Ticket parlay automático")
@@ -680,7 +671,6 @@ with pestana_radar:
         with col_der:
             st.subheader("🎟️ Configuración de Parlay")
             if apuestas_seleccionadas:
-                # 🔀 NUEVO: DETECCIÓN DE APUESTAS CORRELACIONADAS
                 alertas_correlacion = detectar_correlaciones(apuestas_seleccionadas)
                 for al in alertas_correlacion:
                     st.error(al)
@@ -696,7 +686,6 @@ with pestana_radar:
                         st.markdown(f"<div class='ticket-item'>✔️ <b>{ap['evento']}</b><br>➔ <code>{ap['seleccion']}</code> | <span class='ticket-cuota-tag'>x{ap['cuota']}</span></div>", unsafe_allow_html=True)
                         texto_whatsapp += f"⚽ *{ap['evento']}*\n🎯 {ap['mercado']}: *{ap['seleccion']}* (x{ap['cuota']}) - 🏢 {ap['casa']}\n\n"
 
-                    # CÁLCULO DE KELLY
                     b = cuota_acumulada - 1.0
                     p = prob_combinada
                     q = 1.0 - p
@@ -708,7 +697,6 @@ with pestana_radar:
                     st.metric("Ganancia Neta Base", f"${round(ganancia_neta, 2)}")
                     st.metric("💡 Stake Kelly Sugerido", f"${round(stake_kelly, 2)}", help=f"Recomendación para tu Bankroll de ${bankroll_total}")
 
-                    # CALCULADORA DE COBERTURA (HEDGE)
                     with st.expander("🛡️ Calculadora de Cobertura (Hedge)"):
                         st.caption("Usa esta herramienta si acertaste tus primeros eventos y deseas asegurar ganancias en el último partido.")
                         cuota_contra = st.number_input("Cuota Contra-opción último partido:", min_value=1.01, value=2.10, step=0.05)
@@ -732,7 +720,6 @@ with pestana_radar:
                         st.toast("¡Guardado localmente!", icon="💾")
                         st.rerun()
 
-                    # 📄 NUEVO: EXPORTACIÓN DEL BOLETO IMPRIMIBLE/PDF
                     html_ticket = f"""
                     <div style="font-family: Arial; border:2px solid #00d2d3; padding:15px; border-radius:10px; background-color:#12161f; color:white;">
                         <h3 style="color:#00d2d3; text-align:center;">🎟️ BOLETO DE APUESTAS PARLAY</h3>
@@ -757,13 +744,86 @@ with pestana_radar:
                         if enviar_telegram(texto_whatsapp):
                             st.toast("¡Enviado a Telegram!", icon="📤")
 
-# =========================================================
-# 10. PESTAÑA AUDITORÍA, BITÁCORA Y PERFORMANCE ANALYTICS
-# =========================================================
+# ---------------------------------------------------------
+# PESTAÑA 2: NUEVA CALCULADORA DE PARLAY EXTERNO (CUALQUIER APP)
+# ---------------------------------------------------------
+with pestana_verificador:
+    st.title("🧮 Analizador & Verificador de Parlays Externos")
+    st.caption("Ingresa los eventos y cuotas que armaste en cualquier casa de apuestas (Betano, Bet365, Ecuabet, etc.) para calcular su probabilidad real matemática.")
+
+    col_ingreso, col_resultados = st.columns([1.1, 1])
+
+    with col_ingreso:
+        st.subheader("📌 Armar / Pegar Selecciones")
+        num_partidos_ext = st.number_input("Número de Partidos en tu Ticket:", min_value=1, max_value=10, value=3, step=1)
+        margen_estimado_casa = st.slider("Comisión/Margen estimado de la casa (%):", min_value=2.0, max_value=12.0, value=5.0, step=0.5, help="La mayoría de casas cobran entre 5% y 7% de margen sobre las cuotas.")
+
+        partidos_externos = []
+        for i in range(int(num_partidos_ext)):
+            with st.expander(f"⚽ Selección #{i+1}", expanded=True):
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    nombre_partido = st.text_input(f"Partido/Selección #{i+1}:", f"Evento #{i+1}", key=f"ext_name_{i}")
+                with col2:
+                    cuota_partido = st.number_input(f"Cuota:", min_value=1.01, value=1.50, step=0.05, key=f"ext_odd_{i}")
+                partidos_externos.append({"nombre": nombre_partido, "cuota": cuota_partido})
+
+    with col_resultados:
+        st.subheader("📊 Análisis Matemático del Ticket")
+
+        cuota_total_ext = 1.0
+        prob_implícita_casa_total = 1.0
+        prob_real_sin_margen_total = 1.0
+
+        factor_margen = 1.0 + (margen_estimado_casa / 100.0)
+
+        detalles_tabla = []
+
+        for p in partidos_externos:
+            c = p['cuota']
+            cuota_total_ext *= c
+            
+            prob_implicita_bruta = (1.0 / c)
+            prob_real_evento = min(0.99, prob_implicita_bruta * factor_margen) # Ajuste por overround
+            prob_real_sin_margen_total *= prob_real_evento
+
+            detalles_tabla.append({
+                "Selección": p['nombre'],
+                "Cuota Casa": f"x{round(c, 2)}",
+                "Prob. Implícita": f"{round(prob_implicita_bruta * 100, 1)}%",
+                "Prob. Real Est.": f"{round(prob_real_evento * 100, 1)}%"
+            })
+
+        prob_porcentaje = prob_real_sin_margen_total * 100.0
+        cuota_justa = (1.0 / prob_real_sin_margen_total) if prob_real_sin_margen_total > 0 else 0
+        ev_ticket = (cuota_total_ext * prob_real_sin_margen_total) - 1.0
+
+        st.markdown(f"""
+            <div class="kpi-card" style="border-left: 5px solid #00d2d3; margin-bottom: 15px;">
+                <div class="kpi-label">🎯 PROBABILIDAD REAL DE ACERTAR ESTE PARLAY</div>
+                <div class="kpi-value" style="color: #00d2d3; font-size: 34px;">{round(prob_porcentaje, 2)}%</div>
+                <div class="kpi-sub" style="color:#a4b0be;">Equivale a acertar 1 de cada {round(100/prob_porcentaje, 1) if prob_porcentaje > 0 else 0} intentos</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        k1, k2 = st.columns(2)
+        k1.metric("Cuota Total de la Casa", f"x{round(cuota_total_ext, 2)}")
+        k2.metric("Cuota Justa Sin Margen", f"x{round(cuota_justa, 2)}", help="La cuota que matemáticamente te deberían pagar sin la comisión de la casa.")
+
+        if ev_ticket > 0:
+            st.success(f"🔥 **TICKET CON VALOR ESPERADO POSITIVO (+EV: {round(ev_ticket*100, 1)}%)**: Las cuotas de tu ticket valen la pena.")
+        else:
+            st.warning(f"⚠️ **TICKET CON MARGEN DESFAVORABLE ({round(ev_ticket*100, 1)}%)**: La casa retiene una alta comisión en este combinado.")
+
+        st.write("**Desglose Selección por Selección:**")
+        st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------------
+# PESTAÑA 3: AUDITORÍA Y BITÁCORA
+# ---------------------------------------------------------
 with pestana_historial:
     st.title("📊 Módulo de Auditoría Financiera Avanzada")
 
-    # 🗄️ NUEVO: RESPALDO Y RESTAURACIÓN JSON (IMPORT/EXPORT)
     with st.expander("🗄️ Copias de Seguridad (Backup & Restore JSON)"):
         col_exp_j, col_imp_j = st.columns(2)
         with col_exp_j:
@@ -813,7 +873,6 @@ with pestana_historial:
 
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # GRÁFICO EVOLUTIVO DE BANKROLL (PATRIMONIO)
         st.subheader("📈 Curva de Crecimiento de Patrimonio")
         balance_acumulado = []
         cabal = 0.0
@@ -827,7 +886,6 @@ with pestana_historial:
         df_act['Balance Acumulado ($)'] = balance_acumulado
         st.line_chart(df_act['Balance Acumulado ($)'], use_container_width=True)
 
-        # 📊 NUEVO: DESGLOSE DE RENDIMIENTO POR LIGA Y MERCADO (PERFORMANCE ANALYTICS)
         st.subheader("📊 Análisis de Rendimiento por Liga y Mercado")
         col_an_liga, col_an_mercado = st.columns(2)
         with col_an_liga:
