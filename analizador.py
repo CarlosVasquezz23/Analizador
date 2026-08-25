@@ -1883,7 +1883,7 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
             st.caption("Escanea partidos desde el panel lateral para habilitar este módulo.")
 
 # ---------------------------------------------------------
-# PESTAÑA 7: GENERADOR DE CARTEL (100% DINÁMICO & CORREGIDO)
+# PESTAÑA 7: GENERADOR DE CARTEL (RENDERIZADO HTML FIX)
 # ---------------------------------------------------------
 elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.title("🎨 Generador Visual de Pronósticos para Redes")
@@ -1900,6 +1900,7 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
             for nombre_m, m_info in part['mercados'].items():
                 for opcion, val_data in m_info['value_bets'].items():
                     clave_chk = f"ap_{part['id']}_{nombre_m}_{opcion}"
+                    # Verificación síncrona en st.session_state para mantener coherencia
                     if st.session_state.get(f"render_{clave_chk}_v{st.session_state.version_ticket}", False) or clave_chk in st.session_state.claves_auto:
                         apuestas_en_boleto.append({
                             "evento": f"{part['local']} vs {part['visitante']}",
@@ -1917,12 +1918,12 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
         for ap in apuestas_en_boleto:
             cuota_acumulada_cartel *= float(ap['cuota'])
             prob_combinada_cartel *= (float(ap['prob_real']) / 100.0)
-            html_eventos += f"""
-            <div style="margin-bottom: 12px;">
-                ⚽ <b>{ap['evento']}</b><br>
-                🎯 Selección: <span style="color:#00d2d3; font-weight:bold;">{ap['seleccion']} ({ap['cuota']})</span>
-            </div>
-            """
+            html_eventos += (
+                f"<div style='margin-bottom: 12px; text-align: left;'>"
+                f"⚽ <b>{ap['evento']}</b><br>"
+                f"🎯 Selección: <span style='color:#00d2d3; font-weight:bold;'>{ap['seleccion']} (x{ap['cuota']})</span>"
+                f"</div>"
+            )
         
         b = cuota_acumulada_cartel - 1.0
         p = prob_combinada_cartel
@@ -1933,10 +1934,12 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
         pct_banca = (stake_sugerido_monto / bankroll_total) * 100 if bankroll_total > 0 else 0
         stake_auto_escala = 1 if pct_banca == 0 else min(10, max(1, int(np.ceil(pct_banca * 2))))
     else:
-        html_eventos = """
-        <p style="font-style: italic; color: #ffffff; margin-bottom: 5px;">No has marcado selecciones en el Radar.</p>
-        <p style="color: #8a94a6; font-size: 12px;">Ve a la pestaña <b>🚀 RADAR MULTI-MERCADO</b> y marca casillas para generar la tarjeta automáticamente.</p>
-        """
+        html_eventos = (
+            "<p style='font-style: italic; color: #ffffff; margin-bottom: 5px; text-align: center;'>"
+            "No has marcado selecciones en el Radar.</p>"
+            "<p style='color: #8a94a6; font-size: 12px; text-align: center;'>"
+            "Ve a la pestaña <b>🚀 RADAR MULTI-MERCADO</b> y marca casillas para generar la tarjeta automáticamente.</p>"
+        )
         cuota_acumulada_cartel = 0.0
         stake_auto_escala = 1
         stake_sugerido_monto = 0.0
@@ -1955,19 +1958,21 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     with c_t2:
         cuota_txt = f"x{round(cuota_acumulada_cartel, 2)}" if cuota_acumulada_cartel > 0 else "x1.00"
 
-        cartel_html = f"""
-        <div style="background: linear-gradient(135deg, #12161f 0%, #0a0d13 100%); border: 2px solid #00d2d3; padding: 20px; border-radius: 15px; text-align: center;">
-            <h3 style="color: #00d2d3; margin-top: 0; margin-bottom: 5px;">{titulo_cartel}</h3>
-            <p style="color: #8a94a6; font-size: 12px; margin-bottom: 15px;">Analista: <b>{analista_nombre}</b> | Stake Recomendado: <b>{monto_sugerido}/10</b></p>
-            <hr style="border: 0; border-top: 1px solid #232a38; margin: 15px 0;">
-            <div style="text-align: left; font-size: 14px;">
-                {html_eventos}
-            </div>
-            <hr style="border: 0; border-top: 1px solid #232a38; margin: 15px 0;">
-            <h2 style="color: #ffffff; font-family: 'JetBrains Mono', monospace; margin: 10px 0;">CUOTA TOTAL: {cuota_txt}</h2>
-            <small style="color: #00d2d3;">💵 Inversión sugerida: ${round(stake_sugerido_monto, 2)} USD</small>
-        </div>
-        """
+        # HTML limpio en una sola cadena sin saltos de línea crudos
+        cartel_html = (
+            f"<div style='background: linear-gradient(135deg, #12161f 0%, #0a0d13 100%); "
+            f"border: 2px solid #00d2d3; padding: 20px; border-radius: 15px; text-align: center;'>"
+            f"<h3 style='color: #00d2d3; margin-top: 0; margin-bottom: 5px;'>{titulo_cartel}</h3>"
+            f"<p style='color: #8a94a6; font-size: 12px; margin-bottom: 15px;'>"
+            f"Analista: <b>{analista_nombre}</b> | Stake Recomendado: <b>{monto_sugerido}/10</b></p>"
+            f"<hr style='border: 0; border-top: 1px solid #232a38; margin: 15px 0;'>"
+            f"{html_eventos}"
+            f"<hr style='border: 0; border-top: 1px solid #232a38; margin: 15px 0;'>"
+            f"<h2 style='color: #ffffff; font-family: sans-serif; margin: 10px 0;'>CUOTA TOTAL: {cuota_txt}</h2>"
+            f"<small style='color: #00d2d3;'>💵 Inversión sugerida: ${round(stake_sugerido_monto, 2)} USD</small>"
+            f"</div>"
+        )
+        
         st.markdown(cartel_html, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
