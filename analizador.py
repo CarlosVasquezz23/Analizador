@@ -285,7 +285,7 @@ def generar_csv_bitacora(historial: List[Dict[str, Any]]) -> bytes:
     return df_data.to_csv(index=False).encode('utf-8')
 
 # =========================================================
-# 6. TEMA VISUAL CSS AVANZADO
+# 6. TEMA VISUAL CSS AVANZADO (OPTIMIZADO ENTERPRISE)
 # =========================================================
 st.markdown("""
     <style>
@@ -309,44 +309,52 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
     .block-container {
-        padding-top: 4.5rem !important;
+        padding-top: 3.5rem !important;
         padding-bottom: 2rem !important;
-        padding-left: 1.2rem !important;
-        padding-right: 1.2rem !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
         max-width: 98% !important;
     }
 
+    /* TÍTULO PRINCIPAL CON GLOW SUTIL */
     h1 {
         font-family: 'Inter', sans-serif;
         font-weight: 800 !important;
         letter-spacing: -0.02em;
-        font-size: clamp(1.4rem, 2.3vw, 2.1rem) !important;
-        background: linear-gradient(90deg, #ffffff 0%, #9fb4c7 100%);
+        font-size: clamp(1.5rem, 2.4vw, 2.2rem) !important;
+        background: linear-gradient(90deg, #ffffff 0%, #00d2d3 100%);
         -webkit-background-clip: text;
-        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.2rem !important;
     }
 
+    /* PESTAÑAS Y TABS CON SCROLL HORIZONTAL FLUIDO */
     div[data-baseweb="tab-list"] {
-        gap: 8px !important;
-        margin-bottom: 16px !important;
-        padding-top: 6px !important;
+        gap: 6px !important;
+        margin-bottom: 18px !important;
+        padding-bottom: 4px !important;
         border-bottom: 1px solid var(--rg-border) !important;
+        overflow-x: auto !important;
+        flex-wrap: nowrap !important;
+        white-space: nowrap !important;
     }
 
     button[data-baseweb="tab"] {
         font-weight: 700 !important;
-        font-size: clamp(11px, 1vw, 13px) !important;
+        font-size: 12px !important;
         padding: 8px 14px !important;
-        border-radius: 8px 8px 0 0 !important;
+        border-radius: 8px !important;
         color: #8a94a6 !important;
         background-color: transparent !important;
         transition: all 0.2s ease;
-        border: none !important;
+        border: 1px solid transparent !important;
+        flex-shrink: 0 !important;
     }
 
     button[data-baseweb="tab"][aria-selected="true"] {
         color: #ffffff !important;
-        background-color: #171c27 !important;
+        background-color: var(--rg-card-alt) !important;
+        border: 1px solid var(--rg-border) !important;
     }
 
     button[data-baseweb="tab"]:hover {
@@ -355,23 +363,47 @@ st.markdown("""
 
     div[data-baseweb="tab-highlight"] { 
         background-color: var(--rg-accent) !important; 
-        height: 3px !important;
+        height: 2px !important;
         box-shadow: 0 0 10px var(--rg-accent);
     }
 
+    /* TARJETAS DE PASOS DEL INICIO */
     .empty-state-card {
         background: linear-gradient(135deg, #121722 0%, #0d1017 100%);
         border: 1px solid var(--rg-border);
         border-radius: 16px;
-        padding: 28px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        padding: 30px;
+        box-shadow: 0 12px 30px rgba(0,0,0,0.35);
     }
+    
     .empty-state-step {
         background: var(--rg-card-alt);
         border: 1px solid var(--rg-border-soft);
         border-radius: 12px;
-        padding: 16px;
+        padding: 18px 14px;
         text-align: center;
+        transition: all 0.25s ease-in-out;
+    }
+
+    .empty-state-step:hover {
+        border-color: rgba(0, 210, 211, 0.4);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 210, 211, 0.08);
+    }
+
+    .step-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: rgba(0, 210, 211, 0.12);
+        color: var(--rg-accent);
+        border: 1px solid rgba(0, 210, 211, 0.4);
+        font-weight: 800;
+        font-size: 14px;
+        margin-bottom: 12px;
     }
 
     .hint-box {
@@ -396,12 +428,13 @@ st.markdown("""
         padding: 2px 8px; margin-top: 2px;
     }
 
+    /* CAJAS DE CRÉDITO SIDEBAR */
     .creditos-caja-pro {
         background: linear-gradient(135deg, #151b26 0%, #0f131a 100%);
-        padding: 10px 14px;
-        border-radius: 10px;
+        padding: 8px 12px;
+        border-radius: 8px;
         border: 1px solid var(--rg-border);
-        margin-bottom: 10px;
+        margin-bottom: 8px;
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -431,6 +464,7 @@ st.markdown("""
         background: rgba(0,210,211,0.08); border-radius: 6px; padding: 1px 6px; font-size: 12px;
     }
 
+    /* BOTONES */
     div.stButton > button {
         border-radius: 8px !important;
         font-weight: 600 !important;
@@ -442,7 +476,10 @@ st.markdown("""
     div.stButton > button:hover { transform: translateY(-1px); }
     div.stButton > button[kind="primary"] {
         background: linear-gradient(90deg, #00b3b4, #00d2d3) !important;
-        border: none !important; box-shadow: 0 4px 14px rgba(0,210,211,0.25);
+        color: #000000 !important;
+        font-weight: 700 !important;
+        border: none !important;
+        box-shadow: 0 4px 16px rgba(0,210,211,0.25);
     }
 
     div[data-testid="stMetric"] {
@@ -944,23 +981,23 @@ with pestana_radar:
     if not st.session_state.ha_consultado:
         st.markdown("""
             <div class="empty-state-card">
-                <h3 style="color:#00d2d3; margin-bottom:10px;">⚡ Sistema Listo para el Análisis</h3>
-                <p style="color:#8a94a6; margin-bottom:20px;">Sigue estos sencillos pasos en el panel lateral para iniciar la búsqueda de cuotas y ValueBets:</p>
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:15px;">
+                <h3 style="color:#00d2d3; margin-bottom:8px; font-weight:800;">⚡ Sistema Listo para el Análisis</h3>
+                <p style="color:#8a94a6; margin-bottom:22px; font-size:13.5px;">Sigue estos pasos en el panel lateral para iniciar la búsqueda de cuotas y ValueBets:</p>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap:16px;">
                     <div class="empty-state-step">
-                        <div style="font-size:24px; margin-bottom:6px;">1️⃣</div>
-                        <strong>Selecciona Torneos</strong>
-                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Añade Champions, Europa League o Ligas Domésticas.</p>
+                        <div class="step-badge">1</div><br>
+                        <strong style="color:#ffffff; font-size:14px;">Selecciona Torneos</strong>
+                        <p style="font-size:12px; color:#8a94a6; margin-top:6px; margin-bottom:0;">Añade Champions, Europa League o Ligas Domésticas.</p>
                     </div>
                     <div class="empty-state-step">
-                        <div style="font-size:24px; margin-bottom:6px;">2️⃣</div>
-                        <strong>Casas y Mercados</strong>
-                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Selecciona la ventana de tiempo (24h, 48h, 7 días...) o activa 'Traer todo'.</p>
+                        <div class="step-badge">2</div><br>
+                        <strong style="color:#ffffff; font-size:14px;">Casas y Mercados</strong>
+                        <p style="font-size:12px; color:#8a94a6; margin-top:6px; margin-bottom:0;">Selecciona la ventana de tiempo o activa 'Traer todo'.</p>
                     </div>
                     <div class="empty-state-step">
-                        <div style="font-size:24px; margin-bottom:6px;">3️⃣</div>
-                        <strong>Escanea y Ejecuta</strong>
-                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Haz clic en 'Escanear Mercado Now' para analizar cuotas.</p>
+                        <div class="step-badge">3</div><br>
+                        <strong style="color:#ffffff; font-size:14px;">Escanea y Ejecuta</strong>
+                        <p style="font-size:12px; color:#8a94a6; margin-top:6px; margin-bottom:0;">Haz clic en 'Escanear Mercado Now' para analizar cuotas.</p>
                     </div>
                 </div>
             </div>
