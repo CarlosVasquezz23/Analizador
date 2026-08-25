@@ -460,7 +460,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 7. CLIENTES API Y MAPEO CON FALLBACK DE TORNEOS EUROPEOS
+# 7. CLIENTES API Y MAPEO EXTENDIDO DE LIGAS
 # =========================================================
 def hl_headers(): return {"x-rapidapi-key": HL_API_KEY}
 
@@ -512,7 +512,6 @@ AF_LEAGUE_IDS = {
     "🇵🇾 División Profesional Paraguay - Clausura": 252,
 }
 
-# MAPEO DE CLAVES TÉCNICAS CON FALLBACK PARA ELIMINATORIAS Y FASES PREVIAS
 todas_las_ligas = {
     "EU Champions League": ["soccer_uefa_champions_league", "soccer_uefa_champions_league_qualification"],
     "EU Europa League": ["soccer_uefa_europa_league", "soccer_uefa_europa_league_qualification"],
@@ -605,19 +604,15 @@ with st.sidebar:
         habilitar_af = st.checkbox("Habilitar Ligas LATAM (API-Football)", value=True)
         ligas_af_sels = st.multiselect("Ligas extra:", list(AF_LEAGUE_IDS.keys()), default=[]) if habilitar_af else []
 
-    with st.expander("🏬 Casas y Mercados"):
+    with st.expander("🏬 Casas y Mercados", expanded=True):
         casas_preferidas = st.multiselect(
             "Mis Bookies:",
             ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"],
             default=[]
         )
         mercados_sels = st.multiselect("Mercados:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
-        tiempo_sel = st.selectbox("Ventana de tiempo:", ["24 Horas", "48 Horas", "72 Horas", "7 Días", "14 Días"], index=3)
-        
-        if "Días" in tiempo_sel:
-            limite_h = int(tiempo_sel.split()[0]) * 24
-        else:
-            limite_h = int(tiempo_sel.split()[0])
+        tiempo_sel = st.selectbox("Ventana de tiempo:", ["7 Días", "14 Días", "21 Días", "30 Días"], index=3)
+        limite_h = int(tiempo_sel.split()[0]) * 24
 
     with st.expander("🧮 Banca & Criterio Kelly"):
         bankroll_total = st.number_input("Banca Total ($):", min_value=10.0, value=200.0, step=10.0)
@@ -639,7 +634,7 @@ with st.sidebar:
         st.session_state['auto_alertas_telegram'] = st.checkbox("🚀 Auto-alertas (+EV > 5%)", value=False)
 
 # =========================================================
-# 10. PROCESAMIENTO DE CUOTAS Y GENERADOR SINTÉTICO
+# 10. PROCESAMIENTO DE CUOTAS
 # =========================================================
 def actualizar_creditos(headers):
     if 'x-requests-remaining' in headers:
@@ -673,20 +668,6 @@ def consultar_api_odds_evento(sport_key, event_id, market_key):
         return response.json() if response.status_code == 200 else None
     except Exception:
         return None
-
-def filtrar_partidos_por_fecha(datos, limite_horas):
-    ahora_utc = datetime.now(timezone.utc)
-    res = []
-    if not datos or not isinstance(datos, list): return res
-    for p in datos:
-        try:
-            fecha_utc = datetime.fromisoformat(p['commence_time'].replace('Z', '+00:00'))
-        except (ValueError, KeyError):
-            continue
-        horas = (fecha_utc - ahora_utc).total_seconds() / 3600
-        if -48.0 <= horas <= (limite_horas + 48):
-            res.append(p)
-    return res
 
 def calcular_doble_oportunidad_sintetica(raw_h2h_data):
     if not raw_h2h_data or not isinstance(raw_h2h_data, list): return []
@@ -948,7 +929,7 @@ with pestana_radar:
                     <div class="empty-state-step">
                         <div style="font-size:24px; margin-bottom:6px;">2️⃣</div>
                         <strong>Casas y Mercados</strong>
-                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Elige tu Bookie habitual y los mercados a comparar.</p>
+                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Elige tu Bookie habitual y ajusta la Ventana a 30 Días.</p>
                     </div>
                     <div class="empty-state-step">
                         <div style="font-size:24px; margin-bottom:6px;">3️⃣</div>
@@ -959,7 +940,7 @@ with pestana_radar:
             </div>
         """, unsafe_allow_html=True)
     elif not dict_partidos:
-        st.warning("⚠️ No se encontraron partidos con los filtros aplicados.")
+        st.warning("⚠️ No se encontraron partidos con los filtros aplicados. Intenta cambiar la Ventana de Tiempo a '30 Días'.")
     else:
         col_busq, col_valor, col_orden = st.columns([2.2, 1.3, 1.5])
         with col_busq: busqueda_equipo = st.text_input("🔍 Buscador rápido por equipo:", "").strip().lower()
