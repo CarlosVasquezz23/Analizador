@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import numpy as np
-from scipy.stats import poisson
+import math
 from datetime import datetime, timedelta, timezone
 import urllib.parse
 import json
@@ -75,15 +75,19 @@ def enviar_telegram(mensaje: str) -> bool:
         return False
 
 # =========================================================
-# 3. MODELO POISSON & CÁLCULO DE PROBABILIDAD PROPIA
+# 3. MODELO POISSON NATIVO (SIN DEPENDER DE SCIPY)
 # =========================================================
+def poisson_pmf(k: int, mu: float) -> float:
+    """Calcula la función de masa de probabilidad de Poisson de forma nativa"""
+    return (math.pow(mu, k) * math.exp(-mu)) / math.factorial(k)
+
 def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1.10) -> Dict[str, float]:
     max_goles = 6
     matriz_prob = np.zeros((max_goles, max_goles))
     
     for i in range(max_goles):
         for j in range(max_goles):
-            matriz_prob[i, j] = poisson.pmf(i, lambda_local) * poisson.pmf(j, lambda_visita)
+            matriz_prob[i, j] = poisson_pmf(i, lambda_local) * poisson_pmf(j, lambda_visita)
             
     prob_local = float(np.sum(np.tril(matriz_prob, -1)))
     prob_empate = float(np.sum(np.diag(matriz_prob)))
@@ -192,66 +196,41 @@ def calcular_sistema_cobertura(partidos: List[Dict[str, Any]], stake_total: floa
     cuotas = [float(p['cuota']) for p in partidos]
     
     if n == 3:
-        # TRIXIE: 3 dobles + 1 triple (4 apuestas)
         comb_dobles = list(itertools.combinations(cuotas, 2))
         comb_triples = list(itertools.combinations(cuotas, 3))
         num_apuestas = len(comb_dobles) + len(comb_triples)
         stake_unitario = stake_total / num_apuestas
-        
         retorno_max = (sum(np.prod(c) for c in comb_dobles) + sum(np.prod(c) for c in comb_triples)) * stake_unitario
         return {"tipo": "TRIXIE (3 Selecciones)", "apuestas": num_apuestas, "stake_unitario": stake_unitario, "retorno_max": retorno_max}
         
     elif n == 4:
-        # YANKEE: 6 dobles + 4 triples + 1 cuádruple (11 apuestas)
         comb_dobles = list(itertools.combinations(cuotas, 2))
         comb_triples = list(itertools.combinations(cuotas, 3))
         comb_cuad = list(itertools.combinations(cuotas, 4))
         num_apuestas = len(comb_dobles) + len(comb_triples) + len(comb_cuad)
         stake_unitario = stake_total / num_apuestas
-        
         retorno_max = (sum(np.prod(c) for c in comb_dobles) + sum(np.prod(c) for c in comb_triples) + sum(np.prod(c) for c in comb_cuad)) * stake_unitario
         return {"tipo": "YANKEE (4 Selecciones)", "apuestas": num_apuestas, "stake_unitario": stake_unitario, "retorno_max": retorno_max}
 
     elif n >= 5:
-        # CANADIAN / SUPER YANKEE: 10 dobles + 10 triples + 5 cuádruples + 1 quíntuple (26 apuestas)
         comb_dobles = list(itertools.combinations(cuotas[:5], 2))
         comb_triples = list(itertools.combinations(cuotas[:5], 3))
         comb_cuad = list(itertools.combinations(cuotas[:5], 4))
         comb_quin = list(itertools.combinations(cuotas[:5], 5))
         num_apuestas = len(comb_dobles) + len(comb_triples) + len(comb_cuad) + len(comb_quin)
         stake_unitario = stake_total / num_apuestas
-        
         retorno_max = (sum(np.prod(c) for c in comb_dobles) + sum(np.prod(c) for c in comb_triples) + sum(np.prod(c) for c in comb_cuad) + sum(np.prod(c) for c in comb_quin)) * stake_unitario
         return {"tipo": "CANADIAN (5 Selecciones Top)", "apuestas": num_apuestas, "stake_unitario": stake_unitario, "retorno_max": retorno_max}
 
 # =========================================================
-# 5. EXPORTADOR EXCEL (.XLSX)
+# 5. EXPORTADOR CSV (COMPATIBLE SIN REQUIERIR OPENPYXL)
 # =========================================================
-def generar_excel_bitacora(historial: List[Dict[str, Any]]) -> bytes:
+def generar_csv_bitacora(historial: List[Dict[str, Any]]) -> bytes:
     df_data = pd.DataFrame(historial)
-    output = io.BytesIO()
-    
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df_data.to_excel(writer, sheet_name='Historial Apuestas', index=False)
-        
-        # Resumen KPI
-        total_inv = df_data['Inversión'].sum() if not df_data.empty else 0
-        ganados = df_data[df_data['Estado'] == "Ganado"] if not df_data.empty else pd.DataFrame()
-        retorno = (ganados['Inversión'] * ganados['Cuota']).sum() if not ganados.empty else 0
-        neto = retorno - total_inv
-        
-        df_kpi = pd.DataFrame([
-            {"Métrica": "Total Invertido", "Valor": total_inv},
-            {"Métrica": "Retorno Total", "Valor": retorno},
-            {"Métrica": "Ganancia Neta", "Valor": neto},
-            {"Métrica": "ROI (%)", "Valor": (neto/total_inv*100) if total_inv > 0 else 0}
-        ])
-        df_kpi.to_excel(writer, sheet_name='Resumen Ejecutivo', index=False)
-        
-    return output.getvalue()
+    return df_data.to_csv(index=False).encode('utf-8')
 
 # =========================================================
-# 6. TEMA VISUAL CSS
+# 6. TEMA VISUAL CSS (OPTIMIZADO PARA LAPTOPS Y CELULARES)
 # =========================================================
 st.markdown("""
     <style>
@@ -274,59 +253,99 @@ st.markdown("""
 
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
-    h1, h2, h3 { font-family: 'Inter', sans-serif; font-weight: 800 !important; letter-spacing: -0.02em; }
-    h1 { background: linear-gradient(90deg, #ffffff 0%, #9fb4c7 100%); -webkit-background-clip: text; background-clip: text; }
+    /* Reducción de márgenes globales de Streamlit para laptops/móviles */
+    .block-container {
+        padding-top: 1.8rem !important;
+        padding-bottom: 2rem !important;
+        padding-left: 1.2rem !important;
+        padding-right: 1.2rem !important;
+        max-width: 98% !important;
+    }
 
-    .match-header { font-size: 18px; font-weight: 700; margin-bottom: 2px; letter-spacing: -0.01em; }
+    /* Tipografía Dinámica Responsiva */
+    h1 {
+        font-family: 'Inter', sans-serif;
+        font-weight: 800 !important;
+        letter-spacing: -0.02em;
+        font-size: clamp(1.4rem, 2.3vw, 2.1rem) !important;
+        background: linear-gradient(90deg, #ffffff 0%, #9fb4c7 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+    }
+
+    h2, h3 {
+        font-family: 'Inter', sans-serif;
+        font-weight: 700 !important;
+        font-size: clamp(1.1rem, 1.6vw, 1.4rem) !important;
+    }
+
+    .match-header { font-size: 16px; font-weight: 700; margin-bottom: 2px; letter-spacing: -0.01em; }
     .liga-chip {
-        display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase;
+        display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
         letter-spacing: 0.04em; color: var(--rg-accent); background: rgba(0,210,211,0.10);
-        border: 1px solid rgba(0,210,211,0.35); border-radius: 999px; padding: 2px 10px; margin-bottom: 6px;
+        border: 1px solid rgba(0,210,211,0.35); border-radius: 999px; padding: 2px 8px; margin-bottom: 4px;
     }
     .kickoff-chip {
-        display: inline-block; font-size: 12px; font-weight: 600; color: #cfd8e3;
+        display: inline-block; font-size: 11px; font-weight: 600; color: #cfd8e3;
         background: var(--rg-card-alt); border: 1px solid var(--rg-border); border-radius: 999px;
-        padding: 3px 10px; margin-top: 2px;
+        padding: 2px 8px; margin-top: 2px;
     }
 
     .creditos-caja {
         background: linear-gradient(135deg, #151b26 0%, #10141c 100%);
-        padding: 12px 15px 12px 18px;
-        border-radius: 10px;
-        border-left: 4px solid var(--rg-accent);
+        padding: 8px 12px;
+        border-radius: 8px;
+        border-left: 3.5px solid var(--rg-accent);
         border-top: 1px solid var(--rg-border-soft);
         border-right: 1px solid var(--rg-border-soft);
         border-bottom: 1px solid var(--rg-border-soft);
-        margin-bottom: 14px;
+        margin-bottom: 8px;
     }
 
     div[class*="st-key-match_"] {
         background: linear-gradient(180deg, var(--rg-card) 0%, #0f131b 100%) !important;
         border: 1px solid var(--rg-border) !important;
-        border-radius: 16px !important;
+        border-radius: 14px !important;
         box-shadow: 0 2px 10px rgba(0,0,0,0.25);
     }
 
     div[class*="st-key-ticket_card"] {
         background: linear-gradient(180deg, #12161f 0%, #0d1017 100%) !important;
         border: 2px dashed rgba(0,210,211,0.45) !important;
-        border-radius: 18px !important;
+        border-radius: 16px !important;
         box-shadow: 0 0 0 1px rgba(0,210,211,0.06), 0 6px 20px rgba(0,0,0,0.35);
     }
     .ticket-titulo {
-        font-family: 'Inter', sans-serif; font-weight: 800; font-size: 15px; letter-spacing: 0.04em;
+        font-family: 'Inter', sans-serif; font-weight: 800; font-size: 14px; letter-spacing: 0.04em;
         text-transform: uppercase; color: var(--rg-accent); text-align: center; margin-bottom: 6px;
     }
-    .ticket-item { border-bottom: 1px dashed var(--rg-border); padding: 8px 0 10px 0; }
+    .ticket-item { border-bottom: 1px dashed var(--rg-border); padding: 6px 0 8px 0; }
     .ticket-item:last-of-type { border-bottom: none; }
     .ticket-cuota-tag {
         font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--rg-accent);
-        background: rgba(0,210,211,0.08); border-radius: 6px; padding: 1px 6px; font-size: 12.5px;
+        background: rgba(0,210,211,0.08); border-radius: 6px; padding: 1px 6px; font-size: 12px;
+    }
+
+    /* Pestañas (Tabs) Estilizadas y Responsivas */
+    button[data-baseweb="tab"] {
+        font-weight: 700 !important;
+        font-size: clamp(11px, 1vw, 13px) !important;
+        padding: 8px 12px !important;
+    }
+    div[data-baseweb="tab-highlight"] { background-color: var(--rg-accent) !important; }
+
+    /* Radio buttons con ajuste automático en móvil */
+    div[role="radiogroup"] {
+        flex-wrap: wrap !important;
+        gap: 6px !important;
     }
 
     div.stButton > button {
-        border-radius: 10px !important; font-weight: 600 !important;
-        transition: transform .08s ease, box-shadow .15s ease;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        font-size: 13px !important;
+        padding: 6px 12px !important;
+        transition: transform .08s ease;
         border: 1px solid var(--rg-border) !important;
     }
     div.stButton > button:hover { transform: translateY(-1px); }
@@ -337,31 +356,40 @@ st.markdown("""
 
     div[data-testid="stMetric"] {
         background: var(--rg-card-alt); border: 1px solid var(--rg-border);
-        border-radius: 12px; padding: 10px 14px;
+        border-radius: 10px; padding: 8px 12px;
     }
-
-    button[data-baseweb="tab"] { font-weight: 600 !important; }
-    div[data-baseweb="tab-highlight"] { background-color: var(--rg-accent) !important; }
 
     .welcome-card {
         background: linear-gradient(160deg, #141a24 0%, #0f131a 100%);
-        border: 1px solid var(--rg-border); border-radius: 18px; padding: 28px 30px; text-align: left;
+        border: 1px solid var(--rg-border); border-radius: 16px; padding: 22px 24px; text-align: left;
     }
 
-    div[data-testid="stAlert"] { border-radius: 12px !important; border: 1px solid var(--rg-border) !important; }
-    div[data-testid="stExpander"] { border: 1px solid var(--rg-border) !important; border-radius: 12px !important; background: var(--rg-card-alt); overflow: hidden; }
+    div[data-testid="stAlert"] { border-radius: 10px !important; border: 1px solid var(--rg-border) !important; }
+    div[data-testid="stExpander"] { border: 1px solid var(--rg-border) !important; border-radius: 10px !important; background: var(--rg-card-alt); overflow: hidden; }
 
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, textarea {
-        border-radius: 10px !important; background: var(--rg-card-alt) !important; border-color: var(--rg-border) !important;
+        border-radius: 8px !important; background: var(--rg-card-alt) !important; border-color: var(--rg-border) !important;
     }
 
     .kpi-card {
-        border-radius: 14px; padding: 16px 18px; border: 1px solid var(--rg-border);
+        border-radius: 12px; padding: 12px 14px; border: 1px solid var(--rg-border);
         background: linear-gradient(160deg, var(--rg-card) 0%, #0f131b 100%); height: 100%;
     }
-    .kpi-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--rg-text-soft); margin-bottom: 6px; }
-    .kpi-value { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 700; line-height: 1.1; }
-    .kpi-sub { font-size: 12.5px; margin-top: 4px; font-weight: 600; }
+    .kpi-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--rg-text-soft); margin-bottom: 4px; }
+    .kpi-value { font-family: 'JetBrains Mono', monospace; font-size: clamp(20px, 2vw, 26px); font-weight: 700; line-height: 1.1; }
+    .kpi-sub { font-size: 11.5px; margin-top: 4px; font-weight: 600; }
+
+    /* Adaptabilidad para Smartphones (< 768px) */
+    @media (max-width: 768px) {
+        .block-container {
+            padding-left: 0.6rem !important;
+            padding-right: 0.6rem !important;
+        }
+        div[data-testid="column"] {
+            width: 100% !important;
+            margin-bottom: 8px;
+        }
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -477,12 +505,10 @@ if 'creditos_restantes_af' not in st.session_state:
 with st.sidebar:
     st.header("⚙️ Filtros de Control Global")
     
-    # Modo Monitoreo en Vivo (Auto-Refresh Dashboard)
     auto_ref = st.checkbox("⚡ Habilitar Monitoreo Automático en Vivo", value=False)
     if auto_ref:
         intervalo_sec = st.selectbox("Intervalo de recarga:", [30, 60, 120], index=1)
         st.caption(f"🔄 Recargando pantalla cada {intervalo_sec} segundos...")
-        # Auto-refresh de Streamlit
         st.markdown(f"<meta http-equiv='refresh' content='{intervalo_sec}'>", unsafe_allow_html=True)
 
     st.markdown(f"""
@@ -518,7 +544,6 @@ with st.sidebar:
     habilitar_af = st.checkbox("✅ Habilitar ligas extra (API-Football, gratis)", value=True)
     ligas_af_sels = st.multiselect("Ligas extra a analizar (API-Football):", list(AF_LEAGUE_IDS.keys()), default=[]) if habilitar_af else []
 
-    # Filtro por Casas de Apuestas Preferidas
     st.markdown("---")
     st.subheader("🏬 Casas de Apuestas Objetivo")
     casas_preferidas = st.multiselect(
@@ -618,7 +643,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         bookmakers = partido.get('bookmakers', [])
         if not bookmakers: continue
 
-        # Filtrar bookies si el usuario especificó en la sidebar
         if casas_preferidas:
             bookmakers = [b for b in bookmakers if any(cp.lower() in b['title'].lower() for cp in casas_preferidas)]
             if not bookmakers: continue
@@ -662,7 +686,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         cuotas_promedio_dict = {op: sum(t[0] for t in tuplas)/len(tuplas) for op, tuplas in cuotas_globales.items() if tuplas}
         overround = sum([1 / cp for cp in cuotas_promedio_dict.values()]) if cuotas_promedio_dict else 1.0
 
-        # Cálculo Poisson para comparación independiente
         probs_poisson = calcular_modelo_poisson(1.45, 1.10)
 
         for opcion, tuplas in cuotas_globales.items():
@@ -894,7 +917,6 @@ with pestana_radar:
                     st.metric("Ganancia Neta Base", f"${round(ganancia_neta, 2)}")
                     st.metric("💡 Stake Kelly Sugerido", f"${round(stake_kelly, 2)}", help=f"Recomendación para tu Bankroll de ${bankroll_total}")
 
-                    # Optimizador de Sistema por Cobertura Múltiple
                     with st.expander("🛡️ Optimizador de Sistemas (TRIXIE / YANKEE)"):
                         res_sistema = calcular_sistema_cobertura(apuestas_seleccionadas, monto_inversion)
                         if "tipo" in res_sistema and res_sistema["tipo"] != "Insuficientes eventos":
@@ -1108,13 +1130,13 @@ with pestana_verificador:
             st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
-# PESTAÑA 3: AUDITORÍA Y BITÁCORA PRO (MÉTRICAS Y EXPORTACIÓN EXCEL)
+# PESTAÑA 3: AUDITORÍA Y BITÁCORA PRO (MÉTRICAS Y EXPORTACIÓN)
 # ---------------------------------------------------------
 with pestana_historial:
     st.title("📊 Módulo de Auditoría Financiera Avanzada Pro")
 
-    with st.expander("🗄️ Copias de Seguridad (Backup, Restore & Exportación Excel)"):
-        col_exp_j, col_imp_j, col_exp_xl = st.columns(3)
+    with st.expander("🗄️ Copias de Seguridad (Backup, Restore & Exportación)"):
+        col_exp_j, col_imp_j, col_exp_csv = st.columns(3)
         with col_exp_j:
             json_data = json.dumps(st.session_state.historial_apuestas, ensure_ascii=False, indent=4)
             st.download_button("📥 Respaldo JSON", data=json_data, file_name="bitacora_backup.json", mime="application/json", use_container_width=True)
@@ -1129,10 +1151,10 @@ with pestana_historial:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error JSON: {e}")
-        with col_exp_xl:
+        with col_exp_csv:
             if st.session_state.historial_apuestas:
-                excel_bytes = generar_excel_bitacora(st.session_state.historial_apuestas)
-                st.download_button("📊 Exportar Excel (.xlsx)", data=excel_bytes, file_name="Reporte_Apuestas_Pro.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                csv_bytes = generar_csv_bitacora(st.session_state.historial_apuestas)
+                st.download_button("📊 Exportar CSV Bitácora", data=csv_bytes, file_name="Reporte_Apuestas_Pro.csv", mime="text/csv", use_container_width=True)
 
     if st.session_state.historial_apuestas:
         df_act = pd.DataFrame(st.session_state.historial_apuestas)
