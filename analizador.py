@@ -229,7 +229,7 @@ def generar_csv_bitacora(historial: List[Dict[str, Any]]) -> bytes:
     return df_data.to_csv(index=False).encode('utf-8')
 
 # =========================================================
-# 6. TEMA VISUAL CSS AVANZADO (MEJORA #3)
+# 6. TEMA VISUAL CSS AVANZADO (Pestañas Corregidas)
 # =========================================================
 st.markdown("""
     <style>
@@ -270,21 +270,41 @@ st.markdown("""
         background-clip: text;
     }
 
-    /* Pestañas estilizadas tipo Píldora Neón */
+    /* Corrección de Visibilidad y Estilo de Pestañas (Tabs) */
+    div[data-baseweb="tab-list"] {
+        gap: 8px !important;
+        margin-bottom: 16px !important;
+        padding-top: 6px !important;
+        border-bottom: 1px solid var(--rg-border) !important;
+    }
+
     button[data-baseweb="tab"] {
         font-weight: 700 !important;
-        font-size: clamp(12px, 1vw, 14px) !important;
-        padding: 10px 18px !important;
-        border-radius: 10px !important;
+        font-size: clamp(12px, 1.1vw, 14px) !important;
+        padding: 10px 20px !important;
+        border-radius: 8px 8px 0 0 !important;
+        color: #8a94a6 !important;
+        background-color: transparent !important;
         transition: all 0.2s ease;
+        border: none !important;
     }
+
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #ffffff !important;
+        background-color: #171c27 !important;
+    }
+
+    button[data-baseweb="tab"]:hover {
+        color: var(--rg-accent) !important;
+    }
+
     div[data-baseweb="tab-highlight"] { 
         background-color: var(--rg-accent) !important; 
         height: 3px !important;
-        box-shadow: 0 0 12px var(--rg-accent);
+        box-shadow: 0 0 10px var(--rg-accent);
     }
 
-    /* Tarjeta de bienvenida Vacía / Empty State Mejora #3 */
+    /* Tarjeta de bienvenida Vacía / Empty State */
     .empty-state-card {
         background: linear-gradient(135deg, #121722 0%, #0d1017 100%);
         border: 1px solid var(--rg-border);
@@ -312,7 +332,7 @@ st.markdown("""
         padding: 2px 8px; margin-top: 2px;
     }
 
-    /* Badges de Créditos Dinámicos (Mejora #2) */
+    /* Badges de Créditos Dinámicos */
     .creditos-caja-pro {
         background: linear-gradient(135deg, #151b26 0%, #0f131a 100%);
         padding: 10px 14px;
@@ -484,7 +504,7 @@ if 'creditos_restantes_af' not in st.session_state:
     st.session_state.creditos_restantes_af = "No consultado"
 
 # =========================================================
-# 9. SIDEBAR ORGANIZADO EN ACCORDEONES (MEJORA #1 Y #2)
+# 9. SIDEBAR ORGANIZADO EN ACCORDEONES
 # =========================================================
 with st.sidebar:
     st.header("⚙️ Control Global")
@@ -495,7 +515,7 @@ with st.sidebar:
         intervalo_sec = st.selectbox("Recarga cada:", [30, 60, 120], index=1)
         st.markdown(f"<meta http-equiv='refresh' content='{intervalo_sec}'>", unsafe_allow_html=True)
 
-    # Badges Mejora #2
+    # Badges
     st.markdown(f"""
         <div class="creditos-caja-pro">
             <div>
@@ -513,7 +533,7 @@ with st.sidebar:
         </div>
     """, unsafe_allow_html=True)
 
-    # Acordeón 1: Torneos (Mejora #1)
+    # Acordeón 1: Torneos
     with st.expander("⚽ Selección de Torneos", expanded=True):
         if 'ligas_sels_widget' not in st.session_state:
             st.session_state.ligas_sels_widget = []
@@ -813,7 +833,7 @@ with pestana_radar:
 
     apuestas_seleccionadas = []
 
-    # EMPTY STATE INTERACTIVO - MEJORA #3
+    # EMPTY STATE INTERACTIVO
     if not st.session_state.ha_consultado:
         st.markdown("""
             <div class="empty-state-card">
