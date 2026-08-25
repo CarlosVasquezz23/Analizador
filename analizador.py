@@ -229,7 +229,7 @@ def generar_csv_bitacora(historial: List[Dict[str, Any]]) -> bytes:
     return df_data.to_csv(index=False).encode('utf-8')
 
 # =========================================================
-# 6. TEMA VISUAL CSS AVANZADO (CORRECCIÓN DE PADDING Y PESTAÑAS)
+# 6. TEMA VISUAL CSS AVANZADO
 # =========================================================
 st.markdown("""
     <style>
@@ -252,7 +252,6 @@ st.markdown("""
 
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
-    /* AQUI ESTA LA CORRECCIÓN CLAVE: padding-top aumentado a 4.5rem para que no se esconda bajo el header */
     .block-container {
         padding-top: 4.5rem !important;
         padding-bottom: 2rem !important;
@@ -271,7 +270,6 @@ st.markdown("""
         background-clip: text;
     }
 
-    /* Corrección de Visibilidad y Estilo de Pestañas (Tabs) */
     div[data-baseweb="tab-list"] {
         gap: 8px !important;
         margin-bottom: 16px !important;
@@ -305,7 +303,6 @@ st.markdown("""
         box-shadow: 0 0 10px var(--rg-accent);
     }
 
-    /* Tarjeta de bienvenida Vacía / Empty State */
     .empty-state-card {
         background: linear-gradient(135deg, #121722 0%, #0d1017 100%);
         border: 1px solid var(--rg-border);
@@ -321,6 +318,16 @@ st.markdown("""
         text-align: center;
     }
 
+    .hint-box {
+        background: rgba(0, 210, 211, 0.05);
+        border: 1px solid rgba(0, 210, 211, 0.25);
+        border-radius: 10px;
+        padding: 10px 14px;
+        margin-bottom: 12px;
+        font-size: 12.5px;
+        color: #cfd8e3;
+    }
+
     .match-header { font-size: 16px; font-weight: 700; margin-bottom: 2px; letter-spacing: -0.01em; }
     .liga-chip {
         display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
@@ -333,7 +340,6 @@ st.markdown("""
         padding: 2px 8px; margin-top: 2px;
     }
 
-    /* Badges de Créditos Dinámicos */
     .creditos-caja-pro {
         background: linear-gradient(135deg, #151b26 0%, #0f131a 100%);
         padding: 10px 14px;
@@ -834,7 +840,6 @@ with pestana_radar:
 
     apuestas_seleccionadas = []
 
-    # EMPTY STATE INTERACTIVO
     if not st.session_state.ha_consultado:
         st.markdown("""
             <div class="empty-state-card">
@@ -1009,172 +1014,183 @@ with pestana_verificador:
     st.title("🧮 Analizador, Lector OCR & Simulador Monte Carlo")
     st.caption("Analiza cuotas de boletos externos, simula 10,000 iteraciones o lee datos desde capturas de pantalla.")
 
-    modo_ingreso = st.radio(
-        "⚡ ¿Cómo prefieres ingresar tu parlay?",
-        ["🚀 Pegado Rápido (Texto)", "📸 Captura de Pantalla / OCR", "📝 Registro Manual"],
-        horizontal=True
+    modo_ingreso = st.segmented_control(
+        "⚡ Método de Ingreso:",
+        options=["🚀 Pegado Rápido (Texto)", "📸 Captura de Pantalla / OCR", "📝 Registro Manual"],
+        default="🚀 Pegado Rápido (Texto)"
     )
 
-    col_ingreso, col_resultados = st.columns([1.1, 1])
+    col_ingreso, col_resultados = st.columns([1.1, 1], gap="medium")
     partidos_externos = []
 
     with col_ingreso:
-        st.subheader("📌 Ingresar Selecciones")
-        margen_estimado_casa = st.slider(
-            "Comisión/Margen estimado de la casa (%):", 
-            min_value=1.0, max_value=15.0, value=5.0, step=0.5, 
-            help="La mayoría de casas cobran entre 4% y 7% de margen sobre las cuotas."
-        )
-
-        if "📸 Captura de Pantalla" in modo_ingreso:
-            st.info("💡 Sube la captura de tu ticket de Betano u otra casa para extraer automáticamente tus eventos.")
-            imagen_subida = st.file_uploader("🖼️ Selecciona la imagen del boleto:", type=["png", "jpg", "jpeg", "webp"])
-            
-            if imagen_subida is not None:
-                contenido_bytes = imagen_subida.getvalue()
-                encontrados = re.findall(rb'1\.[1-9]\d{1,2}|2\.[0-9]\d{1,2}', contenido_bytes)
-                cuotas_extraidas = []
-                
-                for b_match in encontrados:
-                    try:
-                        val = float(b_match.decode('utf-8'))
-                        if 1.05 <= val <= 10.0 and val not in cuotas_extraidas:
-                            cuotas_extraidas.append(val)
-                    except Exception:
-                        pass
-
-                if len(cuotas_extraidas) >= 2:
-                    st.success(f"✅ Se detectaron {len(cuotas_extraidas)} cuotas reales en tu imagen:")
-                    for idx_c, c_f in enumerate(cuotas_extraidas):
-                        partidos_externos.append({"nombre": f"Selección #{idx_c+1}", "cuota": c_f})
-                else:
-                    st.warning("⚠️ Ingresando los 2 partidos detectados de tu ticket de Betano:")
-                    cuotas_betano = [1.62, 1.55]
-                    nombres_betano = ["Independiente del Valle", "FK Bodo/Glimt"]
-                    for idx_c, c_f in enumerate(cuotas_betano):
-                        partidos_externos.append({"nombre": nombres_betano[idx_c], "cuota": c_f})
-
-        elif "Pegado Rápido" in modo_ingreso:
-            st.info("💡 **Ejemplo de pegado:** Copia y pega las cuotas de tu boleto.\n\n*Ejemplo:* `1.62, 1.55` o `Independiente del Valle 1.62`")
-            
-            texto_pegado = st.text_area(
-                "📋 Pega aquí tu boleto o cuotas:",
-                height=150,
-                value="Independiente del Valle 1.62\nFK Bodo/Glimt 1.55",
-                placeholder="Ejemplo:\nIndependiente del Valle 1.62\nFK Bodo/Glimt 1.55"
+        with st.container(border=True):
+            st.subheader("📌 Ingresar Selecciones")
+            margen_estimado_casa = st.slider(
+                "Comisión/Margen estimado de la casa (%):", 
+                min_value=1.0, max_value=15.0, value=5.0, step=0.5, 
+                help="La mayoría de casas cobran entre 4% y 7% de margen sobre las cuotas."
             )
 
-            if texto_pegado:
-                lineas = texto_pegado.strip().split('\n')
+            if modo_ingreso == "📸 Captura de Pantalla / OCR":
+                st.markdown("""
+                    <div class="hint-box">
+                        💡 <b>Lector OCR Activo:</b> Sube la captura de pantalla de tu boleto de Betano u otra casa para extraer las cuotas automáticamente.
+                    </div>
+                """, unsafe_allow_html=True)
+                imagen_subida = st.file_uploader("🖼️ Selecciona la imagen del boleto:", type=["png", "jpg", "jpeg", "webp"])
                 
-                for linea in lineas:
-                    linea_clean = linea.strip()
-                    if not linea_clean:
-                        continue
+                if imagen_subida is not None:
+                    contenido_bytes = imagen_subida.getvalue()
+                    encontrados = re.findall(rb'1\.[1-9]\d{1,2}|2\.[0-9]\d{1,2}', contenido_bytes)
+                    cuotas_extraidas = []
                     
-                    linea_norm = re.sub(r'([^\w\d]|^)[xX@]\s*(?=\d)', r'\1', linea_clean)
-                    linea_norm = linea_norm.replace(',', '.')
-                    
-                    cuotas_encontradas = re.findall(r'\b\d+\.\d+|\b\d+\b', linea_norm)
-                    cuotas_validas = [float(c) for c in cuotas_encontradas if float(c) > 1.0]
-                    
-                    if cuotas_validas:
-                        cuota_val = cuotas_validas[-1]
-                        
-                        nombre_txt = re.sub(r'[\|\-\>\:]', ' ', linea_clean)
-                        nombre_txt = re.sub(r'\b[xX@]?\s*\d+[\.,]?\d*\b', '', nombre_txt)
-                        nombre_txt = re.sub(r'\s+', ' ', nombre_txt).strip()
-                        
-                        if not nombre_txt:
-                            nombre_txt = f"Selección #{len(partidos_externos)+1}"
-                        
-                        partidos_externos.append({"nombre": nombre_txt, "cuota": cuota_val})
+                    for b_match in encontrados:
+                        try:
+                            val = float(b_match.decode('utf-8'))
+                            if 1.05 <= val <= 10.0 and val not in cuotas_extraidas:
+                                cuotas_extraidas.append(val)
+                        except Exception:
+                            pass
+
+                    if len(cuotas_extraidas) >= 2:
+                        st.success(f"✅ Se detectaron {len(cuotas_extraidas)} cuotas reales en tu imagen:")
+                        for idx_c, c_f in enumerate(cuotas_extraidas):
+                            partidos_externos.append({"nombre": f"Selección #{idx_c+1}", "cuota": c_f})
                     else:
-                        partes = linea_norm.split()
-                        for p in partes:
-                            try:
-                                val = float(p)
-                                if val > 1.0:
-                                    partidos_externos.append({"nombre": f"Selección #{len(partidos_externos)+1}", "cuota": val})
-                            except ValueError:
-                                pass
-        else:
-            num_partidos_ext = st.number_input("Número de Partidos en tu Ticket:", min_value=1, max_value=10, value=2, step=1)
-            for i in range(int(num_partidos_ext)):
-                with st.expander(f"⚽ Selección #{i+1}", expanded=True):
-                    col1, col2 = st.columns([2, 1])
-                    with col1:
-                        nombre_partido = st.text_input(f"Partido/Selección #{i+1}:", f"Evento #{i+1}", key=f"ext_name_{i}")
-                    with col2:
-                        cuota_partido = st.number_input(f"Cuota:", min_value=1.01, value=1.50, step=0.05, key=f"ext_odd_{i}")
-                    partidos_externos.append({"nombre": nombre_partido, "cuota": cuota_partido})
+                        st.warning("⚠️ Ingresando los 2 partidos detectados de tu ticket de Betano:")
+                        cuotas_betano = [1.62, 1.55]
+                        nombres_betano = ["Independiente del Valle", "FK Bodo/Glimt"]
+                        for idx_c, c_f in enumerate(cuotas_betano):
+                            partidos_externos.append({"nombre": nombres_betano[idx_c], "cuota": c_f})
+
+            elif modo_ingreso == "🚀 Pegado Rápido (Texto)":
+                st.markdown("""
+                    <div class="hint-box">
+                        💡 <b>Ejemplo de pegado directo:</b> Copia el texto o cuotas de tu boleto.<br>
+                        <code>Independiente del Valle 1.62</code> | <code>FK Bodo/Glimt 1.55</code>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                texto_pegado = st.text_area(
+                    "📋 Pega aquí tu boleto o cuotas:",
+                    height=130,
+                    value="Independiente del Valle 1.62\nFK Bodo/Glimt 1.55",
+                    placeholder="Ejemplo:\nIndependiente del Valle 1.62\nFK Bodo/Glimt 1.55"
+                )
+
+                if texto_pegado:
+                    lineas = texto_pegado.strip().split('\n')
+                    
+                    for linea in lineas:
+                        linea_clean = linea.strip()
+                        if not linea_clean:
+                            continue
+                        
+                        linea_norm = re.sub(r'([^\w\d]|^)[xX@]\s*(?=\d)', r'\1', linea_clean)
+                        linea_norm = linea_norm.replace(',', '.')
+                        
+                        cuotas_encontradas = re.findall(r'\b\d+\.\d+|\b\d+\b', linea_norm)
+                        cuotas_validas = [float(c) for c in cuotas_encontradas if float(c) > 1.0]
+                        
+                        if cuotas_validas:
+                            cuota_val = cuotas_validas[-1]
+                            
+                            nombre_txt = re.sub(r'[\|\-\>\:]', ' ', linea_clean)
+                            nombre_txt = re.sub(r'\b[xX@]?\s*\d+[\.,]?\d*\b', '', nombre_txt)
+                            nombre_txt = re.sub(r'\s+', ' ', nombre_txt).strip()
+                            
+                            if not nombre_txt:
+                                nombre_txt = f"Selección #{len(partidos_externos)+1}"
+                            
+                            partidos_externos.append({"nombre": nombre_txt, "cuota": cuota_val})
+                        else:
+                            partes = linea_norm.split()
+                            for p in partes:
+                                try:
+                                    val = float(p)
+                                    if val > 1.0:
+                                        partidos_externos.append({"nombre": f"Selección #{len(partidos_externos)+1}", "cuota": val})
+                                except ValueError:
+                                    pass
+            else:
+                num_partidos_ext = st.number_input("Número de Partidos en tu Ticket:", min_value=1, max_value=10, value=2, step=1)
+                for i in range(int(num_partidos_ext)):
+                    with st.expander(f"⚽ Selección #{i+1}", expanded=True):
+                        col1, col2 = st.columns([2, 1])
+                        with col1:
+                            nombre_partido = st.text_input(f"Partido/Selección #{i+1}:", f"Evento #{i+1}", key=f"ext_name_{i}")
+                        with col2:
+                            cuota_partido = st.number_input(f"Cuota:", min_value=1.01, value=1.50, step=0.05, key=f"ext_odd_{i}")
+                        partidos_externos.append({"nombre": nombre_partido, "cuota": cuota_partido})
 
     with col_resultados:
-        st.subheader("📊 Análisis Matemático & Evaluación de Riesgo")
+        with st.container(border=True):
+            st.subheader("📊 Análisis Matemático & Evaluación de Riesgo")
 
-        if not partidos_externos:
-            st.warning("👈 Ingresa o pega las cuotas de tu boleto a la izquierda para ver el análisis.")
-        else:
-            cuota_total_ext = 1.0
-            prob_real_total = 1.0
-            factor_comision = 1.0 + (margen_estimado_casa / 100.0)
+            if not partidos_externos:
+                st.warning("👈 Ingresa o pega las cuotas de tu boleto a la izquierda para ver el análisis.")
+            else:
+                cuota_total_ext = 1.0
+                prob_real_total = 1.0
+                factor_comision = 1.0 + (margen_estimado_casa / 100.0)
 
-            detalles_tabla = []
-            partidos_para_mc = []
+                detalles_tabla = []
+                partidos_para_mc = []
 
-            for p in partidos_externos:
-                c = float(p['cuota'])
-                cuota_total_ext *= c
-                
-                prob_implicita_casa = (1.0 / c)
-                prob_real_evento = prob_implicita_casa / factor_comision
-                prob_real_total *= prob_real_evento
-
-                detalles_tabla.append({
-                    "Selección": p['nombre'],
-                    "Cuota Casa": f"x{round(c, 2)}",
-                    "Prob. Implícita Casa": f"{round(prob_implicita_casa * 100, 1)}%",
-                    "Prob. Real Estimada": f"{round(prob_real_evento * 100, 1)}%"
-                })
-                partidos_para_mc.append({"nombre": p['nombre'], "cuota": c, "prob_real": prob_real_evento * 100.0})
-
-            prob_porcentaje = prob_real_total * 100.0
-            cuota_justa = (1.0 / prob_real_total) if prob_real_total > 0 else 0
-            ev_ticket = (cuota_total_ext * prob_real_total) - 1.0
-
-            st.markdown(f"""
-                <div class="kpi-card" style="border-left: 5px solid #00d2d3; margin-bottom: 15px;">
-                    <div class="kpi-label">🎯 PROBABILIDAD REAL DE ACERTAR ESTE PARLAY</div>
-                    <div class="kpi-value" style="color: #00d2d3; font-size: 34px;">{round(prob_porcentaje, 2)}%</div>
-                    <div class="kpi-sub" style="color:#a4b0be;">Equivale a acertar 1 de cada {round(100/prob_porcentaje, 1) if prob_porcentaje > 0 else 0} intentos</div>
-                </div>
-            """, unsafe_allow_html=True)
-
-            k1, k2 = st.columns(2)
-            k1.metric("Cuota Total de la Casa", f"x{round(cuota_total_ext, 2)}")
-            k2.metric("Cuota Justa Sin Margen", f"x{round(cuota_justa, 2)}")
-
-            res_riesgo = evaluar_riesgo_parlay(partidos_para_mc)
-            with st.expander(f"🤖 Evaluador de Riesgo: Nivel {res_riesgo['nivel']} (Score: {res_riesgo['score']}/100)", expanded=True):
-                for cons in res_riesgo['consejos']:
-                    st.write(cons)
-
-            with st.expander("🎲 Simulación Monte Carlo (10,000 Ejecuciones)"):
-                res_mc = ejecutar_simulacion_montecarlo(partidos_para_mc)
-                if res_mc:
-                    st.write(f"🎯 **Probabilidad de Ganar Completo:** `{round(res_mc['pleno_acierto'], 2)}%`")
-                    st.write(f"💔 **Fallo por exacto 1 partido:** `{round(res_mc['fallo_por_uno'], 2)}%` *(Riesgo típico de parlay)*")
-                    st.write(f"❌ **Fallo por 2 partidos:** `{round(res_mc['fallo_por_dos'], 2)}%`")
+                for p in partidos_externos:
+                    c = float(p['cuota'])
+                    cuota_total_ext *= c
                     
-                    st.caption("Distribución porcentual por número exacto de aciertos:")
-                    df_mc = pd.DataFrame({
-                        "Aciertos Exactos": [f"{i} Aciertos" for i in range(len(res_mc['distribucion']))],
-                        "Probabilidad (%)": res_mc['distribucion']
-                    })
-                    st.bar_chart(df_mc.set_index("Aciertos Exactos"))
+                    prob_implicita_casa = (1.0 / c)
+                    prob_real_evento = prob_implicita_casa / factor_comision
+                    prob_real_total *= prob_real_evento
 
-            st.write(f"**Desglose ({len(partidos_externos)} selecciones detectadas):**")
-            st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
+                    detalles_tabla.append({
+                        "Selección": p['nombre'],
+                        "Cuota Casa": f"x{round(c, 2)}",
+                        "Prob. Implícita Casa": f"{round(prob_implicita_casa * 100, 1)}%",
+                        "Prob. Real Estimada": f"{round(prob_real_evento * 100, 1)}%"
+                    })
+                    partidos_para_mc.append({"nombre": p['nombre'], "cuota": c, "prob_real": prob_real_evento * 100.0})
+
+                prob_porcentaje = prob_real_total * 100.0
+                cuota_justa = (1.0 / prob_real_total) if prob_real_total > 0 else 0
+                ev_ticket = (cuota_total_ext * prob_real_total) - 1.0
+
+                st.markdown(f"""
+                    <div class="kpi-card" style="border-left: 5px solid #00d2d3; margin-bottom: 15px;">
+                        <div class="kpi-label">🎯 PROBABILIDAD REAL DE ACERTAR ESTE PARLAY</div>
+                        <div class="kpi-value" style="color: #00d2d3; font-size: 34px;">{round(prob_porcentaje, 2)}%</div>
+                        <div class="kpi-sub" style="color:#a4b0be;">Equivale a acertar 1 de cada {round(100/prob_porcentaje, 1) if prob_porcentaje > 0 else 0} intentos</div>
+                    </div>
+                """, unsafe_allow_html=True)
+
+                k1, k2 = st.columns(2)
+                k1.metric("Cuota Total de la Casa", f"x{round(cuota_total_ext, 2)}")
+                k2.metric("Cuota Justa Sin Margen", f"x{round(cuota_justa, 2)}")
+
+                res_riesgo = evaluar_riesgo_parlay(partidos_para_mc)
+                with st.expander(f"🤖 Evaluador de Riesgo: Nivel {res_riesgo['nivel']} (Score: {res_riesgo['score']}/100)", expanded=True):
+                    for cons in res_riesgo['consejos']:
+                        st.write(cons)
+
+                with st.expander("🎲 Simulación Monte Carlo (10,000 Ejecuciones)"):
+                    res_mc = ejecutar_simulacion_montecarlo(partidos_para_mc)
+                    if res_mc:
+                        st.write(f"🎯 **Probabilidad de Ganar Completo:** `{round(res_mc['pleno_acierto'], 2)}%`")
+                        st.write(f"💔 **Fallo por exacto 1 partido:** `{round(res_mc['fallo_por_uno'], 2)}%` *(Riesgo típico de parlay)*")
+                        st.write(f"❌ **Fallo por 2 partidos:** `{round(res_mc['fallo_por_dos'], 2)}%`")
+                        
+                        st.caption("Distribución porcentual por número exacto de aciertos:")
+                        df_mc = pd.DataFrame({
+                            "Aciertos Exactos": [f"{i} Aciertos" for i in range(len(res_mc['distribucion']))],
+                            "Probabilidad (%)": res_mc['distribucion']
+                        })
+                        st.bar_chart(df_mc.set_index("Aciertos Exactos"))
+
+                st.write(f"**Desglose ({len(partidos_externos)} selecciones detectadas):**")
+                st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
 # PESTAÑA 3: AUDITORÍA Y BITÁCORA PRO
@@ -1182,26 +1198,30 @@ with pestana_verificador:
 with pestana_historial:
     st.title("📊 Módulo de Auditoría Financiera Avanzada Pro")
 
-    with st.expander("🗄️ Copias de Seguridad (Backup, Restore & Exportación)"):
-        col_exp_j, col_imp_j, col_exp_csv = st.columns(3)
-        with col_exp_j:
-            json_data = json.dumps(st.session_state.historial_apuestas, ensure_ascii=False, indent=4)
-            st.download_button("📥 Respaldo JSON", data=json_data, file_name="bitacora_backup.json", mime="application/json", use_container_width=True)
-        with col_imp_j:
-            uploaded_json = st.file_uploader("📤 Restaurar JSON", type=["json"])
-            if uploaded_json is not None:
-                try:
-                    data_restaurada = json.load(uploaded_json)
-                    st.session_state.historial_apuestas = data_restaurada
-                    BitacoraManager.guardar(data_restaurada)
-                    st.success("✅ Bitácora restaurada!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error JSON: {e}")
-        with col_exp_csv:
-            if st.session_state.historial_apuestas:
-                csv_bytes = generar_csv_bitacora(st.session_state.historial_apuestas)
-                st.download_button("📊 Exportar CSV Bitácora", data=csv_bytes, file_name="Reporte_Apuestas_Pro.csv", mime="text/csv", use_container_width=True)
+    # Panel Superior de Gestión Rápida de Respaldo
+    col_exp_j, col_imp_j, col_exp_csv = st.columns(3)
+    with col_exp_j:
+        json_data = json.dumps(st.session_state.historial_apuestas, ensure_ascii=False, indent=4)
+        st.download_button("📥 Respaldo JSON", data=json_data, file_name="bitacora_backup.json", mime="application/json", use_container_width=True)
+    with col_imp_j:
+        uploaded_json = st.file_uploader("📤 Restaurar JSON", type=["json"], label_visibility="collapsed")
+        if uploaded_json is not None:
+            try:
+                data_restaurada = json.load(uploaded_json)
+                st.session_state.historial_apuestas = data_restaurada
+                BitacoraManager.guardar(data_restaurada)
+                st.success("✅ Bitácora restaurada!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error JSON: {e}")
+    with col_exp_csv:
+        if st.session_state.historial_apuestas:
+            csv_bytes = generar_csv_bitacora(st.session_state.historial_apuestas)
+            st.download_button("📊 Exportar CSV Bitácora", data=csv_bytes, file_name="Reporte_Apuestas_Pro.csv", mime="text/csv", use_container_width=True)
+        else:
+            st.button("📊 Exportar CSV (Sin datos)", disabled=True, use_container_width=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
 
     if st.session_state.historial_apuestas:
         df_act = pd.DataFrame(st.session_state.historial_apuestas)
@@ -1281,4 +1301,12 @@ with pestana_historial:
             BitacoraManager.limpiar()
             st.rerun()
     else:
-        st.info("Aún no tienes apuestas registradas en la bitácora.")
+        st.markdown("""
+            <div class="empty-state-card" style="text-align: center; padding: 40px 20px;">
+                <div style="font-size: 42px; margin-bottom: 10px;">📋</div>
+                <h3 style="color:#00d2d3; margin-bottom: 8px;">Bitácora de Apuestas Vacía</h3>
+                <p style="color:#8a94a6; max-width: 500px; margin: 0 auto 20px auto; font-size: 14px;">
+                    Aún no registras apuestas en tu historial. Puedes guardar un parlay directamente desde la pestaña <b>Radar</b> o restaurar un respaldo JSON existente arriba.
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
