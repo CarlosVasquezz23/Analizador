@@ -284,7 +284,7 @@ ligas_locales = {
     "🇧🇷 Brasileirao Serie A": "soccer_brazil_campeonato",
     "🇧🇷 Copa de Brasil": "soccer_brazil_copa_do_brasil",
     "🇲🇽 Liga MX (México)": "soccer_mexico_liga_mx",
-    "🇪🇸 La Liga (España)": "soccer_spain_la_liga",
+    "🇪檐 La Liga (España)": "soccer_spain_la_liga",
     "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League (Inglaterra)": "soccer_epl",
     "🇮🇹 Serie A (Italia)": "soccer_italy_serie_a",
     "🇩🇪 Bundesliga (Alemania)": "soccer_germany_bundesliga",
@@ -745,7 +745,7 @@ with pestana_radar:
                             st.toast("¡Enviado a Telegram!", icon="📤")
 
 # ---------------------------------------------------------
-# PESTAÑA 2: NUEVA CALCULADORA DE PARLAY EXTERNO (CUALQUIER APP)
+# PESTAÑA 2: CALCULADORA DE PARLAY EXTERNO (CORREGIDA)
 # ---------------------------------------------------------
 with pestana_verificador:
     st.title("🧮 Analizador & Verificador de Parlays Externos")
@@ -756,7 +756,7 @@ with pestana_verificador:
     with col_ingreso:
         st.subheader("📌 Armar / Pegar Selecciones")
         num_partidos_ext = st.number_input("Número de Partidos en tu Ticket:", min_value=1, max_value=10, value=3, step=1)
-        margen_estimado_casa = st.slider("Comisión/Margen estimado de la casa (%):", min_value=2.0, max_value=12.0, value=5.0, step=0.5, help="La mayoría de casas cobran entre 5% y 7% de margen sobre las cuotas.")
+        margen_estimado_casa = st.slider("Comisión/Margen estimado de la casa (%):", min_value=1.0, max_value=15.0, value=5.0, step=0.5, help="La mayoría de casas cobran entre 4% y 7% de margen sobre las cuotas.")
 
         partidos_externos = []
         for i in range(int(num_partidos_ext)):
@@ -772,31 +772,32 @@ with pestana_verificador:
         st.subheader("📊 Análisis Matemático del Ticket")
 
         cuota_total_ext = 1.0
-        prob_implícita_casa_total = 1.0
-        prob_real_sin_margen_total = 1.0
-
-        factor_margen = 1.0 + (margen_estimado_casa / 100.0)
+        prob_real_total = 1.0
+        factor_comision = 1.0 + (margen_estimado_casa / 100.0)
 
         detalles_tabla = []
 
         for p in partidos_externos:
-            c = p['cuota']
+            c = float(p['cuota'])
             cuota_total_ext *= c
             
-            prob_implicita_bruta = (1.0 / c)
-            prob_real_evento = min(0.99, prob_implicita_bruta * factor_margen) # Ajuste por overround
-            prob_real_sin_margen_total *= prob_real_evento
+            # 1. Probabilidad implícita que incluye el margen de la casa
+            prob_implicita_casa = (1.0 / c)
+            
+            # 2. Probabilidad Real Fair (revolviendo matemáticamente la comisión)
+            prob_real_evento = prob_implicita_casa / factor_comision
+            prob_real_total *= prob_real_evento
 
             detalles_tabla.append({
                 "Selección": p['nombre'],
                 "Cuota Casa": f"x{round(c, 2)}",
-                "Prob. Implícita": f"{round(prob_implicita_bruta * 100, 1)}%",
-                "Prob. Real Est.": f"{round(prob_real_evento * 100, 1)}%"
+                "Prob. Implícita Casa": f"{round(prob_implicita_casa * 100, 1)}%",
+                "Prob. Real Estimada": f"{round(prob_real_evento * 100, 1)}%"
             })
 
-        prob_porcentaje = prob_real_sin_margen_total * 100.0
-        cuota_justa = (1.0 / prob_real_sin_margen_total) if prob_real_sin_margen_total > 0 else 0
-        ev_ticket = (cuota_total_ext * prob_real_sin_margen_total) - 1.0
+        prob_porcentaje = prob_real_total * 100.0
+        cuota_justa = (1.0 / prob_real_total) if prob_real_total > 0 else 0
+        ev_ticket = (cuota_total_ext * prob_real_total) - 1.0
 
         st.markdown(f"""
             <div class="kpi-card" style="border-left: 5px solid #00d2d3; margin-bottom: 15px;">
@@ -808,12 +809,14 @@ with pestana_verificador:
 
         k1, k2 = st.columns(2)
         k1.metric("Cuota Total de la Casa", f"x{round(cuota_total_ext, 2)}")
-        k2.metric("Cuota Justa Sin Margen", f"x{round(cuota_justa, 2)}", help="La cuota que matemáticamente te deberían pagar sin la comisión de la casa.")
+        k2.metric("Cuota Justa Sin Margen", f"x{round(cuota_justa, 2)}", help="La cuota que verdaderamente debería pagar el parlay si la casa no cobrara comisión.")
 
-        if ev_ticket > 0:
+        if ev_ticket > 0.01:
             st.success(f"🔥 **TICKET CON VALOR ESPERADO POSITIVO (+EV: {round(ev_ticket*100, 1)}%)**: Las cuotas de tu ticket valen la pena.")
+        elif ev_ticket >= -0.05:
+            st.info(f"⚖️ **TICKET EQUILIBRADO (EV: {round(ev_ticket*100, 1)}%)**: El cobro de comisión se mantiene dentro del rango estándar de la casa.")
         else:
-            st.warning(f"⚠️ **TICKET CON MARGEN DESFAVORABLE ({round(ev_ticket*100, 1)}%)**: La casa retiene una alta comisión en este combinado.")
+            st.warning(f"⚠️ **TICKET DESFAVORABLE (EV: {round(ev_ticket*100, 1)}%)**: La casa está aplicando un margen de comisión muy desfavorable sobre tu combinado.")
 
         st.write("**Desglose Selección por Selección:**")
         st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
