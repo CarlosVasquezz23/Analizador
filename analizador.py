@@ -699,22 +699,38 @@ with pestana_radar:
 
     dict_partidos = st.session_state.datos_cargados
 
+    # LÓGICA MEJORADA: ELECCIÓN DE LA MEJOR OPCIÓN DE PROBABILIDAD POR PARTIDO ENTRE MERCADOS ACTIVOS
     if generar_auto:
         if dict_partidos:
-            bolsa = []
+            opciones_todas = []
             for p_id, part in dict_partidos.items():
                 for nombre_m, m_info in part['mercados'].items():
                     for opcion, val_data in m_info['value_bets'].items():
-                        bolsa.append({
+                        opciones_todas.append({
+                            "partido_id": part['id'],
                             "clave": f"ap_{part['id']}_{nombre_m}_{opcion}",
-                            "prob_real": val_data['prob_real']
+                            "prob_real": val_data['prob_real'],
+                            "mercado": nombre_m,
+                            "seleccion": opcion
                         })
-            bolsa = sorted(bolsa, key=lambda x: x['prob_real'], reverse=True)
-            k = min(len(bolsa), num_eventos_auto)
-            if k > 0:
-                st.session_state.claves_auto = set([x['clave'] for x in bolsa[:k]])
+            
+            # Ordenar todas por probabilidad descendente
+            opciones_todas = sorted(opciones_todas, key=lambda x: x['prob_real'], reverse=True)
+            
+            # Seleccionar únicamente la mejor opción por partido (sin repetir partidos)
+            partidos_usados = set()
+            mejores_opciones = []
+            for op in opciones_todas:
+                if op['partido_id'] not in partidos_usados:
+                    partidos_usados.add(op['partido_id'])
+                    mejores_opciones.append(op)
+                if len(mejores_opciones) == num_eventos_auto:
+                    break
+            
+            if mejores_opciones:
+                st.session_state.claves_auto = set([x['clave'] for x in mejores_opciones])
                 st.session_state.version_ticket += 1
-                st.success(f"🎯 Marcados automáticamente los {k} mejores eventos.")
+                st.success(f"🎯 Marcados automáticamente los {len(mejores_opciones)} eventos con mayor probabilidad real de éxito.")
 
     apuestas_seleccionadas = []
 
@@ -766,7 +782,7 @@ with pestana_radar:
                                                 clave_base = f"ap_{part['id']}_{text_m}_{opcion}"
                                                 marcado = clave_base in st.session_state.claves_auto
 
-                                                chk = st.checkbox(f"{opcion} ({cuota_m}) {lbl_val}", value=marcado, key=f"render_{clave_base}")
+                                                chk = st.checkbox(f"{opcion} ({cuota_m}) {lbl_val}", value=marcado, key=f"render_{clave_base}_v{st.session_state.version_ticket}")
                                                 st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]}<br>🎯 Prob: {round(val['prob_real'],1)}%</small>", unsafe_allow_html=True)
 
                                                 if chk:
