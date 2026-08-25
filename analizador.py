@@ -827,7 +827,15 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             continue
 
         horas = (fecha_utc - ahora_utc).total_seconds() / 3600
-        if limite_horas < 900000 and (horas < -48.0 or horas > (limite_horas + 48)): continue
+        
+        # Detección de estado En Vivo y Marcador Parcial
+        es_en_vivo = partido.get('in_play', False) or (horas <= 0 and horas >= -2.5)
+        marcador_local = partido.get('scores', {}).get('home', 0) if es_en_vivo else None
+        marcador_visita = partido.get('scores', {}).get('away', 0) if es_en_vivo else None
+        minuto_en_vivo = partido.get('minute', 'LIVE') if es_en_vivo else None
+
+        if limite_horas < 900000 and not es_en_vivo and (horas < -48.0 or horas > (limite_horas + 48)): 
+            continue
 
         fecha_local = fecha_utc - timedelta(hours=5)
         bookmakers = partido.get('bookmakers', [])
@@ -908,7 +916,12 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                     "id": partido_id, "liga_origen": nombre_liga,
                     "fecha_str": fecha_local.strftime("%d/%m/%Y - %H:%M"),
                     "fecha_ts": fecha_utc.timestamp(),
-                    "local": home, "visitante": away, "mercados": {}
+                    "local": home, "visitante": away,
+                    "es_en_vivo": es_en_vivo,
+                    "marcador_local": marcador_local,
+                    "marcador_visita": marcador_visita,
+                    "minuto_en_vivo": minuto_en_vivo,
+                    "mercados": {}
                 }
             diccionario_consolidador[partido_id]["mercados"][mercado] = {
                 "max_cuotas": max_cuotas, "max_bookies": max_bookies,
@@ -1095,9 +1108,17 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                         partidos_f = [p for p in dict_partidos_filtrados.values() if p['liga_origen'] == liga_p]
                         for part in partidos_f:
                             with st.container(border=True, key=f"match_{part['id']}"):
-                                st.markdown(f"<span class='liga-chip'>🏆 {part['liga_origen']}</span>", unsafe_allow_html=True)
-                                st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
-                                st.markdown(f"<span class='kickoff-chip'>📅 {part['fecha_str']}</span>", unsafe_allow_html=True)
+                                col_enc_1, col_enc_2 = st.columns([4, 1.5])
+                                with col_enc_1:
+                                    st.markdown(f"<span class='liga-chip'>🏆 {part['liga_origen']}</span>", unsafe_allow_html=True)
+                                    if part.get('es_en_vivo'):
+                                        m_loc = part.get('marcador_local', 0)
+                                        m_vis = part.get('marcador_visita', 0)
+                                        st.markdown(f"<div class='match-header'>⚽ {part['local']} <span style='color:#00d2d3; font-weight:800;'>{m_loc} - {m_vis}</span> {part['visitante']}</div>", unsafe_allow_html=True)
+                                        st.markdown(f"<span style='background:#e74c3c; color:white; padding:2px 8px; border-radius:12px; font-weight:bold; font-size:11px;'>🔴 EN VIVO</span> <span class='kickoff-chip'>⏱️ {part.get('minuto_en_vivo', 'LIVE')}</span>", unsafe_allow_html=True)
+                                    else:
+                                        st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
+                                        st.markdown(f"<span class='kickoff-chip'>📅 {part['fecha_str']}</span>", unsafe_allow_html=True)
 
                                 sub_tabs = st.tabs(list(part['mercados'].keys()))
                                 for m_idx, text_m in enumerate(part['mercados'].keys()):
@@ -1533,7 +1554,6 @@ elif vista_seleccionada == "📊 ESTADÍSTICAS & H2H":
 
             st.markdown("<br>", unsafe_allow_html=True)
             
-            # --- SECCIÓN AÑADIDA: SIMULADOR xG E IMPACTO POR BAJAS ---
             with st.expander("🎯 Simulador de Goles Esperados (xG) & Calculador de Impacto por Bajas", expanded=True):
                 col_xg1, col_xg2 = st.columns(2)
                 with col_xg1:
@@ -1649,7 +1669,6 @@ elif vista_seleccionada == "🔥 CAZADOR +EV & DROPPING":
 
     st.subheader("🎯 Value Stream: Filtrado Dinámico de Oportunidades +EV")
 
-    # --- SECCIÓN AÑADIDA: FILTRO VALUE STREAM ---
     umbral_ev_min = st.slider("Filtrar por Umbral Mínimo de Valor (+EV %):", min_value=1.0, max_value=25.0, value=5.0, step=0.5)
 
     dict_partidos = st.session_state.get('datos_cargados', {})
