@@ -611,8 +611,12 @@ with st.sidebar:
             default=[]
         )
         mercados_sels = st.multiselect("Mercados:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
-        tiempo_sel = st.selectbox("Ventana de tiempo:", ["7 Días", "14 Días", "21 Días", "30 Días"], index=3)
-        limite_h = int(tiempo_sel.split()[0]) * 24
+        sin_limite_fecha = st.checkbox("🌐 Traer todo sin filtro de días", value=True)
+        if not sin_limite_fecha:
+            tiempo_sel = st.selectbox("Ventana de tiempo:", ["7 Días", "14 Días", "21 Días", "30 Días"], index=3)
+            limite_h = int(tiempo_sel.split()[0]) * 24
+        else:
+            limite_h = 999999
 
     with st.expander("🧮 Banca & Criterio Kelly"):
         bankroll_total = st.number_input("Banca Total ($):", min_value=10.0, value=200.0, step=10.0)
@@ -717,7 +721,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             continue
 
         horas = (fecha_utc - ahora_utc).total_seconds() / 3600
-        if horas < -48.0 or horas > (limite_horas + 48): continue
+        if limite_horas < 900000 and (horas < -48.0 or horas > (limite_horas + 48)): continue
 
         fecha_local = fecha_utc - timedelta(hours=5)
         bookmakers = partido.get('bookmakers', [])
@@ -854,7 +858,7 @@ with pestana_radar:
                             procesar_e_inyectar_mercado(raw_totals, "Goles Más/Menos 2.5", limite_h, liga, consolidador)
 
                         if "Ambos Anotan (BTTS)" in mercados_sels:
-                            for p_base in filtrar_partidos_por_fecha(raw_h2h, limite_h):
+                            for p_base in raw_h2h:
                                 datos_evento = consultar_api_odds_evento(sport_keys_list[0], p_base['id'], "btts")
                                 if datos_evento:
                                     procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
@@ -924,12 +928,12 @@ with pestana_radar:
                     <div class="empty-state-step">
                         <div style="font-size:24px; margin-bottom:6px;">1️⃣</div>
                         <strong>Selecciona Torneos</strong>
-                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Añade Champions, Premier League o Ligas Locales.</p>
+                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Añade Champions, Europa League o Ligas Domésticas.</p>
                     </div>
                     <div class="empty-state-step">
                         <div style="font-size:24px; margin-bottom:6px;">2️⃣</div>
                         <strong>Casas y Mercados</strong>
-                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Elige tu Bookie habitual y ajusta la Ventana a 30 Días.</p>
+                        <p style="font-size:12px; color:#8a94a6; margin-top:4px;">Verifica que esté activa la opción 'Traer todo sin filtro de días'.</p>
                     </div>
                     <div class="empty-state-step">
                         <div style="font-size:24px; margin-bottom:6px;">3️⃣</div>
@@ -940,7 +944,7 @@ with pestana_radar:
             </div>
         """, unsafe_allow_html=True)
     elif not dict_partidos:
-        st.warning("⚠️ No se encontraron partidos con los filtros aplicados. Intenta cambiar la Ventana de Tiempo a '30 Días'.")
+        st.info("ℹ️ **No hay partidos activos con cuotas publicadas actualmente para los torneos UEFA seleccionados.** Esto ocurre cuando no hay jornadas en los próximos días o los proveedores no han abierto líneas de apuestas. Intenta seleccionar torneos de liga activa como **Spain La Liga**, **England Premier League** o **Copa Libertadores**.")
     else:
         col_busq, col_valor, col_orden = st.columns([2.2, 1.3, 1.5])
         with col_busq: busqueda_equipo = st.text_input("🔍 Buscador rápido por equipo:", "").strip().lower()
