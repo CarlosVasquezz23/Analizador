@@ -285,7 +285,7 @@ def generar_csv_bitacora(historial: List[Dict[str, Any]]) -> bytes:
     return df_data.to_csv(index=False).encode('utf-8')
 
 # =========================================================
-# 6. TEMA VISUAL CSS AVANZADO (OPTIMIZADO ENTERPRISE)
+# 6. TEMA VISUAL CSS AVANZADO (ULTRACLEAN ALL-TABS EDITION)
 # =========================================================
 st.markdown("""
     <style>
@@ -309,7 +309,7 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
     .block-container {
-        padding-top: 3.5rem !important;
+        padding-top: 3.2rem !important;
         padding-bottom: 2rem !important;
         padding-left: 1.5rem !important;
         padding-right: 1.5rem !important;
@@ -321,7 +321,7 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
         font-weight: 800 !important;
         letter-spacing: -0.02em;
-        font-size: clamp(1.5rem, 2.4vw, 2.2rem) !important;
+        font-size: clamp(1.5rem, 2.2vw, 2.1rem) !important;
         background: linear-gradient(90deg, #ffffff 0%, #00d2d3 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
@@ -330,7 +330,7 @@ st.markdown("""
 
     /* PESTAÑAS Y TABS CON SCROLL HORIZONTAL FLUIDO */
     div[data-baseweb="tab-list"] {
-        gap: 6px !important;
+        gap: 4px !important;
         margin-bottom: 18px !important;
         padding-bottom: 4px !important;
         border-bottom: 1px solid var(--rg-border) !important;
@@ -341,8 +341,8 @@ st.markdown("""
 
     button[data-baseweb="tab"] {
         font-weight: 700 !important;
-        font-size: 12px !important;
-        padding: 8px 14px !important;
+        font-size: 11.5px !important;
+        padding: 7px 12px !important;
         border-radius: 8px !important;
         color: #8a94a6 !important;
         background-color: transparent !important;
@@ -367,7 +367,7 @@ st.markdown("""
         box-shadow: 0 0 10px var(--rg-accent);
     }
 
-    /* TARJETAS DE PASOS DEL INICIO */
+    /* TARJETAS DE PASOS DEL INICIO (EMPTY STATE) */
     .empty-state-card {
         background: linear-gradient(135deg, #121722 0%, #0d1017 100%);
         border: 1px solid var(--rg-border);
@@ -406,6 +406,20 @@ st.markdown("""
         margin-bottom: 12px;
     }
 
+    /* ALERTAS Y MENSAJES DE ST.WARNING/INFO */
+    div[data-testid="stNotification"] {
+        border-radius: 10px !important;
+        border: 1px solid var(--rg-border) !important;
+        background-color: var(--rg-card-alt) !important;
+    }
+
+    /* INPUTS COMPACTOS */
+    div[data-baseweb="input"] {
+        border-radius: 8px !important;
+        border: 1px solid var(--rg-border) !important;
+        background-color: var(--rg-card) !important;
+    }
+
     .hint-box {
         background: rgba(0, 210, 211, 0.05);
         border: 1px solid rgba(0, 210, 211, 0.25);
@@ -416,6 +430,7 @@ st.markdown("""
         color: #cfd8e3;
     }
 
+    /* ELEMENTOS DEL RADAR */
     .match-header { font-size: 16px; font-weight: 700; margin-bottom: 2px; letter-spacing: -0.01em; }
     .liga-chip {
         display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
@@ -464,6 +479,13 @@ st.markdown("""
         background: rgba(0,210,211,0.08); border-radius: 6px; padding: 1px 6px; font-size: 12px;
     }
 
+    /* ESTILIZADO DE SEGMENTED CONTROL (MÉTODO DE INGRESO) */
+    div[data-testid="stSegmentedControl"] button {
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        font-size: 12px !important;
+    }
+
     /* BOTONES */
     div.stButton > button {
         border-radius: 8px !important;
@@ -487,13 +509,18 @@ st.markdown("""
         border-radius: 10px; padding: 8px 12px;
     }
 
+    /* TARJETAS KPI Y RESULTADOS (ESTANDARIZADAS) */
     .kpi-card {
-        border-radius: 12px; padding: 12px 14px; border: 1px solid var(--rg-border);
-        background: linear-gradient(160deg, var(--rg-card) 0%, #0f131b 100%); height: 100%;
+        border-radius: 12px;
+        padding: 16px;
+        border: 1px solid var(--rg-border);
+        background: linear-gradient(145deg, var(--rg-card) 0%, #0d1017 100%);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        height: 100%;
     }
-    .kpi-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--rg-text-soft); margin-bottom: 4px; }
-    .kpi-value { font-family: 'JetBrains Mono', monospace; font-size: clamp(20px, 2vw, 26px); font-weight: 700; line-height: 1.1; }
-    .kpi-sub { font-size: 11.5px; margin-top: 4px; font-weight: 600; }
+    .kpi-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--rg-text-soft); margin-bottom: 6px; }
+    .kpi-value { font-family: 'JetBrains Mono', monospace; font-size: clamp(20px, 2.5vw, 28px); font-weight: 700; line-height: 1.1; }
+    .kpi-sub { font-size: 11.5px; margin-top: 6px; font-weight: 500; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -1345,7 +1372,7 @@ with pestana_verificador:
                 st.markdown(f"""
                     <div class="kpi-card" style="border-left: 5px solid #00d2d3; margin-bottom: 15px;">
                         <div class="kpi-label">🎯 PROBABILIDAD REAL DE ACERTAR ESTE PARLAY</div>
-                        <div class="kpi-value" style="color: #00d2d3; font-size: 34px;">{round(prob_porcentaje, 2)}%</div>
+                        <div class="kpi-value" style="color: #00d2d3;">{round(prob_porcentaje, 2)}%</div>
                         <div class="kpi-sub" style="color:#a4b0be;">Equivale a acertar 1 de cada {round(100/prob_porcentaje, 1) if prob_porcentaje > 0 else 0} intentos</div>
                     </div>
                 """, unsafe_allow_html=True)
