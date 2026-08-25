@@ -1162,7 +1162,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                         st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
                                         st.markdown(f"<span class='kickoff-chip'>📅 {part['fecha_str']}</span>", unsafe_allow_html=True)
 
-                                # MEJORA 1: CALCULADORA Y ALERTA DE COBERTURA LIVE (HEDGING AUTO-TRIGGER)
+                                # CALCULADORA Y ALERTA DE COBERTURA LIVE
                                 if part.get('es_en_vivo'):
                                     with st.expander("⚡ Cobertura en Vivo / Hedging Automático (Live Trigger)", expanded=False):
                                         c_h1, c_h2 = st.columns(2)
@@ -1192,7 +1192,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                             c_sb_left, c_sb_right = st.columns([4, 1])
                                             c_sb_left.success(f"💰 **SUREBET / ARBITRAJE DETECTADO!** Rendimiento asegurable: +{round(m_info['surebet']['lucro'], 2)}%")
                                             
-                                            # MEJORA 5: BOTÓN DE DISPARO DIRECTO A BITÁCORA
                                             if c_sb_right.button("⚡ Disparo a Bitácora", key=f"disparo_sb_{part['id']}_{text_m}"):
                                                 c_max_par = max(m_info['max_cuotas'].values())
                                                 st.session_state.historial_apuestas.append({
@@ -1208,7 +1207,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                                 BitacoraManager.guardar(st.session_state.historial_apuestas)
                                                 st.toast("⚡ ¡SureBet registrada directamente en Bitácora!", icon="🚀")
 
-                                        # MEJORA 2: ALERTA DE MOMENTUM / DROPPING ODDS LIVE
                                         for op_k, var_k in m_info.get('variaciones', {}).items():
                                             if "Bajando" in var_k and part.get('es_en_vivo'):
                                                 st.warning(f"⚡ **MOMENTUM LIVE:** Caída drástica de cuota en **{op_k}** ({m_info['max_cuotas'][op_k]}). ¡El mercado está entrando fuerte!")
@@ -1230,7 +1228,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
 
                                                 chk = st.checkbox(f"{opcion} ({cuota_m}) {lbl_val}", value=marcado, key=f"render_{clave_base}_v{st.session_state.version_ticket}")
                                                 
-                                                # MEJORA 3: INDICADOR DE MODELO ADAPTATIVO LIVE VS PRE-MATCH
                                                 lbl_modelo = "⏱️ Poisson Live" if part.get('es_en_vivo') else "📊 Dixon-Coles"
                                                 st.markdown(f"<small>🏠 {m_info['max_bookies'][opcion]}<br>🎯 Implícita: {round(val['prob_real'],1)}%<br>{lbl_modelo}: {round(val['prob_poisson'],1)}% | {var_txt}</small>", unsafe_allow_html=True)
 
@@ -1240,12 +1237,11 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                                         df_casas = pd.DataFrame(todas_casas, columns=["Cuota", "Casa de Apuestas"]).sort_values("Cuota", ascending=False)
                                                         st.dataframe(df_casas, use_container_width=True, hide_index=True)
                                                     
-                                                    # MEJORA 4: HISTÓRICO DE CUOTAS LIVE (SPARKLINE CHART)
-                                                    clave_hist = f"{part['id']}_{text_m}_{opcion}"
-                                                    hist_pts = st.session_state.historico_cuotas_live.get(clave_hist, [])
-                                                    if len(hist_pts) > 1:
-                                                        st.caption("📈 **Tendencia de Cuota Live:**")
-                                                        st.line_chart(hist_pts, height=100)
+                                                clave_hist = f"{part['id']}_{text_m}_{opcion}"
+                                                hist_pts = st.session_state.historico_cuotas_live.get(clave_hist, [])
+                                                if len(hist_pts) > 1:
+                                                    st.caption("📈 **Tendencia de Cuota Live:**")
+                                                    st.line_chart(hist_pts, height=100)
 
                                                 if chk:
                                                     apuestas_seleccionadas.append({
@@ -1888,34 +1884,96 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
             st.caption("Escanea partidos desde el panel lateral para habilitar este módulo.")
 
 # ---------------------------------------------------------
-# PESTAÑA 7: GENERADOR DE CARTEL
+# PESTAÑA 7: GENERADOR DE CARTEL (100% DINÁMICO & KELLY INTEGRADO)
 # ---------------------------------------------------------
 elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.title("🎨 Generador Visual de Pronósticos para Redes")
-    st.caption("Crea carteles elegantes y profesionales con tus jugadas para compartir en Telegram, WhatsApp o Redes.")
+    st.caption("Crea carteles elegantes y profesionales ajustados automáticamente según las selecciones de tu boleto.")
 
     st.subheader("🖼️ Diseñador de Tarjeta de Apuesta")
     c_t1, c_t2 = st.columns([1, 1])
 
+    # Lógica de procesamiento de las selecciones realizadas en la pestaña RADAR MULTI-MERCADO
+    dict_partidos_cargados = st.session_state.get('datos_cargados', {})
+    apuestas_en_boleto = []
+    
+    # Recorremos el diccionario global para capturar únicamente los elementos seleccionados
+    if dict_partidos_cargados:
+        for p_id, part in dict_partidos_cargados.items():
+            for nombre_m, m_info in part['mercados'].items():
+                for opcion, val_data in m_info['value_bets'].items():
+                    clave_chk = f"ap_{part['id']}_{nombre_m}_{opcion}"
+                    # Verificamos si la casilla fue marcada
+                    if st.session_state.get(f"render_{clave_chk}_v{st.session_state.version_ticket}", False) or clave_chk in st.session_state.claves_auto:
+                        apuestas_en_boleto.append({
+                            "evento": f"{part['local']} vs {part['visitante']}",
+                            "mercado": nombre_m,
+                            "seleccion": opcion,
+                            "cuota": m_info['max_cuotas'][opcion],
+                            "prob_real": val_data['prob_real']
+                        })
+
+    cuota_acumulada_cartel = 1.0
+    prob_combinada_cartel = 1.0
+    html_eventos = ""
+
+    if apuestas_en_boleto:
+        for ap in apuestas_en_boleto:
+            cuota_acumulada_cartel *= float(ap['cuota'])
+            prob_combinada_cartel *= (float(ap['prob_real']) / 100.0)
+            html_eventos += f"""
+            ⚽ <b>{ap['evento']}</b><br>
+            🎯 Selección: <span style="color:#00d2d3; font-weight:bold;">{ap['seleccion']} ({ap['cuota']})</span><br><br>
+            """
+        
+        # Cálculo del Stake Automático según el Criterio de Kelly
+        b = cuota_acumulada_cartel - 1.0
+        p = prob_combinada_cartel
+        q = 1.0 - p
+        f_kelly = ((b * p) - q) / b if b > 0 else 0
+        stake_sugerido_monto = max(0.0, f_kelly * fraccion_kelly * bankroll_total)
+        
+        # Escala automática de Stake (1 al 10)
+        pct_banca = (stake_sugerido_monto / bankroll_total) * 100 if bankroll_total > 0 else 0
+        if pct_banca == 0:
+            stake_auto_escala = 1
+        else:
+            stake_auto_escala = min(10, max(1, int(np.ceil(pct_banca * 2))))
+    else:
+        # Estado por defecto cuando el usuario no ha seleccionado nada en el Radar aún
+        html_eventos = """
+        <i>No has marcado selecciones en el Radar.</i><br>
+        <small style="color:#8a94a6;">Ve a la pestaña <b>🚀 RADAR MULTI-MERCADO</b> y marca casillas para generar la tarjeta automáticamente.</small>
+        """
+        cuota_acumulada_cartel = 0.0
+        stake_auto_escala = 1
+        stake_sugerido_monto = 0.0
+
     with c_t1:
         titulo_cartel = st.text_input("Título del Cartel:", "🔥 PARLAY DEL DÍA DE ALTA PROBABILIDAD")
-        analista_nombre = st.text_input("Nombre de Tipster / Canal:", "@MiCanalApuestasPro")
-        monto_sugerido = st.number_input("Stake Sugerido (1-10):", min_value=1, max_value=10, value=3)
+        analista_nombre = st.text_input("Nombre de Tipster / Canal:", "@MiApuestaSeguraPro")
+        
+        monto_sugerido = st.number_input(
+            "Stake Sugerido (1-10):", 
+            min_value=1, max_value=10, 
+            value=int(stake_auto_escala),
+            help=f"Calculado automáticamente. Inversión estimada recomendada: ${round(stake_sugerido_monto, 2)} USD"
+        )
 
     with c_t2:
+        cuota_txt = f"x{round(cuota_acumulada_cartel, 2)}" if cuota_acumulada_cartel > 0 else "x1.00"
+
         st.markdown(f"""
             <div style="background: linear-gradient(135deg, #12161f 0%, #0a0d13 100%); border: 2px solid #00d2d3; padding: 20px; border-radius: 15px; text-align: center;">
                 <h3 style="color: #00d2d3; margin-bottom: 5px;">{titulo_cartel}</h3>
-                <p style="color: #8a94a6; font-size: 12px;">Analista: <b>{analista_nombre}</b> | Stake: <b>{monto_sugerido}/10</b></p>
+                <p style="color: #8a94a6; font-size: 12px;">Analista: <b>{analista_nombre}</b> | Stake Recomendado: <b>{monto_sugerido}/10</b></p>
                 <hr style="border-color: #232a38;">
                 <div style="text-align: left; font-size: 14px; margin: 10px 0;">
-                    ⚽ <b>Independiente del Valle vs Dep. Tolima</b><br>
-                    🎯 Selección: <span style="color:#00d2d3; font-weight:bold;">Local (1.59)</span><br><br>
-                    ⚽ <b>Bodo/Glimt vs Linfield</b><br>
-                    🎯 Selección: <span style="color:#00d2d3; font-weight:bold;">Más de 2.5 Goles (1.55)</span>
+                    {html_eventos}
                 </div>
                 <hr style="border-color: #232a38;">
-                <h2 style="color: #ffffff; font-family: 'JetBrains Mono'; margin: 5px 0;">CUOTA TOTAL: x2.46</h2>
+                <h2 style="color: #ffffff; font-family: 'JetBrains Mono'; margin: 5px 0;">CUOTA TOTAL: {cuota_txt}</h2>
+                <small style="color:#00d2d3;">💵 Inversión sugerida: ${round(stake_sugerido_monto, 2)} USD</small>
             </div>
         """, unsafe_allow_html=True)
 
