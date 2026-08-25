@@ -744,7 +744,7 @@ if 'creditos_restantes_af' not in st.session_state:
 if 'overrides_live' not in st.session_state:
     st.session_state.overrides_live = {}
 
-# CORRECCIÓN DE PERSISTENCIA: DICCIONARIO PARA TICKET GLOBAL PERSISTENTE
+# DICCIONARIO PARA TICKET GLOBAL PERSISTENTE
 if 'ticket_persistente' not in st.session_state:
     st.session_state.ticket_persistente = {}
 
@@ -1181,7 +1181,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             consolidador = {}
             st.session_state.ha_consultado = True
 
-            mercados_featured = [m for m in mercados_sels if diccionario_mercados[m] in ("h2h", "totals")]
             total_ligas = len(ligas_sels) + len(ligas_af_sels)
 
             with st.status(f"🔄 Consultando {total_ligas} liga(s)...", expanded=True) as status_consulta:
@@ -1243,8 +1242,8 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                     
                     cumple_perfil = True
                     if "Conservador" in perfil_estrategia: cumple_perfil = prob_op >= 65.0
-                    elif "Value Hunter" in perfil_estrategia: cumple_perfil = ev_op > 0.02
-                    elif "Equilibrado" in perfil_estrategia: cumple_perfil = nombre_m == "Doble Oportunidad"
+                    elif "Cazador de Valor" in perfil_estrategia: cumple_perfil = ev_op > 0.02
+                    elif "Doble Oportunidad" in perfil_estrategia: cumple_perfil = nombre_m == "Doble Oportunidad"
 
                     if cumple_perfil and (rango_cuota_auto[0] <= cuota_op <= rango_cuota_auto[1]) and (prob_op >= prob_min_auto):
                         clave_b = f"ap_{part['id']}_{nombre_m}_{opcion}"
@@ -1439,7 +1438,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                                 var_txt = m_info.get('variaciones', {}).get(opcion, "")
                                                 lbl_val = "**🔥 VALOR**" if val['es_value'] else ""
                                                 
-                                                # KEY ESTÁTICA Y CALLBACK DIRECTO DE PERSISTENCIA
                                                 clave_base = f"ap_{part['id']}_{text_m}_{opcion}"
                                                 val_defecto = clave_base in st.session_state.ticket_persistente or clave_base in st.session_state.claves_auto
 
@@ -1469,7 +1467,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
         with col_der:
             st.subheader("🎟️ Configuración de Parlay")
             
-            # OBTENER SELECCIONES DIRECTAMENTE DEL ESTADO PERSISTENTE
             apuestas_seleccionadas = list(st.session_state.ticket_persistente.values())
 
             if st.button("🧹 Limpiar Boleto", use_container_width=True):
@@ -2160,7 +2157,6 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.subheader("🖼️ Diseñador de Tarjeta de Apuesta")
     c_t1, c_t2 = st.columns([1, 1])
 
-    # LECTURA PERSISTENTE PARA EL CARTEL
     apuestas_en_boleto = list(st.session_state.ticket_persistente.values())
 
     cuota_acumulada_cartel = 1.0
