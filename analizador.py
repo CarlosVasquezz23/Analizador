@@ -460,7 +460,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 7. CLIENTES API
+# 7. CLIENTES API Y MAPEO OFICIAL
 # =========================================================
 def hl_headers(): return {"x-rapidapi-key": HL_API_KEY}
 
@@ -512,30 +512,23 @@ AF_LEAGUE_IDS = {
     "🇵🇾 División Profesional Paraguay - Clausura": 252,
 }
 
-ligas_top = {
-    "🇪🇺 Champions League (Europa)": "soccer_uefa_champions_league",
-    "🇪🇺 Europa League (Europa)": "soccer_uefa_europa_league",
-    "🏆 Copa Libertadores (CONMEBOL)": "soccer_conmebol_copa_libertadores",
-    "🥈 Copa Sudamericana (CONMEBOL)": "soccer_conmebol_copa_sudamericana"
+# MAPEO DE CLAVES ESTÁNDAR PARA THE ODDS API
+todas_las_ligas = {
+    "EU Champions League": "soccer_uefa_champions_league",
+    "EU Europa League": "soccer_uefa_europa_league",
+    "Copa Libertadores": "soccer_conmebol_copa_libertadores",
+    "Copa Sudamericana": "soccer_conmebol_copa_sudamericana",
+    "Argentina Primera Division": "soccer_argentina_primera_division",
+    "Chile Primera Division": "soccer_chile_campeonato",
+    "Brasil Brasileirao": "soccer_brazil_campeonato",
+    "Mexico Liga MX": "soccer_mexico_liga_mx",
+    "Spain La Liga": "soccer_spain_la_liga",
+    "England Premier League": "soccer_epl",
+    "Italy Serie A": "soccer_italy_serie_a",
+    "Germany Bundesliga": "soccer_germany_bundesliga",
+    "France Ligue 1": "soccer_france_ligue_one"
 }
 
-ligas_locales = {
-    "🇦🇷 Liga Profesional (Argentina)": "soccer_argentina_primera_division",
-    "🇨🇱 Primera División (Chile)": "soccer_chile_campeonato",
-    "🇪🇨 Copa Ecuador": "soccer_ecuador_copa_ecuador",
-    "🇧🇷 Brasileirao Serie A": "soccer_brazil_campeonato",
-    "🇧🇷 Copa de Brasil": "soccer_brazil_copa_do_brasil",
-    "🇲🇽 Liga MX (México)": "soccer_mexico_liga_mx",
-    "🇪🇸 La Liga (España)": "soccer_spain_la_liga",
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League (Inglaterra)": "soccer_epl",
-    "🇮🇹 Serie A (Italia)": "soccer_italy_serie_a",
-    "🇩🇪 Bundesliga (Alemania)": "soccer_germany_bundesliga",
-    "🇫🇷 Ligue 1 (Francia)": "soccer_france_ligue_one",
-    "🇳🇱 Eredivisie (Países Bajos)": "soccer_netherlands_eredivisie",
-    "🇵🇹 Primeira Liga (Portugal)": "soccer_portugal_primeira_liga"
-}
-
-todas_las_ligas = {**ligas_top, **dict(sorted(ligas_locales.items()))}
 diccionario_mercados = {
     "1X2 (Ganador)": "h2h",
     "Doble Oportunidad": "double_chance",
@@ -619,7 +612,7 @@ with st.sidebar:
             default=[]
         )
         mercados_sels = st.multiselect("Mercados:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
-        tiempo_sel = st.selectbox("Ventana de tiempo:", ["24 Horas", "48 Horas", "72 Horas", "7 Días", "14 Días"], index=2)
+        tiempo_sel = st.selectbox("Ventana de tiempo:", ["24 Horas", "48 Horas", "72 Horas", "7 Días", "14 Días"], index=3)
         
         if "Días" in tiempo_sel:
             limite_h = int(tiempo_sel.split()[0]) * 24
@@ -646,7 +639,7 @@ with st.sidebar:
         st.session_state['auto_alertas_telegram'] = st.checkbox("🚀 Auto-alertas (+EV > 5%)", value=False)
 
 # =========================================================
-# 10. PROCESAMIENTO DE CUOTAS
+# 10. PROCESAMIENTO DE CUOTAS Y FILTRADO ROBUSTO
 # =========================================================
 def actualizar_creditos(headers):
     if 'x-requests-remaining' in headers:
@@ -684,8 +677,7 @@ def filtrar_partidos_por_fecha(datos, limite_horas):
         except (ValueError, KeyError):
             continue
         horas = (fecha_utc - ahora_utc).total_seconds() / 3600
-        # Tolerancia para partidos en curso o recientes (-24h a +limite_horas)
-        if -24.0 <= horas <= (limite_horas + 48):
+        if -48.0 <= horas <= (limite_horas + 48):
             res.append(p)
     return res
 
@@ -705,7 +697,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             continue
 
         horas = (fecha_utc - ahora_utc).total_seconds() / 3600
-        if horas < -24.0 or horas > (limite_horas + 48): continue
+        if horas < -48.0 or horas > (limite_horas + 48): continue
 
         fecha_local = fecha_utc - timedelta(hours=5)
         bookmakers = partido.get('bookmakers', [])
@@ -822,8 +814,8 @@ with pestana_radar:
 
             with st.status(f"🔄 Consultando {total_ligas} liga(s)...", expanded=True) as status_consulta:
                 for idx_liga, liga in enumerate(ligas_sels, start=1):
-                    status_consulta.update(label=f"🔄 Consultando ({idx_liga}/{total_ligas}): {liga}")
                     sport_key = todas_las_ligas.get(liga)
+                    status_consulta.update(label=f"🔄 Consultando ({idx_liga}/{total_ligas}): {liga} [{sport_key}]")
                     
                     if sport_key:
                         for m_sel in mercados_featured:
