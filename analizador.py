@@ -1520,8 +1520,9 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
                         linea_norm = re.sub(r'([^\w\d]|^)[xX@]\s*(?=\d)', r'\1', linea_clean)
                         linea_norm = linea_norm.replace(',', '.')
                         
-                        cuotas_encontradas = re.findall(r'\b\d+\.\d+|\b\d+\b', linea_norm)
-                        cuotas_validas = [float(c) for c in cuotas_encontradas if float(c) > 1.0]
+                        # Extraer solo cuotas decimales flotantes reales
+                        cuotas_encontradas = re.findall(r'\b\d+\.\d+\b', linea_norm)
+                        cuotas_validas = [float(c) for c in cuotas_encontradas if 1.01 <= float(c) <= 100.0]
                         
                         if cuotas_validas:
                             cuota_val = cuotas_validas[-1]
@@ -1539,7 +1540,7 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
                             for p in partes:
                                 try:
                                     val = float(p)
-                                    if val > 1.0:
+                                    if 1.01 <= val <= 100.0:
                                         partidos_externos.append({"nombre": f"Selección #{len(partidos_externos)+1}", "cuota": val})
                                 except ValueError:
                                     pass
