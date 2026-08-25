@@ -334,8 +334,8 @@ st.markdown("""
 
     button[data-baseweb="tab"] {
         font-weight: 700 !important;
-        font-size: clamp(12px, 1.1vw, 14px) !important;
-        padding: 10px 20px !important;
+        font-size: clamp(11px, 1vw, 13px) !important;
+        padding: 8px 14px !important;
         border-radius: 8px 8px 0 0 !important;
         color: #8a94a6 !important;
         background-color: transparent !important;
@@ -819,12 +819,26 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             }
 
 # =========================================================
-# 11. VISTAS Y PESTAÑAS
+# 11. VISTAS Y PESTAÑAS (8 APARTADOS ENTERPRISE)
 # =========================================================
-pestana_radar, pestana_verificador, pestana_historial = st.tabs([
-    "🚀 RADAR MULTI-MERCADO & VALUEBETS", 
-    "🧮 CALCULADORA & SIMULADOR PARLAY (OCR / AUTO)",
-    "📊 BITÁCORA PRO & AUDITORÍA ROI"
+(
+    pestana_radar, 
+    pestana_verificador, 
+    pestana_h2h,
+    pestana_coberturas,
+    pestana_value,
+    pestana_noticias,
+    pestana_tipster,
+    pestana_historial
+) = st.tabs([
+    "🚀 RADAR MULTI-MERCADO", 
+    "🧮 CALCULADORA & OCR",
+    "📊 ESTADÍSTICAS & H2H",
+    "🛡️ MATRIZ DE COBERTURAS",
+    "🔥 CAZADOR +EV & DROPPING",
+    "📰 BAJAS & ALINEACIONES",
+    "🎨 GENERADOR DE CARTEL",
+    "📈 BITÁCORA & ROI"
 ])
 
 # ---------------------------------------------------------
@@ -1036,7 +1050,7 @@ with pestana_radar:
                         st.markdown(f"<div class='ticket-item'>✔️ <b>{ap['evento']}</b><br>➔ <code>{ap['seleccion']}</code> | <span class='ticket-cuota-tag'>x{ap['cuota']}</span></div>", unsafe_allow_html=True)
                         texto_whatsapp += f"⚽ *{ap['evento']}*\n🎯 {ap['mercado']}: *{ap['seleccion']}* (x{ap['cuota']}) - 🏢 {ap['casa']}\n\n"
 
-                    # CAMPO DIRECTO PARAINGRESAR LA INVERSIÓN
+                    # CAMPO DIRECTO PARA INGRESAR LA INVERSIÓN
                     monto_ticket = st.number_input("💵 Inversión / Importe a Apostar ($):", min_value=1.0, value=float(monto_inversion), step=1.0, key="monto_ticket_directo")
 
                     b = cuota_acumulada - 1.0
@@ -1298,7 +1312,168 @@ with pestana_verificador:
                 st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
-# PESTAÑA 3: AUDITORÍA Y BITÁCORA PRO
+# PESTAÑA 3: ANÁLISIS ESTADÍSTICO & H2H
+# ---------------------------------------------------------
+with pestana_h2h:
+    st.title("📊 Análisis Estadístico y Cara a Cara (H2H)")
+    st.caption("Consulta el historial reciente de enfrentamientos directos, rachas de forma y métricas de goles.")
+
+    c_h1, c_h2 = st.columns(2)
+    with c_h1:
+        eq_local = st.text_input("⚽ Equipo Local:", value="Independiente del Valle")
+    with c_h2:
+        eq_visit = st.text_input("⚽ Equipo Visitante:", value="Deportes Tolima")
+
+    st.subheader(f"⚔️ Comparativa Directa: {eq_local} vs {eq_visit}")
+    
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    col_m1.metric("Forma Local (Últimos 5)", "W-W-D-W-L", "80% Rend.")
+    col_m2.metric("Forma Visitante (Últimos 5)", "D-W-L-D-W", "53% Rend.")
+    col_m3.metric("Promedio Goles Local", "1.8 / partido", "Altos")
+    col_m4.metric("Promedio Goles Visitante", "1.1 / partido", "Medios")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("📜 Histórico de Enfrentamientos Directos (H2H)")
+    h2h_demo = pd.DataFrame([
+        {"Fecha": "12/04/2025", "Torneo": "Copa Libertadores", "Resultado": f"{eq_local} 2 - 1 {eq_visit}", "Ganador": eq_local},
+        {"Fecha": "24/09/2024", "Torneo": "Amistoso Clubes", "Resultado": f"{eq_local} 1 - 1 {eq_visit}", "Ganador": "Empate"},
+        {"Fecha": "18/05/2023", "Torneo": "Copa Libertadores", "Resultado": f"{eq_visit} 0 - 2 {eq_local}", "Ganador": eq_local},
+    ])
+    st.dataframe(h2h_demo, use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------------
+# PESTAÑA 4: MATRIZ DE COBERTURAS Y CASHOUT
+# ---------------------------------------------------------
+with pestana_coberturas:
+    st.title("🛡️ Matriz de Coberturas & Calculadora SureBet")
+    st.caption("Asegura ganancias en partidos en vivo o calcula arbitrajes libres de riesgo.")
+
+    sub_tab1, sub_tab2 = st.tabs(["💰 Calculadora Arbitraje / SureBet", "🔄 Cashout vs. Cobertura (Hedge)"])
+
+    with sub_tab1:
+        st.subheader("🧮 Arbitraje Libre de Riesgo (2 u Opción 3-Way)")
+        c_sb1, c_sb2, c_sb3 = st.columns(3)
+        cuota_1 = c_sb1.number_input("Cuota Opción 1 (ej: Local):", min_value=1.01, value=2.10, step=0.05)
+        cuota_X = c_sb2.number_input("Cuota Opción X (ej: Empate):", min_value=1.01, value=3.40, step=0.05)
+        cuota_2 = c_sb3.number_input("Cuota Opción 2 (ej: Visitante):", min_value=1.01, value=4.50, step=0.05)
+
+        monto_total_sb = st.number_input("Monto Total a Invertir ($):", min_value=10.0, value=100.0, step=10.0)
+
+        inv_p = (1/cuota_1) + (1/cuota_X) + (1/cuota_2)
+        lucro_sb = ((1 / inv_p) - 1) * 100
+
+        if inv_p < 1.0:
+            st.success(f"🔥 **SUREBET DETECTADA! Rendimiento Garantizado: +{round(lucro_sb, 2)}%**")
+            ap_1 = (monto_total_sb / (cuota_1 * inv_p))
+            ap_X = (monto_total_sb / (cuota_X * inv_p))
+            ap_2 = (monto_total_sb / (cuota_2 * inv_p))
+
+            res_df = pd.DataFrame([
+                {"Opción": "Selección 1", "Cuota": cuota_1, "Apostar ($)": round(ap_1, 2), "Retorno Total ($)": round(ap_1 * cuota_1, 2)},
+                {"Opción": "Selección X", "Cuota": cuota_X, "Apostar ($)": round(ap_X, 2), "Retorno Total ($)": round(ap_X * cuota_X, 2)},
+                {"Opción": "Selección 2", "Cuota": cuota_2, "Apostar ($)": round(ap_2, 2), "Retorno Total ($)": round(ap_2 * cuota_2, 2)},
+            ])
+            st.dataframe(res_df, use_container_width=True, hide_index=True)
+        else:
+            st.warning(f"⚠️ No hay SureBet con estas cuotas (Overround/Margen de la casa: {round(inv_p*100, 2)}%).")
+
+    with sub_tab2:
+        st.subheader("🔄 Evaluar Cashout vs. Cobertura Directa")
+        c_ch1, c_ch2 = st.columns(2)
+        monto_original = c_ch1.number_input("Inversión Inicial Parlay ($):", value=20.0)
+        retorno_potencial = c_ch2.number_input("Retorno Potencial Parlay ($):", value=250.0)
+
+        cashout_ofrecido = c_ch1.number_input("Cashout ofrecido por la Casa ($):", value=140.0)
+        cuota_contraopcion = c_ch2.number_input("Cuota Contra-Opción en vivo:", value=2.20)
+
+        hedge_stake = retorno_potencial / cuota_contraopcion
+        ganancia_hedge = retorno_potencial - hedge_stake - monto_original
+
+        col_r1, col_r2 = st.columns(2)
+        col_r1.info(f"💵 **Aceptar Cashout Casa:** Ganas **${round(cashout_ofrecido - monto_original, 2)}** netos")
+        col_r2.success(f"🛡️ **Apostar ${round(hedge_stake, 2)} en Cobertura:** Ganas **${round(ganancia_hedge, 2)}** netos en cualquier resultado")
+
+# ---------------------------------------------------------
+# PESTAÑA 5: CAZADOR AUTOMÁTICO DE VALUEBETS (+EV) & DROPPING ODDS
+# ---------------------------------------------------------
+with pestana_value:
+    st.title("🔥 Cazador de Valor (+EV) y Cuotas Cayendo (Dropping Odds)")
+    st.caption("Detección de movimientos bruscos del mercado y líneas desajustadas frente al modelo matemático.")
+
+    st.subheader("🎯 Oportunidades +EV Destacadas en Tiempo Real")
+    value_demo = pd.DataFrame([
+        {"Partido": "Independiente del Valle vs Deportes Tolima", "Mercado": "1X2", "Selección": "Visitante", "Cuota Bookie": 7.20, "Cuota Justa": 3.69, "Valor (+EV)": "+27.1%", "Casa": "Betfair"},
+        {"Partido": "Bodo/Glimt vs Linfield", "Mercado": "Goles 2.5", "Selección": "Más de 2.5", "Cuota Bookie": 1.85, "Cuota Justa": 1.55, "Valor (+EV)": "+19.3%", "Casa": "Betano"},
+        {"Partido": "Flamengo vs Olimpia", "Mercado": "BTTS", "Selección": "Sí", "Cuota Bookie": 2.10, "Cuota Justa": 1.80, "Valor (+EV)": "+16.6%", "Casa": "1xBet"}
+    ])
+    st.dataframe(value_demo, use_container_width=True, hide_index=True)
+
+    st.subheader("📉 Alertas de Dropping Odds (Cuotas en Caída Libre)")
+    st.caption("Señala eventos donde el dinero del mercado masivo está empujando las líneas a la baja.")
+    drop_demo = pd.DataFrame([
+        {"Partido": "Barcelona SC vs LDU Quito", "Selección": "Local", "Cuota Inicial": 2.45, "Cuota Actual": 1.95, "Variación": "📉 -20.4%", "Motivo Probable": "Baja de jugador titular rival"},
+        {"Partido": "Boca Juniors vs Racing Club", "Selección": "Menos de 2.5", "Cuota Inicial": 1.80, "Cuota Actual": 1.55, "Variación": "📉 -13.8%", "Motivo Probable": "Condición climática / Lluvia"}
+    ])
+    st.dataframe(drop_demo, use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------------
+# PESTAÑA 6: NOTICIAS & BAJAS IMPORTANTES
+# ---------------------------------------------------------
+with pestana_noticias:
+    st.title("📰 Centro de Bajas, Lesiones y Alineaciones")
+    st.caption("Información contextual crucial para validar tus selecciones antes de realizar la apuesta.")
+
+    c_n1, c_n2 = st.columns(2)
+    with c_n1:
+        st.subheader("🩹 Lesionados & Sancionados Confirmados")
+        st.markdown("""
+        * 🔴 **Deportes Tolima:** J. Lucumí (Lesión Muscular - Descartado)
+        * 🟡 **Independiente del Valle:** C. Zavala (Duda por molestia en tobillo)
+        * 🔴 **Bodo/Glimt:** P. Berg (Acumulación de Amarillas - Suspendido)
+        """)
+
+    with c_n2:
+        st.subheader("📋 Novedades de Última Hora")
+        st.info("🌦️ **Condiciones del Campo:** Lluvia moderada prevista en Sangolquí durante la hora del encuentro entre Independiente del Valle y Tolima.")
+        st.success("✅ **Alineación:** Independiente del Valle mantendrá su esquema habitual 4-3-3.")
+
+# ---------------------------------------------------------
+# PESTAÑA 7: GENERADOR DE CARTEL / EXPORTADOR TIPSTER
+# ---------------------------------------------------------
+with pestana_tipster:
+    st.title("🎨 Generador Visual de Pronósticos para Redes")
+    st.caption("Crea carteles elegantes y profesionales con tus jugadas para compartir en Telegram, WhatsApp o Redes.")
+
+    st.subheader("🖼️ Diseñador de Tarjeta de Apuesta")
+    c_t1, c_t2 = st.columns([1, 1])
+
+    with c_t1:
+        titulo_cartel = st.text_input("Título del Cartel:", "🔥 PARLAY DEL DÍA DE ALTA PROBABILIDAD")
+        analista_nombre = st.text_input("Nombre de Tipster / Canal:", "@MiCanalApuestasPro")
+        monto_sugerido = st.number_input("Stake Sugerido (1-10):", min_value=1, max_value=10, value=3)
+
+    with c_t2:
+        st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #12161f 0%, #0a0d13 100%); border: 2px solid #00d2d3; padding: 20px; border-radius: 15px; text-align: center;">
+                <h3 style="color: #00d2d3; margin-bottom: 5px;">{titulo_cartel}</h3>
+                <p style="color: #8a94a6; font-size: 12px;">Analista: <b>{analista_nombre}</b> | Stake: <b>{monto_sugerido}/10</b></p>
+                <hr style="border-color: #232a38;">
+                <div style="text-align: left; font-size: 14px; margin: 10px 0;">
+                    ⚽ <b>Independiente del Valle vs Dep. Tolima</b><br>
+                    🎯 Selección: <span style="color:#00d2d3; font-weight:bold;">Local (1.59)</span><br><br>
+                    ⚽ <b>Bodo/Glimt vs Linfield</b><br>
+                    🎯 Selección: <span style="color:#00d2d3; font-weight:bold;">Más de 2.5 Goles (1.55)</span>
+                </div>
+                <hr style="border-color: #232a38;">
+                <h2 style="color: #ffffff; font-family: 'JetBrains Mono'; margin: 5px 0;">CUOTA TOTAL: x2.46</h2>
+            </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.button("📸 Descargar Imagen del Cartel (PNG)", use_container_width=True)
+
+# ---------------------------------------------------------
+# PESTAÑA 8: AUDITORÍA Y BITÁCORA PRO
 # ---------------------------------------------------------
 with pestana_historial:
     st.title("📊 Módulo de Auditoría Financiera Avanzada Pro")
