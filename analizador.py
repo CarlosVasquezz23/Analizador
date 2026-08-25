@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import urllib.parse
 import json
 import os
+import re
 from typing import Dict, List, Any, Optional
 
 # =========================================================
@@ -284,7 +285,7 @@ ligas_locales = {
     "🇧🇷 Brasileirao Serie A": "soccer_brazil_campeonato",
     "🇧🇷 Copa de Brasil": "soccer_brazil_copa_do_brasil",
     "🇲🇽 Liga MX (México)": "soccer_mexico_liga_mx",
-    "🇪檐 La Liga (España)": "soccer_spain_la_liga",
+    "🇪🇸 La Liga (España)": "soccer_spain_la_liga",
     "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League (Inglaterra)": "soccer_epl",
     "🇮🇹 Serie A (Italia)": "soccer_italy_serie_a",
     "🇩🇪 Bundesliga (Alemania)": "soccer_germany_bundesliga",
@@ -745,81 +746,132 @@ with pestana_radar:
                             st.toast("¡Enviado a Telegram!", icon="📤")
 
 # ---------------------------------------------------------
-# PESTAÑA 2: CALCULADORA DE PARLAY EXTERNO (CORREGIDA)
+# PESTAÑA 2: CALCULADORA DE PARLAY EXTERNO (CON PEGADO RÁPIDO Y MODO MANUAL)
 # ---------------------------------------------------------
 with pestana_verificador:
     st.title("🧮 Analizador & Verificador de Parlays Externos")
-    st.caption("Ingresa los eventos y cuotas que armaste en cualquier casa de apuestas (Betano, Bet365, Ecuabet, etc.) para calcular su probabilidad real matemática.")
+    st.caption("Ingresa o pega las cuotas que armaste en cualquier casa de apuestas (Betano, Bet365, Ecuabet, etc.) para calcular su probabilidad real matemática.")
+
+    modo_ingreso = st.radio(
+        "⚡ ¿Cómo prefieres ingresar tu parlay?",
+        ["🚀 Pegado Rápido (Solo copiar y pegar)", "📝 Registro Manual Partido por Partido"],
+        horizontal=True
+    )
 
     col_ingreso, col_resultados = st.columns([1.1, 1])
+    partidos_externos = []
 
     with col_ingreso:
-        st.subheader("📌 Armar / Pegar Selecciones")
-        num_partidos_ext = st.number_input("Número de Partidos en tu Ticket:", min_value=1, max_value=10, value=3, step=1)
-        margen_estimado_casa = st.slider("Comisión/Margen estimado de la casa (%):", min_value=1.0, max_value=15.0, value=5.0, step=0.5, help="La mayoría de casas cobran entre 4% y 7% de margen sobre las cuotas.")
+        st.subheader("📌 Ingresar Selecciones")
+        margen_estimado_casa = st.slider(
+            "Comisión/Margen estimado de la casa (%):", 
+            min_value=1.0, max_value=15.0, value=5.0, step=0.5, 
+            help="La mayoría de casas cobran entre 4% y 7% de margen sobre las cuotas."
+        )
 
-        partidos_externos = []
-        for i in range(int(num_partidos_ext)):
-            with st.expander(f"⚽ Selección #{i+1}", expanded=True):
-                col1, col2 = st.columns([2, 1])
-                with col1:
-                    nombre_partido = st.text_input(f"Partido/Selección #{i+1}:", f"Evento #{i+1}", key=f"ext_name_{i}")
-                with col2:
-                    cuota_partido = st.number_input(f"Cuota:", min_value=1.01, value=1.50, step=0.05, key=f"ext_odd_{i}")
-                partidos_externos.append({"nombre": nombre_partido, "cuota": cuota_partido})
+        if "Pegado Rápido" in modo_ingreso:
+            st.info("💡 **Ejemplo de pegado:** Puedes pegar el texto completo que copiaste de tu casa de apuestas, o simplemente escribir las cuotas separadas por espacios o comas.\n\n*Ejemplo 1:* `1.50, 1.65, 1.80, 2.10`\n*Ejemplo 2:* `Real Madrid 1.50\nBarcelona 1.65\nLiga de Quito 1.80`")
+            
+            texto_pegado = st.text_area(
+                "📋 Pega aquí tu boleto o cuotas:",
+                height=150,
+                placeholder="Ejemplo:\nBarcelona vs Emelec - Cuota 1.50\nReal Madrid vs Getafe - Cuota 1.85\n1.45"
+            )
+
+            if texto_pegado:
+                lineas = texto_pegado.strip().split('\n')
+                
+                for idx, linea in enumerate(lineas):
+                    linea_clean = linea.strip()
+                    if not linea_clean:
+                        continue
+                    
+                    linea_norm = linea_clean.replace(',', '.')
+                    cuotas_encontradas = re.findall(r'\b\d+\.\d+|\b\d+\b', linea_norm)
+                    cuotas_validas = [float(c) for c in cuotas_encontradas if float(c) > 1.0]
+                    
+                    if cuotas_validas:
+                        cuota_val = cuotas_validas[-1]
+                        nombre_txt = re.sub(r'\b\d+[\.,]?\d*\b', '', linea_clean).strip(" -:()")
+                        if not nombre_txt:
+                            nombre_txt = f"Selección #{len(partidos_externos)+1}"
+                        
+                        partidos_externos.append({"nombre": nombre_txt, "cuota": cuota_val})
+                    else:
+                        partes = linea_norm.replace(',', ' ').split()
+                        for p in partes:
+                            try:
+                                val = float(p)
+                                if val > 1.0:
+                                    partidos_externos.append({"nombre": f"Selección #{len(partidos_externos)+1}", "cuota": val})
+                            except ValueError:
+                                pass
+        else:
+            num_partidos_ext = st.number_input("Número de Partidos en tu Ticket:", min_value=1, max_value=10, value=3, step=1)
+            for i in range(int(num_partidos_ext)):
+                with st.expander(f"⚽ Selección #{i+1}", expanded=True):
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        nombre_partido = st.text_input(f"Partido/Selección #{i+1}:", f"Evento #{i+1}", key=f"ext_name_{i}")
+                    with col2:
+                        cuota_partido = st.number_input(f"Cuota:", min_value=1.01, value=1.50, step=0.05, key=f"ext_odd_{i}")
+                    partidos_externos.append({"nombre": nombre_partido, "cuota": cuota_partido})
 
     with col_resultados:
         st.subheader("📊 Análisis Matemático del Ticket")
 
-        cuota_total_ext = 1.0
-        prob_real_total = 1.0
-        factor_comision = 1.0 + (margen_estimado_casa / 100.0)
-
-        detalles_tabla = []
-
-        for p in partidos_externos:
-            c = float(p['cuota'])
-            cuota_total_ext *= c
-            
-            # 1. Probabilidad implícita que incluye el margen de la casa
-            prob_implicita_casa = (1.0 / c)
-            
-            # 2. Probabilidad Real Fair (revolviendo matemáticamente la comisión)
-            prob_real_evento = prob_implicita_casa / factor_comision
-            prob_real_total *= prob_real_evento
-
-            detalles_tabla.append({
-                "Selección": p['nombre'],
-                "Cuota Casa": f"x{round(c, 2)}",
-                "Prob. Implícita Casa": f"{round(prob_implicita_casa * 100, 1)}%",
-                "Prob. Real Estimada": f"{round(prob_real_evento * 100, 1)}%"
-            })
-
-        prob_porcentaje = prob_real_total * 100.0
-        cuota_justa = (1.0 / prob_real_total) if prob_real_total > 0 else 0
-        ev_ticket = (cuota_total_ext * prob_real_total) - 1.0
-
-        st.markdown(f"""
-            <div class="kpi-card" style="border-left: 5px solid #00d2d3; margin-bottom: 15px;">
-                <div class="kpi-label">🎯 PROBABILIDAD REAL DE ACERTAR ESTE PARLAY</div>
-                <div class="kpi-value" style="color: #00d2d3; font-size: 34px;">{round(prob_porcentaje, 2)}%</div>
-                <div class="kpi-sub" style="color:#a4b0be;">Equivale a acertar 1 de cada {round(100/prob_porcentaje, 1) if prob_porcentaje > 0 else 0} intentos</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        k1, k2 = st.columns(2)
-        k1.metric("Cuota Total de la Casa", f"x{round(cuota_total_ext, 2)}")
-        k2.metric("Cuota Justa Sin Margen", f"x{round(cuota_justa, 2)}", help="La cuota que verdaderamente debería pagar el parlay si la casa no cobrara comisión.")
-
-        if ev_ticket > 0.01:
-            st.success(f"🔥 **TICKET CON VALOR ESPERADO POSITIVO (+EV: {round(ev_ticket*100, 1)}%)**: Las cuotas de tu ticket valen la pena.")
-        elif ev_ticket >= -0.05:
-            st.info(f"⚖️ **TICKET EQUILIBRADO (EV: {round(ev_ticket*100, 1)}%)**: El cobro de comisión se mantiene dentro del rango estándar de la casa.")
+        if not partidos_externos:
+            st.warning("👈 Ingresa o pega las cuotas de tu boleto a la izquierda para ver el análisis.")
         else:
-            st.warning(f"⚠️ **TICKET DESFAVORABLE (EV: {round(ev_ticket*100, 1)}%)**: La casa está aplicando un margen de comisión muy desfavorable sobre tu combinado.")
+            cuota_total_ext = 1.0
+            prob_real_total = 1.0
+            factor_comision = 1.0 + (margen_estimado_casa / 100.0)
 
-        st.write("**Desglose Selección por Selección:**")
-        st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
+            detalles_tabla = []
+
+            for p in partidos_externos:
+                c = float(p['cuota'])
+                cuota_total_ext *= c
+                
+                # 1. Probabilidad implícita con margen
+                prob_implicita_casa = (1.0 / c)
+                
+                # 2. Probabilidad Real Fair descontando la comisión
+                prob_real_evento = prob_implicita_casa / factor_comision
+                prob_real_total *= prob_real_evento
+
+                detalles_tabla.append({
+                    "Selección": p['nombre'],
+                    "Cuota Casa": f"x{round(c, 2)}",
+                    "Prob. Implícita Casa": f"{round(prob_implicita_casa * 100, 1)}%",
+                    "Prob. Real Estimada": f"{round(prob_real_evento * 100, 1)}%"
+                })
+
+            prob_porcentaje = prob_real_total * 100.0
+            cuota_justa = (1.0 / prob_real_total) if prob_real_total > 0 else 0
+            ev_ticket = (cuota_total_ext * prob_real_total) - 1.0
+
+            st.markdown(f"""
+                <div class="kpi-card" style="border-left: 5px solid #00d2d3; margin-bottom: 15px;">
+                    <div class="kpi-label">🎯 PROBABILIDAD REAL DE ACERTAR ESTE PARLAY</div>
+                    <div class="kpi-value" style="color: #00d2d3; font-size: 34px;">{round(prob_porcentaje, 2)}%</div>
+                    <div class="kpi-sub" style="color:#a4b0be;">Equivale a acertar 1 de cada {round(100/prob_porcentaje, 1) if prob_porcentaje > 0 else 0} intentos</div>
+                </div>
+            """, unsafe_allow_html=True)
+
+            k1, k2 = st.columns(2)
+            k1.metric("Cuota Total de la Casa", f"x{round(cuota_total_ext, 2)}")
+            k2.metric("Cuota Justa Sin Margen", f"x{round(cuota_justa, 2)}", help="La cuota que verdaderamente debería pagar el parlay si la casa no cobrara comisión.")
+
+            if ev_ticket > 0.01:
+                st.success(f"🔥 **TICKET CON VALOR ESPERADO POSITIVO (+EV: {round(ev_ticket*100, 1)}%)**: Las cuotas de tu ticket valen la pena.")
+            elif ev_ticket >= -0.05:
+                st.info(f"⚖️ **TICKET EQUILIBRADO (EV: {round(ev_ticket*100, 1)}%)**: El cobro de comisión se mantiene dentro del rango estándar de la casa.")
+            else:
+                st.warning(f"⚠️ **TICKET DESFAVORABLE (EV: {round(ev_ticket*100, 1)}%)**: La casa está aplicando un margen de comisión muy desfavorable sobre tu combinado.")
+
+            st.write(f"**Desglose ({len(partidos_externos)} selecciones detectadas):**")
+            st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
 # PESTAÑA 3: AUDITORÍA Y BITÁCORA
