@@ -10,8 +10,10 @@ import os
 import re
 import io
 import itertools
+import time
 from typing import Dict, List, Any, Optional
 from PIL import Image
+import streamlit.components.v1 as components
 
 # =========================================================
 # 1. CONFIGURACIÓN DE PÁGINA Y CREDENCIALES
@@ -96,6 +98,39 @@ def enviar_telegram(mensaje: str) -> bool:
     except Exception as e:
         st.error(f"💥 Error de conexión con Telegram: {e}")
         return False
+
+# =========================================================
+# MEJORA 3: SERVICIO JS DE NOTIFICACIONES Y SONIDO NATIVO
+# =========================================================
+def disparar_alerta_sonora_y_notificacion(titulo: str, mensaje: str):
+    js_code = f"""
+    <script>
+    if ("Notification" in window) {{
+        if (Notification.permission === "granted") {{
+            new Notification("{titulo}", {{ body: "{mensaje}", icon: "⚽" }});
+        }} else if (Notification.permission !== "denied") {{
+            Notification.requestPermission().then(function (permission) {{
+                if (permission === "granted") {{
+                    new Notification("{titulo}", {{ body: "{mensaje}", icon: "⚽" }});
+                }}
+            }});
+        }}
+    }}
+    try {{
+        let ctx = new (window.AudioContext || window.webkitAudioContext)();
+        let osc = ctx.createOscillator();
+        let gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.3);
+    }} catch(e) {{ console.log(e); }}
+    </script>
+    """
+    components.html(js_code, height=0, width=0)
 
 # =========================================================
 # 3. MODELADO MATEMÁTICO: POISSON, DIXON-COLES & LIVE POISSON
@@ -707,6 +742,10 @@ if 'creditos_restantes_af' not in st.session_state:
 if 'overrides_live' not in st.session_state:
     st.session_state.overrides_live = {}
 
+# MEJORA 2: Timestamp del último escaneo
+if 'ultimo_escaneo_ts' not in st.session_state:
+    st.session_state.ultimo_escaneo_ts = None
+
 # Carga de preferencias persistentes del usuario
 if 'casas_preferidas' not in st.session_state:
     st.session_state.casas_preferidas = user_config.get('casas_preferidas', [])
@@ -922,19 +961,17 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
 
         horas = (fecha_utc - ahora_utc).total_seconds() / 3600
         
-        # Detección de In-Play dinámica según tiempo transcurrido
         es_en_vivo = partido.get('in_play', False) or (horas <= 0 and horas >= -2.2)
         marcador_local = partido.get('scores', {}).get('home', 0) if es_en_vivo else None
         marcador_visita = partido.get('scores', {}).get('away', 0) if es_en_vivo else None
         
-        # Estimación en tiempo real del minuto de juego si transcurrió el kickoff
         minuto_estimado = 30
         if es_en_vivo and horas < 0:
             minutos_transcurridos = int(abs(horas) * 60)
             if minutos_transcurridos <= 45:
                 minuto_estimado = max(1, minutos_transcurridos)
             elif minutos_transcurridos <= 60:
-                minuto_estimado = 45 # Entretiempo
+                minuto_estimado = 45 
             else:
                 minuto_estimado = min(89, minutos_transcurridos - 15)
         
@@ -995,7 +1032,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         cuotas_promedio_dict = {op: sum(t[0] for t in tuplas)/len(tuplas) for op, tuplas in cuotas_globales.items() if tuplas}
         overround = sum([1 / cp for cp in cuotas_promedio_dict.values()]) if cuotas_promedio_dict else 1.0
 
-        # Revisión de sobreescritura manual en la interfaz
         override_data = st.session_state.overrides_live.get(partido_id, {})
         minuto_final_calc = override_data.get('minuto', minuto_num)
         goles_loc_final = override_data.get('goles_loc', marcador_local or 0)
@@ -1023,12 +1059,18 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                 "es_value": ev > 0.02
             }
 
+            # MEJORA 3: Disparo de notificaciones nativas JS si +EV > 10%
+            if ev > 0.10:
+                disparar_alerta_sonora_y_notificacion(
+                    f"🔥 OPORTUNIDAD ALTO VALOR (+{round(ev*100,1)}%)",
+                    f"{home} vs {away} - {opcion} @ {cuota_max} en {bookie_max}"
+                )
+
             c_prev = datos_previos.get(partido_id, {}).get("mercados", {}).get(mercado, {}).get("max_cuotas", {}).get(opcion, cuota_max)
             if cuota_max < c_prev: variaciones_dict[opcion] = "📉 Bajando"
             elif cuota_max > c_prev: variaciones_dict[opcion] = "📈 Subiendo"
             else: variaciones_dict[opcion] = "➡️ Estable"
 
-            # Registro de histórico de cuotas para Sparkline Chart
             clave_hist = f"{partido_id}_{mercado}_{opcion}"
             if clave_hist not in st.session_state.historico_cuotas_live:
                 st.session_state.historico_cuotas_live[clave_hist] = []
@@ -1037,6 +1079,13 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                 st.session_state.historico_cuotas_live[clave_hist].pop(0)
 
         info_surebet = detectar_surebet(max_cuotas)
+
+        # MEJORA 3: Disparo de notificación nativa si SureBet
+        if info_surebet.get("es_surebet"):
+            disparar_alerta_sonora_y_notificacion(
+                f"💰 SUREBET ENCONTRADA (+{round(info_surebet['lucro'], 2)}%)",
+                f"{home} vs {away} en {mercado}"
+            )
 
         if max_cuotas:
             if partido_id not in diccionario_consolidador:
@@ -1098,6 +1147,16 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
     st.caption("Escaneo de cuotas en tiempo real · Modelo Dixon-Coles / Poisson Live · SureBets · Coberturas · Dropping Odds")
 
+    # MEJORA 2: Indicador visual de Timestamp y Stale Data Warning
+    if st.session_state.ultimo_escaneo_ts is not None:
+        segundos_transcurridos = int(time.time() - st.session_state.ultimo_escaneo_ts)
+        hora_escaneo = datetime.fromtimestamp(st.session_state.ultimo_escaneo_ts).strftime("%H:%M:%S")
+        
+        if segundos_transcurridos > 120:
+            st.error(f"🚨 **ATENCIÓN: CUOTAS DESACTUALIZADAS (STALE DATA)**. Último escaneo a las **{hora_escaneo}** (hace {segundos_transcurridos}s). Las cuotas en vivo cambian rápido; vuelve a escanear.")
+        else:
+            st.info(f"⏱️ **Cuotas actualizadas a las {hora_escaneo}** (hace {segundos_transcurridos} segundos).")
+
     if consultar:
         if (len(ligas_sels) > 0 or len(ligas_af_sels) > 0) and len(mercados_sels) > 0:
             st.cache_data.clear()
@@ -1140,6 +1199,9 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             st.session_state.datos_cargados = consolidador
             st.session_state.claves_auto = set()
             st.session_state.version_ticket += 1
+            
+            # MEJORA 2: Actualizar timestamp de escaneo
+            st.session_state.ultimo_escaneo_ts = time.time()
 
             if st.session_state.get('auto_alertas_telegram', False):
                 alertas_ev = []
@@ -1251,7 +1313,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                         st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
                                         st.markdown(f"<span class='kickoff-chip'>📅 {part['fecha_str']}</span>", unsafe_allow_html=True)
 
-                                # PANEL INTERACTIVO DE CONTROL EN VIVO (Ajuste de Minuto / Marcador)
+                                # PANEL INTERACTIVO DE CONTROL EN VIVO (MEJORA 1: Callbacks on_change)
                                 if part.get('es_en_vivo'):
                                     with st.expander("⏱️ Ajustar Minuto y Marcador en Vivo (Live Override)", expanded=False):
                                         c_ov1, c_ov2, c_ov3 = st.columns([2, 1, 1])
@@ -1259,16 +1321,19 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                         g_loc_act = override_data.get('goles_loc', part.get('marcador_local', 0))
                                         g_vis_act = override_data.get('goles_vis', part.get('marcador_visita', 0))
                                         
-                                        nuevo_minuto = c_ov1.slider("Minuto real del partido:", min_value=1, max_value=90, value=min_actual, key=f"sl_min_{part['id']}")
-                                        goles_l = c_ov2.number_input(f"Goles {part['local']}:", min_value=0, value=int(g_loc_act), key=f"gl_{part['id']}")
-                                        goles_v = c_ov3.number_input(f"Goles {part['visitante']}:", min_value=0, value=int(g_vis_act), key=f"gv_{part['id']}")
+                                        def actualizar_live_state(p_id=part['id']):
+                                            st.session_state.overrides_live[p_id] = {
+                                                'minuto': st.session_state[f"sl_min_{p_id}"],
+                                                'goles_loc': st.session_state[f"gl_{p_id}"],
+                                                'goles_vis': st.session_state[f"gv_{p_id}"]
+                                            }
+
+                                        nuevo_minuto = c_ov1.slider("Minuto real del partido:", min_value=1, max_value=90, value=min_actual, key=f"sl_min_{part['id']}", on_change=actualizar_live_state)
+                                        goles_l = c_ov2.number_input(f"Goles {part['local']}:", min_value=0, value=int(g_loc_act), key=f"gl_{part['id']}", on_change=actualizar_live_state)
+                                        goles_v = c_ov3.number_input(f"Goles {part['visitante']}:", min_value=0, value=int(g_vis_act), key=f"gv_{part['id']}", on_change=actualizar_live_state)
                                         
                                         if st.button("🔄 Recalcular Modelo Poisson Live", key=f"btn_recalc_{part['id']}", type="primary"):
-                                            st.session_state.overrides_live[part['id']] = {
-                                                'minuto': nuevo_minuto,
-                                                'goles_loc': goles_l,
-                                                'goles_vis': goles_v
-                                            }
+                                            actualizar_live_state(part['id'])
                                             part['marcador_local'] = goles_l
                                             part['marcador_visita'] = goles_v
                                             part['minuto_num'] = nuevo_minuto
@@ -2044,7 +2109,7 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
             st.caption("Escanea partidos desde el panel lateral para habilitar este módulo.")
 
 # ---------------------------------------------------------
-# PESTAÑA 7: GENERADOR DE CARTEL
+# PESTAÑA 7: GENERADOR DE CARTEL Y DESCARGA PNG (MEJORA 4)
 # ---------------------------------------------------------
 elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.title("🎨 Generador Visual de Pronósticos para Redes")
@@ -2079,7 +2144,7 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
             cuota_acumulada_cartel *= float(ap['cuota'])
             prob_combinada_cartel *= (float(ap['prob_real']) / 100.0)
             html_eventos += (
-                f"<div style='margin-bottom: 12px; text-align: left;'>"
+                f"<div style='margin-bottom: 12px; text-align: left; background: rgba(255,255,255,0.03); padding: 8px 12px; border-radius: 8px; border: 1px solid #232a38;'>"
                 f"⚽ <b>{ap['evento']}</b><br>"
                 f"🎯 Selección: <span style='color:#00d2d3; font-weight:bold;'>{ap['seleccion']} (x{ap['cuota']})</span>"
                 f"</div>"
@@ -2118,24 +2183,74 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     with c_t2:
         cuota_txt = f"x{round(cuota_acumulada_cartel, 2)}" if cuota_acumulada_cartel > 0 else "x1.00"
 
-        cartel_html = (
-            f"<div style='background: linear-gradient(135deg, #12161f 0%, #0a0d13 100%); "
-            f"border: 2px solid #00d2d3; padding: 20px; border-radius: 15px; text-align: center;'>"
-            f"<h3 style='color: #00d2d3; margin-top: 0; margin-bottom: 5px;'>{titulo_cartel}</h3>"
-            f"<p style='color: #8a94a6; font-size: 12px; margin-bottom: 15px;'>"
-            f"Analista: <b>{analista_nombre}</b> | Stake Recomendado: <b>{monto_sugerido}/10</b></p>"
-            f"<hr style='border: 0; border-top: 1px solid #232a38; margin: 15px 0;'>"
-            f"{html_eventos}"
-            f"<hr style='border: 0; border-top: 1px solid #232a38; margin: 15px 0;'>"
-            f"<h2 style='color: #ffffff; font-family: sans-serif; margin: 10px 0;'>CUOTA TOTAL: {cuota_txt}</h2>"
-            f"<small style='color: #00d2d3;'>💵 Inversión sugerida: ${round(stake_sugerido_monto, 2)} USD</small>"
-            f"</div>"
-        )
-        
-        st.markdown(cartel_html, unsafe_allow_html=True)
+        # MEJORA 4: Canvas HTML/JS con html2canvas para exportar la imagen en PNG nativo a 1080x1080
+        cartel_componente_html = f"""
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+        <div id="cartel_container" style="
+            width: 480px; 
+            min-height: 480px; 
+            background: linear-gradient(135deg, #0b0e14 0%, #171c27 100%); 
+            border: 2px solid #00d2d3; 
+            border-radius: 16px; 
+            padding: 24px; 
+            box-sizing: border-box; 
+            font-family: 'Inter', sans-serif; 
+            color: white; 
+            margin: 0 auto;
+            box-shadow: 0 10px 30px rgba(0,210,211,0.15);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        ">
+            <div>
+                <div style="text-align: center; margin-bottom: 15px;">
+                    <span style="background: rgba(0,210,211,0.15); color: #00d2d3; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">PREDICCIÓN EXCLUSIVA</span>
+                    <h3 style="color: #00d2d3; margin: 10px 0 4px 0; font-size: 18px; font-weight: 800;">{titulo_cartel}</h3>
+                    <p style="color: #8a94a6; font-size: 12px; margin: 0;">Tipster: <b style="color:#ffffff;">{analista_nombre}</b> | Stake: <b style="color:#feca57;">{monto_sugerido}/10</b></p>
+                </div>
+                <hr style="border: 0; border-top: 1px solid #232a38; margin: 12px 0;">
+                <div style="font-size: 13px;">
+                    {html_eventos}
+                </div>
+            </div>
+            <div>
+                <hr style="border: 0; border-top: 1px solid #232a38; margin: 12px 0;">
+                <div style="text-align: center; background: rgba(0,210,211,0.08); border-radius: 12px; padding: 12px; border: 1px dashed rgba(0,210,211,0.3);">
+                    <div style="color: #8a94a6; font-size: 11px; font-weight: 700; text-transform: uppercase;">Cuota Total Acumulada</div>
+                    <div style="color: #ffffff; font-size: 28px; font-weight: 800; font-family: sans-serif;">{cuota_txt}</div>
+                    <div style="color: #00d2d3; font-size: 11px; margin-top: 2px;">💵 Inversión Recomendada: ${round(stake_sugerido_monto, 2)} USD</div>
+                </div>
+            </div>
+        </div>
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.button("📸 Descargar Imagen del Cartel (PNG)", use_container_width=True)
+        <div style="text-align: center; margin-top: 15px;">
+            <button onclick="descargarPNG()" style="
+                background: linear-gradient(90deg, #00b3b4, #00d2d3); 
+                color: black; 
+                border: none; 
+                padding: 10px 20px; 
+                border-radius: 8px; 
+                font-weight: 800; 
+                font-size: 13px; 
+                cursor: pointer; 
+                box-shadow: 0 4px 15px rgba(0,210,211,0.3);
+                width: 100%;
+            ">📸 Descargar Imagen del Cartel (PNG Nativo 1080x1080)</button>
+        </div>
+
+        <script>
+        function descargarPNG() {{
+            const container = document.getElementById('cartel_container');
+            html2canvas(container, {{ scale: 2.2, backgroundColor: '#0b0e14' }}).then(canvas => {{
+                let link = document.createElement('a');
+                link.download = 'Cartel_Parlay_Pro.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }});
+        }}
+        </script>
+        """
+        components.html(cartel_componente_html, height=580)
 
 # ---------------------------------------------------------
 # PESTAÑA 8: AUDITORÍA Y BITÁCORA PRO
