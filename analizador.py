@@ -1921,13 +1921,47 @@ elif vista_seleccionada == "🔥 CAZADOR +EV & DROPPING":
         st.caption("No se han detectado caídas drásticas de cuotas en las consultas consecutivas recientes.")
 
 # ---------------------------------------------------------
-# PESTAÑA 6: NOTICIAS & BAJAS IMPORTANTES
+# PESTAÑA 6: NOTICIAS, BAJAS Y ALINEACIONES REALES
 # ---------------------------------------------------------
 elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
     st.title("📰 Centro de Bajas, Lesiones y Alineaciones")
     st.caption("Información contextual en tiempo real mediante API-Football para validar tus selecciones.")
 
     dict_partidos = st.session_state.get('datos_cargados', {})
+
+    @st.cache_data(ttl=3600)
+    def obtener_id_equipo_af_local(team_name):
+        if not AF_API_KEY or not team_name: return None
+        try:
+            r = requests.get(f"{AF_BASE_URL}/teams", headers=af_headers(), params={"search": team_name}, timeout=10)
+            _actualizar_creditos_af(r.headers)
+            data = r.json().get("response", [])
+            return data[0]["team"]["id"] if data else None
+        except Exception:
+            return None
+
+    @st.cache_data(ttl=1800)
+    def buscar_fixture_id_af(team1_id, team2_id):
+        if not AF_API_KEY or not team1_id or not team2_id: return None
+        try:
+            r = requests.get(f"{AF_BASE_URL}/fixtures", headers=af_headers(), params={"headtohead": f"{team1_id}-{team2_id}"}, timeout=10)
+            _actualizar_creditos_af(r.headers)
+            res = r.json().get("response", [])
+            if res:
+                return res[0]["fixture"]["id"]
+            return None
+        except Exception:
+            return None
+
+    @st.cache_data(ttl=600)
+    def consultar_lineups_af(fixture_id):
+        if not AF_API_KEY or not fixture_id: return []
+        try:
+            r = requests.get(f"{AF_BASE_URL}/fixtures/lineups", headers=af_headers(), params={"fixture": fixture_id}, timeout=10)
+            _actualizar_creditos_af(r.headers)
+            return r.json().get("response", [])
+        except Exception:
+            return []
 
     col_info_1, col_info_2 = st.columns(2)
 
@@ -1936,29 +1970,19 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
         
         @st.cache_data(ttl=3600)
         def consultar_lesiones_af(team_name):
-            if not AF_API_KEY or not team_name:
-                return []
+            if not AF_API_KEY or not team_name: return []
             try:
-                r_team = requests.get(f"{AF_BASE_URL}/teams", headers=af_headers(), params={"search": team_name}, timeout=10)
-                _actualizar_creditos_af(r_team.headers)
-                data_team = r_team.json().get("response", [])
-                if not data_team:
-                    return []
-                team_id = data_team[0]["team"]["id"]
-
-                r_injuries = requests.get(f"{AF_BASE_URL}/injuries", headers=af_headers(), params={"team": team_id}, timeout=10)
+                t_id = obtener_id_equipo_af_local(team_name)
+                if not t_id: return []
+                r_injuries = requests.get(f"{AF_BASE_URL}/injuries", headers=af_headers(), params={"team": t_id}, timeout=10)
                 _actualizar_creditos_af(r_injuries.headers)
                 return r_injuries.json().get("response", [])
             except Exception:
                 return []
 
         if dict_partidos:
-            equipos_escaneados = set()
-            for part in dict_partidos.values():
-                equipos_escaneados.add(part['local'])
-                equipos_escaneados.add(part['visitante'])
-
-            equipo_sel = st.selectbox("Selecciona un equipo de la lista escaneada:", list(equipos_escaneados))
+            equipos_escaneados = sorted(list(set([p['local'] for p in dict_partidos.values()] + [p['visitante'] for p in dict_partidos.values()])))
+            equipo_sel = st.selectbox("Selecciona un equipo de la lista escaneada:", equipos_escaneados)
             
             if equipo_sel:
                 with st.spinner(f"Consultando bajas de {equipo_sel}..."):
@@ -1976,14 +2000,31 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
             st.info("ℹ️ Haz clic en **'🔍 Escanear Mercado Now'** para cargar los equipos disponibles y consultar sus bajas.")
 
     with col_info_2:
-        st.subheader("📋 Estado del Encuentro y Alineaciones")
+        st.subheader("📋 Alineaciones Confirmadas")
         
         if dict_partidos:
-            partido_lista = [f"{p['local']} vs {p['visitante']}" for p in dict_partidos.values()]
-            partido_sel = st.selectbox("Selecciona un partido para revisar alineación:", partido_lista)
+            partido_dict_map = {f"{p['local']} vs {p['visitante']}": p for p in dict_partidos.values()}
+            partido_sel_str = st.selectbox("Selecciona un partido para revisar alineación:", list(partido_dict_map.keys()))
             
-            st.info("🌦️ **Condiciones Ambientales:** Consulta previa a partido disponible en actualización de cuotas.")
-            st.warning("⚠️ **Alineaciones Confirmadas:** Las alineaciones oficiales se publican automáticamente 1 hora antes de que inicie el partido.")
+            p_obj = partido_dict_map[partido_sel_str]
+            
+            with st.spinner("Buscando alineaciones en vivo..."):
+                id_loc = obtener_id_equipo_af_local(p_obj['local'])
+                id_vis = obtener_id_equipo_af_local(p_obj['visitante'])
+                fix_id = buscar_fixture_id_af(id_loc, id_vis) if (id_loc and id_vis) else None
+                lineups = consultar_lineups_af(fix_id) if fix_id else []
+
+            if lineups and len(lineups) >= 2:
+                for team_lineup in lineups:
+                    t_name = team_lineup.get("team", {}).get("name", "Equipo")
+                    formation = team_lineup.get("formation", "N/A")
+                    start_xi = team_lineup.get("startXI", [])
+                    
+                    with st.expander(f"👕 {t_name} (Formación: {formation})", expanded=True):
+                        jugadores = [f"**#{j['player']['number']}** {j['player']['name']} ({j['player']['pos']})" for j in start_xi]
+                        st.write(" • ".join(jugadores) if jugadores else "Sin datos de jugadores.")
+            else:
+                st.warning(f"⚠️ Las alineaciones oficiales para **{partido_sel_str}** aún no se han publicado en la API. Suelen estar disponibles 45-60 minutos antes del partido.")
         else:
             st.caption("Escanea partidos desde el panel lateral para habilitar este módulo.")
 
