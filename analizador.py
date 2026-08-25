@@ -102,7 +102,6 @@ def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1
             tau = dixon_coles_factor(i, j, lambda_local, lambda_visita) if usar_dixon_coles else 1.0
             matriz_prob[i, j] = p_base * tau
             
-    # Normalización de la matriz
     soma = np.sum(matriz_prob)
     if soma > 0:
         matriz_prob /= soma
@@ -130,7 +129,6 @@ def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1
 # 4. VALIDADOR, ARBITRAJE, SHARPE RATIO & RUINA MONTE CARLO
 # =========================================================
 def detectar_surebet(cuotas_max_dict: Dict[str, float]) -> Dict[str, Any]:
-    """Suma las probabilidades implícitas de las máximas cuotas de un mercado completo."""
     if not cuotas_max_dict or len(cuotas_max_dict) < 2:
         return {"es_surebet": False, "overround": 1.0, "lucro": 0.0}
     
@@ -141,14 +139,12 @@ def detectar_surebet(cuotas_max_dict: Dict[str, float]) -> Dict[str, Any]:
     return {"es_surebet": es_surebet, "overround": overround, "lucro": lucro}
 
 def calcular_sharpe_parlay(cuota_total: float, prob_combinada: float) -> float:
-    """Calcula el ratio de Sharpe del Parlay ajustando el Retorno Esperado contra la Desviación Estándar."""
     ev = (cuota_total * prob_combinada) - 1.0
     varianza = (prob_combinada * ((cuota_total - 1.0) ** 2)) + ((1.0 - prob_combinada) * ((-1.0) ** 2))
     desviacion = math.sqrt(varianza) if varianza > 0 else 1.0
     return ev / desviacion
 
 def simular_riesgo_ruina_banca(bankroll_inicial: float, stake_promedio: float, prob_exito: float, cuota_prom: float, num_apuestas: int = 200, sims: int = 2000) -> Dict[str, float]:
-    """Ejecuta simulación de ruina de banca a largo plazo mediante Monte Carlo."""
     bancarrota_count = 0
     final_bankrolls = []
     
@@ -159,7 +155,6 @@ def simular_riesgo_ruina_banca(bankroll_inicial: float, stake_promedio: float, p
                 bancarrota_count += 1
                 b = 0
                 break
-            # Simular apuesta
             if np.random.rand() < prob_exito:
                 b += stake_promedio * (cuota_prom - 1.0)
             else:
@@ -518,10 +513,11 @@ AF_LEAGUE_IDS = {
     "🇵🇾 División Profesional Paraguay - Clausura": 252,
 }
 
+# CORRECCIÓN DE LLAVE OFICIAL DE LA LIBERTADORES
 ligas_top = {
     "🇪🇺 Champions League (Europa)": "soccer_uefa_champions_league",
     "🇪🇺 Europa League (Europa)": "soccer_uefa_europa_league",
-    "🏆 Copa Libertadores (CONMEBOL)": "soccer_conmebol_copa_distribuidores",
+    "🏆 Copa Libertadores (CONMEBOL)": "soccer_conmebol_copa_libertadores",
     "🥈 Copa Sudamericana (CONMEBOL)": "soccer_conmebol_copa_sudamericana"
 }
 
@@ -629,8 +625,12 @@ with st.sidebar:
             default=[]
         )
         mercados_sels = st.multiselect("Mercados:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
-        tiempo_sel = st.selectbox("Ventana de tiempo:", ["24 Horas", "48 Horas", "72 Horas"], index=1)
-        limite_h = int(tiempo_sel.split()[0])
+        tiempo_sel = st.selectbox("Ventana de tiempo:", ["24 Horas", "48 Horas", "72 Horas", "7 Días", "14 Días"], index=2)
+        
+        if "Días" in tiempo_sel:
+            limite_h = int(tiempo_sel.split()[0]) * 24
+        else:
+            limite_h = int(tiempo_sel.split()[0])
 
     # Acordeón 3: Gestión Financiera
     with st.expander("🧮 Banca & Criterio Kelly"):
@@ -763,7 +763,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         cuotas_promedio_dict = {op: sum(t[0] for t in tuplas)/len(tuplas) for op, tuplas in cuotas_globales.items() if tuplas}
         overround = sum([1 / cp for cp in cuotas_promedio_dict.values()]) if cuotas_promedio_dict else 1.0
 
-        # Implementación de Dixon-Coles activada por defecto
         probs_poisson = calcular_modelo_poisson(1.45, 1.10, usar_dixon_coles=True)
 
         for opcion, tuplas in cuotas_globales.items():
@@ -788,7 +787,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             elif cuota_max > c_prev: variaciones_dict[opcion] = "📈 Subiendo"
             else: variaciones_dict[opcion] = "➡️ Estable"
 
-        # Detección de SureBet en el mercado procesado
         info_surebet = detectar_surebet(max_cuotas)
 
         if max_cuotas:
@@ -834,21 +832,23 @@ with pestana_radar:
             with st.status(f"🔄 Consultando {total_ligas} liga(s)...", expanded=True) as status_consulta:
                 for idx_liga, liga in enumerate(ligas_sels, start=1):
                     status_consulta.update(label=f"🔄 Consultando ({idx_liga}/{total_ligas}): {liga}")
-                    sport_key = todas_las_ligas[liga]
-                    for m_sel in mercados_featured:
-                        raw_data = consultar_api_odds(sport_key, market_key=diccionario_mercados[m_sel])
-                        procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
+                    sport_key = todas_las_ligas.get(liga)
+                    
+                    if sport_key:
+                        for m_sel in mercados_featured:
+                            raw_data = consultar_api_odds(sport_key, market_key=diccionario_mercados[m_sel])
+                            procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga, consolidador)
 
-                    if "Doble Oportunidad" in mercados_sels:
-                        base_h2h = consultar_api_odds(sport_key, market_key="h2h")
-                        procesar_e_inyectar_mercado(base_h2h, "Doble Oportunidad", limite_h, liga, consolidador)
+                        if "Doble Oportunidad" in mercados_sels:
+                            base_h2h = consultar_api_odds(sport_key, market_key="h2h")
+                            procesar_e_inyectar_mercado(base_h2h, "Doble Oportunidad", limite_h, liga, consolidador)
 
-                    if "Ambos Anotan (BTTS)" in mercados_sels:
-                        base_para_filtrar = consultar_api_odds(sport_key, market_key="h2h")
-                        for p_base in filtrar_partidos_por_fecha(base_para_filtrar, limite_h):
-                            datos_evento = consultar_api_odds_evento(sport_key, p_base['id'], "btts")
-                            if datos_evento:
-                                procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
+                        if "Ambos Anotan (BTTS)" in mercados_sels:
+                            base_para_filtrar = consultar_api_odds(sport_key, market_key="h2h")
+                            for p_base in filtrar_partidos_por_fecha(base_para_filtrar, limite_h):
+                                datos_evento = consultar_api_odds_evento(sport_key, p_base['id'], "btts")
+                                if datos_evento:
+                                    procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
 
                 status_consulta.update(label=f"✅ Consulta completa: {len(consolidador)} partidos procesados.", state="complete")
 
@@ -962,7 +962,6 @@ with pestana_radar:
                                     with sub_tabs[m_idx]:
                                         m_info = part['mercados'][text_m]
                                         
-                                        # Alerta de Arbitraje / SureBet
                                         if m_info.get("surebet", {}).get("es_surebet", False):
                                             st.success(f"💰 **SUREBET / ARBITRAJE DETECTADO!** Rendimiento asegurable: +{round(m_info['surebet']['lucro'], 2)}%")
 
@@ -1274,7 +1273,6 @@ with pestana_verificador:
 with pestana_historial:
     st.title("📊 Módulo de Auditoría Financiera Avanzada Pro")
 
-    # Panel Superior de Gestión Rápida de Respaldo
     col_exp_j, col_imp_j, col_exp_csv = st.columns(3)
     with col_exp_j:
         json_data = json.dumps(st.session_state.historial_apuestas, ensure_ascii=False, indent=4)
@@ -1352,7 +1350,6 @@ with pestana_historial:
 
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # Simulación de Riesgo de Ruina sobre la Banca
         with st.expander("📊 Stress Test de Banca (Probabilidad de Ruina a 200 Apuestas)"):
             if len(terminados) > 0:
                 prob_acierto_hist = (len(ganados) / len(terminados))
