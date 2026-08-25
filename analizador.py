@@ -999,7 +999,6 @@ with pestana_radar:
                                         if m_info.get("surebet", {}).get("es_surebet", False):
                                             st.success(f"💰 **SUREBET / ARBITRAJE DETECTADO!** Rendimiento asegurable: +{round(m_info['surebet']['lucro'], 2)}%")
 
-                                        # ORDENAR OPCIONES: Local -> Empate -> Visitante para 1X2
                                         todas_opciones = list(m_info['max_cuotas'].keys())
                                         if text_m == "1X2 (Ganador)":
                                             orden_deseado = ["Local", "Empate", "Visitante"]
@@ -1050,7 +1049,6 @@ with pestana_radar:
                         st.markdown(f"<div class='ticket-item'>✔️ <b>{ap['evento']}</b><br>➔ <code>{ap['seleccion']}</code> | <span class='ticket-cuota-tag'>x{ap['cuota']}</span></div>", unsafe_allow_html=True)
                         texto_whatsapp += f"⚽ *{ap['evento']}*\n🎯 {ap['mercado']}: *{ap['seleccion']}* (x{ap['cuota']}) - 🏢 {ap['casa']}\n\n"
 
-                    # CAMPO DIRECTO PARA INGRESAR LA INVERSIÓN
                     monto_ticket = st.number_input("💵 Inversión / Importe a Apostar ($):", min_value=1.0, value=float(monto_inversion), step=1.0, key="monto_ticket_directo")
 
                     b = cuota_acumulada - 1.0
@@ -1402,7 +1400,6 @@ with pestana_value:
 
     st.subheader("🎯 Oportunidades +EV Destacadas en Tiempo Real")
 
-    # Extraer datos reales cargados en memoria
     dict_partidos = st.session_state.get('datos_cargados', {})
     
     lista_valuebets_reales = []
@@ -1437,7 +1434,6 @@ with pestana_value:
     st.subheader("📉 Alertas de Dropping Odds (Cuotas en Caída Libre)")
     st.caption("Señala eventos donde el dinero del mercado masivo está empujando las líneas a la baja.")
     
-    # Mapeo de variaciones detectadas entre escaneos consecutivos
     lista_dropping = []
     if dict_partidos:
         for p_id, part in dict_partidos.items():
@@ -1459,25 +1455,71 @@ with pestana_value:
         st.caption("No se han detectado caídas drásticas de cuotas en las consultas consecutivas recientes.")
 
 # ---------------------------------------------------------
-# PESTAÑA 6: NOTICIAS & BAJAS IMPORTANTES
+# PESTAÑA 6: NOTICIAS & BAJAS IMPORTANTES (INTEGRADO CON API-FOOTBALL)
 # ---------------------------------------------------------
 with pestana_noticias:
     st.title("📰 Centro de Bajas, Lesiones y Alineaciones")
-    st.caption("Información contextual crucial para validar tus selecciones antes de realizar la apuesta.")
+    st.caption("Información contextual en tiempo real mediante API-Football para validar tus selecciones.")
 
-    c_n1, c_n2 = st.columns(2)
-    with c_n1:
-        st.subheader("🩹 Lesionados & Sancionados Confirmados")
-        st.markdown("""
-        * 🔴 **Deportes Tolima:** J. Lucumí (Lesión Muscular - Descartado)
-        * 🟡 **Independiente del Valle:** C. Zavala (Duda por molestia en tobillo)
-        * 🔴 **Bodo/Glimt:** P. Berg (Acumulación de Amarillas - Suspendido)
-        """)
+    dict_partidos = st.session_state.get('datos_cargados', {})
 
-    with c_n2:
-        st.subheader("📋 Novedades de Última Hora")
-        st.info("🌦️ **Condiciones del Campo:** Lluvia moderada prevista en Sangolquí durante la hora del encuentro entre Independiente del Valle y Tolima.")
-        st.success("✅ **Alineación:** Independiente del Valle mantendrá su esquema habitual 4-3-3.")
+    col_info_1, col_info_2 = st.columns(2)
+
+    with col_info_1:
+        st.subheader("🩹 Lesionados & Sancionados Reales")
+        
+        @st.cache_data(ttl=3600)
+        def consultar_lesiones_af(team_name):
+            if not AF_API_KEY or not team_name:
+                return []
+            try:
+                r_team = requests.get(f"{AF_BASE_URL}/teams", headers=af_headers(), params={"search": team_name}, timeout=10)
+                _actualizar_creditos_af(r_team.headers)
+                data_team = r_team.json().get("response", [])
+                if not data_team:
+                    return []
+                team_id = data_team[0]["team"]["id"]
+
+                r_injuries = requests.get(f"{AF_BASE_URL}/injuries", headers=af_headers(), params={"team": team_id}, timeout=10)
+                _actualizar_creditos_af(r_injuries.headers)
+                return r_injuries.json().get("response", [])
+            except Exception:
+                return []
+
+        if dict_partidos:
+            equipos_escaneados = set()
+            for part in dict_partidos.values():
+                equipos_escaneados.add(part['local'])
+                equipos_escaneados.add(part['visitante'])
+
+            equipo_sel = st.selectbox("Selecciona un equipo de la lista escaneada:", list(equipos_escaneados))
+            
+            if equipo_sel:
+                with st.spinner(f"Consultando bajas de {equipo_sel}..."):
+                    lesiones = consultar_lesiones_af(equipo_sel)
+                    
+                if lesiones:
+                    for item in lesiones[:10]:
+                        player = item.get("player", {})
+                        reason = player.get("reason", "No especificado")
+                        type_injury = player.get("type", "Baja")
+                        st.markdown(f"🔴 **{player.get('name', 'Jugador')}:** {type_injury} ({reason})")
+                else:
+                    st.success(f"✅ No se reportan bajas oficiales registradas recientemente para **{equipo_sel}**.")
+        else:
+            st.info("ℹ️ Haz clic en **'🔍 Escanear Mercado Now'** para cargar los equipos disponibles y consultar sus bajas.")
+
+    with col_info_2:
+        st.subheader("📋 Estado del Encuentro y Alineaciones")
+        
+        if dict_partidos:
+            partido_lista = [f"{p['local']} vs {p['visitante']}" for p in dict_partidos.values()]
+            partido_sel = st.selectbox("Selecciona un partido para revisar alineación:", partido_lista)
+            
+            st.info("🌦️ **Condiciones Ambientales:** Consulta previa a partido disponible en actualización de cuotas.")
+            st.warning("⚠️ **Alineaciones Confirmadas:** Las alineaciones oficiales se publican automáticamente 1 hora antes de que inicie el partido.")
+        else:
+            st.caption("Escanea partidos desde el panel lateral para habilitar este módulo.")
 
 # ---------------------------------------------------------
 # PESTAÑA 7: GENERADOR DE CARTEL / EXPORTADOR TIPSTER
