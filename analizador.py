@@ -628,7 +628,7 @@ with st.sidebar:
     with st.expander("🧮 Banca & Criterio Kelly"):
         bankroll_total = st.number_input("Banca Total ($):", min_value=10.0, value=200.0, step=10.0)
         fraccion_kelly = st.slider("Fracción de Kelly:", min_value=0.1, max_value=1.0, value=0.25, step=0.05)
-        monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0)
+        monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0, key="monto_inversion_base")
 
     consultar = st.button("🔍 Escanear Mercado Now", type="primary", use_container_width=True)
 
@@ -985,8 +985,15 @@ with pestana_radar:
                                         if m_info.get("surebet", {}).get("es_surebet", False):
                                             st.success(f"💰 **SUREBET / ARBITRAJE DETECTADO!** Rendimiento asegurable: +{round(m_info['surebet']['lucro'], 2)}%")
 
-                                        sub_cols = st.columns(len(m_info['max_cuotas']))
-                                        for idx, (opcion, cuota_m) in enumerate(m_info['max_cuotas'].items()):
+                                        # ORDENAR OPCIONES: Local -> Empate -> Visitante para 1X2
+                                        todas_opciones = list(m_info['max_cuotas'].keys())
+                                        if text_m == "1X2 (Ganador)":
+                                            orden_deseado = ["Local", "Empate", "Visitante"]
+                                            todas_opciones = [o for o in orden_deseado if o in todas_opciones] + [o for o in todas_opciones if o not in orden_deseado]
+
+                                        sub_cols = st.columns(len(todas_opciones))
+                                        for idx, opcion in enumerate(todas_opciones):
+                                            cuota_m = m_info['max_cuotas'][opcion]
                                             with sub_cols[idx]:
                                                 val = m_info['value_bets'][opcion]
                                                 var_txt = m_info.get('variaciones', {}).get(opcion, "")
@@ -1029,13 +1036,16 @@ with pestana_radar:
                         st.markdown(f"<div class='ticket-item'>✔️ <b>{ap['evento']}</b><br>➔ <code>{ap['seleccion']}</code> | <span class='ticket-cuota-tag'>x{ap['cuota']}</span></div>", unsafe_allow_html=True)
                         texto_whatsapp += f"⚽ *{ap['evento']}*\n🎯 {ap['mercado']}: *{ap['seleccion']}* (x{ap['cuota']}) - 🏢 {ap['casa']}\n\n"
 
+                    # CAMPO DIRECTO PARAINGRESAR LA INVERSIÓN
+                    monto_ticket = st.number_input("💵 Inversión / Importe a Apostar ($):", min_value=1.0, value=float(monto_inversion), step=1.0, key="monto_ticket_directo")
+
                     b = cuota_acumulada - 1.0
                     p = prob_combinada
                     q = 1.0 - p
                     f_kelly = ((b * p) - q) / b if b > 0 else 0
                     stake_kelly = max(0.0, f_kelly * fraccion_kelly * bankroll_total)
 
-                    ganancia_neta = (cuota_acumulada * monto_inversion) - monto_inversion
+                    ganancia_neta = (cuota_acumulada * monto_ticket) - monto_ticket
                     sharpe_parlay = calcular_sharpe_parlay(cuota_acumulada, prob_combinada)
 
                     st.metric("Cuota Final", f"x{round(cuota_acumulada, 2)}")
@@ -1046,7 +1056,7 @@ with pestana_radar:
                     c_k2.metric("⚡ Sharpe Ratio Parlay", f"{round(sharpe_parlay, 3)}", help="Relación de Rentabilidad Esperanza vs Volatilidad (> 0.05 es aceptable)")
 
                     with st.expander("🛡️ Optimizador de Sistemas (TRIXIE / YANKEE)"):
-                        res_sistema = calcular_sistema_cobertura(apuestas_seleccionadas, monto_inversion)
+                        res_sistema = calcular_sistema_cobertura(apuestas_seleccionadas, monto_ticket)
                         if "tipo" in res_sistema and res_sistema["tipo"] != "Insuficientes eventos":
                             st.write(f"📐 **Sistema Detectado:** `{res_sistema['tipo']}`")
                             st.write(f"🔢 **Apuestas en Bloque:** `{res_sistema['apuestas']}` combinadas")
@@ -1058,9 +1068,9 @@ with pestana_radar:
                     with st.expander("🛡️ Calculadora de Cobertura Simple (Hedge)"):
                         st.caption("Usa esta herramienta si acertaste tus primeros eventos y deseas asegurar ganancias en el último partido.")
                         cuota_contra = st.number_input("Cuota Contra-opción último partido:", min_value=1.01, value=2.10, step=0.05)
-                        retorno_potencial = monto_inversion * cuota_acumulada
+                        retorno_potencial = monto_ticket * cuota_acumulada
                         stake_hedge = retorno_potencial / cuota_contra
-                        ganancia_asegurada = retorno_potencial - monto_inversion - stake_hedge
+                        ganancia_asegurada = retorno_potencial - monto_ticket - stake_hedge
                         st.info(f"👉 Apostar **${round(stake_hedge, 2)}** a la contraopción para **garantizar ${round(ganancia_asegurada, 2)} libres de riesgo**.")
 
                     if st.button("💾 Registrar en Bitácora", type="primary", use_container_width=True):
@@ -1070,7 +1080,7 @@ with pestana_radar:
                             "Liga": apuestas_seleccionadas[0]['liga'] if apuestas_seleccionadas else "Varias",
                             "Market": apuestas_seleccionadas[0]['mercado'] if len(apuestas_seleccionadas)==1 else "Multi-Mercado",
                             "Cuota": cuota_acumulada,
-                            "Inversión": monto_inversion,
+                            "Inversión": monto_ticket,
                             "Estado": "Pendiente",
                             "Ganancia Potencial": ganancia_neta
                         })
@@ -1085,7 +1095,7 @@ with pestana_radar:
                     """
                     for ap in apuestas_seleccionadas:
                         html_ticket += f"<p>⚽ <b>{ap['evento']}</b><br>🎯 {ap['mercado']} - {ap['seleccion']} (x{ap['cuota']})</p>"
-                    html_ticket += f"<hr><h4>Cuota Total: x{round(cuota_acumulada,2)} | Inversión: ${monto_inversion}</h4></div>"
+                    html_ticket += f"<hr><h4>Cuota Total: x{round(cuota_acumulada,2)} | Inversión: ${monto_ticket}</h4></div>"
                     
                     st.download_button(
                         "📄 Descargar Boleto HTML/PDF",
