@@ -11,6 +11,7 @@ import re
 import io
 import itertools
 from typing import Dict, List, Any, Optional
+from PIL import Image
 
 # =========================================================
 # 1. CONFIGURACIÓN DE PÁGINA Y CREDENCIALES
@@ -1125,7 +1126,7 @@ with pestana_radar:
                             st.toast("¡Enviado a Telegram!", icon="📤")
 
 # ---------------------------------------------------------
-# PESTAÑA 2: CALCULADORA EXTERNA & MONTE CARLO
+# PESTAÑA 2: CALCULADORA EXTERNA & MONTE CARLO (OCR CORREGIDO)
 # ---------------------------------------------------------
 with pestana_verificador:
     st.title("🧮 Analizador, Lector OCR & Simulador Monte Carlo")
@@ -1152,34 +1153,63 @@ with pestana_verificador:
             if modo_ingreso == "📸 Captura de Pantalla / OCR":
                 st.markdown("""
                     <div class="hint-box">
-                        💡 <b>Lector OCR Activo:</b> Sube la captura de pantalla de tu boleto de Betano u otra casa para extraer las cuotas automáticamente.
+                        💡 <b>Lector OCR Inteligente:</b> Sube la captura de tu boleto. El motor procesará la imagen y extraerá los eventos y cuotas.
                     </div>
                 """, unsafe_allow_html=True)
                 imagen_subida = st.file_uploader("🖼️ Selecciona la imagen del boleto:", type=["png", "jpg", "jpeg", "webp"])
                 
                 if imagen_subida is not None:
-                    contenido_bytes = imagen_subida.getvalue()
-                    encontrados = re.findall(rb'1\.[1-9]\d{1,2}|2\.[0-9]\d{1,2}', contenido_bytes)
-                    cuotas_extraidas = []
-                    
-                    for b_match in encontrados:
+                    try:
+                        image = Image.open(imagen_subida)
+                        texto_ocr = ""
+                        
+                        # Intento 1: pytesseract si está disponible en el entorno
                         try:
-                            val = float(b_match.decode('utf-8'))
-                            if 1.05 <= val <= 10.0 and val not in cuotas_extraidas:
-                                cuotas_extraidas.append(val)
+                            import pytesseract
+                            texto_ocr = pytesseract.image_to_string(image)
                         except Exception:
-                            pass
+                            # Intento 2: EasyOCR
+                            try:
+                                import easyocr
+                                reader = easyocr.Reader(['es', 'en'], gpu=False)
+                                image_np = np.array(image)
+                                result_ocr = reader.readtext(image_np, detail=0)
+                                texto_ocr = "\n".join(result_ocr)
+                            except Exception:
+                                texto_ocr = ""
 
-                    if len(cuotas_extraidas) >= 2:
-                        st.success(f"✅ Se detectaron {len(cuotas_extraidas)} cuotas reales en tu imagen:")
-                        for idx_c, c_f in enumerate(cuotas_extraidas):
-                            partidos_externos.append({"nombre": f"Selección #{idx_c+1}", "cuota": c_f})
-                    else:
-                        st.warning("⚠️ Ingresando los 2 partidos detectados de tu ticket de Betano:")
-                        cuotas_betano = [1.62, 1.55]
-                        nombres_betano = ["Independiente del Valle", "FK Bodo/Glimt"]
-                        for idx_c, c_f in enumerate(cuotas_betano):
-                            partidos_externos.append({"nombre": nombres_betano[idx_c], "cuota": c_f})
+                        if texto_ocr.strip():
+                            lineas = texto_ocr.strip().split('\n')
+                            for linea in lineas:
+                                linea_clean = linea.strip()
+                                if not linea_clean:
+                                    continue
+                                
+                                linea_norm = re.sub(r'([^\w\d]|^)[xX@]\s*(?=\d)', r'\1', linea_clean)
+                                linea_norm = linea_norm.replace(',', '.')
+                                
+                                cuotas_encontradas = re.findall(r'\b\d+\.\d+\b', linea_norm)
+                                cuotas_validas = [float(c) for c in cuotas_encontradas if float(c) > 1.01 and float(c) < 100.0]
+                                
+                                if cuotas_validas:
+                                    cuota_val = cuotas_validas[-1]
+                                    nombre_txt = re.sub(r'[\|\-\>\:\@]', ' ', linea_clean)
+                                    nombre_txt = re.sub(r'\b[xX@]?\s*\d+[\.,]?\d*\b', '', nombre_txt)
+                                    nombre_txt = re.sub(r'\s+', ' ', nombre_txt).strip()
+                                    
+                                    if not nombre_txt or len(nombre_txt) < 2:
+                                        nombre_txt = f"Selección #{len(partidos_externos)+1}"
+                                    
+                                    partidos_externos.append({"nombre": nombre_txt, "cuota": cuota_val})
+
+                            if partidos_externos:
+                                st.success(f"✅ Se detectaron {len(partidos_externos)} selecciones en la captura de pantalla.")
+                            else:
+                                st.warning("⚠️ No se pudieron asociar cuotas válidas en el texto extraído.")
+                        else:
+                            st.warning("⚠️ No se pudo procesar la imagen mediante el OCR nativo. Usa la pestaña '🚀 Pegado Rápido (Texto)' para ingresar los datos.")
+                    except Exception as e:
+                        st.error(f"Error procesando la imagen: {e}")
 
             elif modo_ingreso == "🚀 Pegado Rápido (Texto)":
                 st.markdown("""
