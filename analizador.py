@@ -1401,20 +1401,62 @@ with pestana_value:
     st.caption("Detección de movimientos bruscos del mercado y líneas desajustadas frente al modelo matemático.")
 
     st.subheader("🎯 Oportunidades +EV Destacadas en Tiempo Real")
-    value_demo = pd.DataFrame([
-        {"Partido": "Independiente del Valle vs Deportes Tolima", "Mercado": "1X2", "Selección": "Visitante", "Cuota Bookie": 7.20, "Cuota Justa": 3.69, "Valor (+EV)": "+27.1%", "Casa": "Betfair"},
-        {"Partido": "Bodo/Glimt vs Linfield", "Mercado": "Goles 2.5", "Selección": "Más de 2.5", "Cuota Bookie": 1.85, "Cuota Justa": 1.55, "Valor (+EV)": "+19.3%", "Casa": "Betano"},
-        {"Partido": "Flamengo vs Olimpia", "Mercado": "BTTS", "Selección": "Sí", "Cuota Bookie": 2.10, "Cuota Justa": 1.80, "Valor (+EV)": "+16.6%", "Casa": "1xBet"}
-    ])
-    st.dataframe(value_demo, use_container_width=True, hide_index=True)
 
+    # Extraer datos reales cargados en memoria
+    dict_partidos = st.session_state.get('datos_cargados', {})
+    
+    lista_valuebets_reales = []
+    
+    if dict_partidos:
+        for p_id, part in dict_partidos.items():
+            for nombre_m, m_info in part['mercados'].items():
+                for opcion, val_data in m_info['value_bets'].items():
+                    if val_data.get('es_value', False):
+                        cuota_bookie = m_info['max_cuotas'][opcion]
+                        prob_r = val_data['prob_real'] / 100.0
+                        cuota_justa = round(1.0 / prob_r, 2) if prob_r > 0 else 0
+                        ev_porcentaje = round(val_data['ev'] * 100, 1)
+                        
+                        lista_valuebets_reales.append({
+                            "Partido": f"{part['local']} vs {part['visitante']}",
+                            "Mercado": nombre_m,
+                            "Selección": opcion,
+                            "Cuota Bookie": cuota_bookie,
+                            "Cuota Justa": cuota_justa,
+                            "Valor (+EV)": f"+{ev_porcentaje}%",
+                            "Casa": m_info['max_bookies'][opcion]
+                        })
+
+    if lista_valuebets_reales:
+        df_value_real = pd.DataFrame(lista_valuebets_reales)
+        st.dataframe(df_value_real, use_container_width=True, hide_index=True)
+    else:
+        st.info("ℹ️ Haz clic en **'🔍 Escanear Mercado Now'** en el panel lateral para cargar cuotas reales con valor matemáticamente positivo (+EV).")
+
+    st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("📉 Alertas de Dropping Odds (Cuotas en Caída Libre)")
     st.caption("Señala eventos donde el dinero del mercado masivo está empujando las líneas a la baja.")
-    drop_demo = pd.DataFrame([
-        {"Partido": "Barcelona SC vs LDU Quito", "Selección": "Local", "Cuota Inicial": 2.45, "Cuota Actual": 1.95, "Variación": "📉 -20.4%", "Motivo Probable": "Baja de jugador titular rival"},
-        {"Partido": "Boca Juniors vs Racing Club", "Selección": "Menos de 2.5", "Cuota Inicial": 1.80, "Cuota Actual": 1.55, "Variación": "📉 -13.8%", "Motivo Probable": "Condición climática / Lluvia"}
-    ])
-    st.dataframe(drop_demo, use_container_width=True, hide_index=True)
+    
+    # Mapeo de variaciones detectadas entre escaneos consecutivos
+    lista_dropping = []
+    if dict_partidos:
+        for p_id, part in dict_partidos.items():
+            for nombre_m, m_info in part['mercados'].items():
+                for opcion, var_estado in m_info.get('variaciones', {}).items():
+                    if "Bajando" in var_estado:
+                        lista_dropping.append({
+                            "Partido": f"{part['local']} vs {part['visitante']}",
+                            "Mercado": nombre_m,
+                            "Selección": opcion,
+                            "Cuota Actual": m_info['max_cuotas'][opcion],
+                            "Tendencia": var_estado,
+                            "Casa Top": m_info['max_bookies'][opcion]
+                        })
+
+    if lista_dropping:
+        st.dataframe(pd.DataFrame(lista_dropping), use_container_width=True, hide_index=True)
+    else:
+        st.caption("No se han detectado caídas drásticas de cuotas en las consultas consecutivas recientes.")
 
 # ---------------------------------------------------------
 # PESTAÑA 6: NOTICIAS & BAJAS IMPORTANTES
