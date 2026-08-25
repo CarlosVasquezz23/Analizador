@@ -328,6 +328,35 @@ st.markdown("""
         margin-bottom: 0.2rem !important;
     }
 
+    /* ESTILIZADO DEL CONTROL RADIO DE NAVEGACIÓN DUAL */
+    div[data-testid="stRadio"] > div {
+        flex-direction: row !important;
+        gap: 6px !important;
+    }
+
+    div[data-testid="stRadio"] label {
+        background-color: var(--rg-card) !important;
+        border: 1px solid var(--rg-border) !important;
+        border-radius: 8px !important;
+        padding: 6px 12px !important;
+        font-weight: 700 !important;
+        font-size: 12px !important;
+        color: var(--rg-text-soft) !important;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    div[data-testid="stRadio"] label:hover {
+        border-color: var(--rg-accent) !important;
+        color: #ffffff !important;
+    }
+
+    div[data-testid="stRadio"] label[data-checked="true"] {
+        background-color: var(--rg-card-alt) !important;
+        border-color: var(--rg-accent) !important;
+        color: #ffffff !important;
+    }
+
     /* PESTAÑAS Y TABS CON SCROLL HORIZONTAL FLUIDO */
     div[data-baseweb="tab-list"] {
         gap: 4px !important;
@@ -884,32 +913,41 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             }
 
 # =========================================================
-# 11. VISTAS Y PESTAÑAS (8 APARTADOS ENTERPRISE)
+# 11. VISTAS Y NAVEGACIÓN (3 PRINCIPALES + MENÚ DESPLEGABLE)
 # =========================================================
-(
-    pestana_radar, 
-    pestana_verificador, 
-    pestana_h2h,
-    pestana_coberturas,
-    pestana_value,
-    pestana_noticias,
-    pestana_tipster,
-    pestana_historial
-) = st.tabs([
-    "🚀 RADAR MULTI-MERCADO", 
-    "🧮 CALCULADORA & OCR",
-    "📊 ESTADÍSTICAS & H2H",
-    "🛡️ MATRIZ DE COBERTURAS",
-    "🔥 CAZADOR +EV & DROPPING",
-    "📰 BAJAS & ALINEACIONES",
-    "🎨 GENERADOR DE CARTEL",
-    "📈 BITÁCORA & ROI"
-])
+col_nav_rapida, col_nav_extra = st.columns([3, 1.5])
+
+with col_nav_rapida:
+    tab_activa_rapida = st.radio(
+        "Pestañas principales:",
+        options=["🚀 RADAR MULTI-MERCADO", "🧮 CALCULADORA & OCR", "📊 ESTADÍSTICAS & H2H"],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+
+with col_nav_extra:
+    opcion_extra = st.selectbox(
+        "Más herramientas:",
+        options=[
+            "-- Seleccionar otro módulo --",
+            "🛡️ MATRIZ DE COBERTURAS",
+            "🔥 CAZADOR +EV & DROPPING",
+            "📰 BAJAS & ALINEACIONES",
+            "🎨 GENERADOR DE CARTEL",
+            "📈 BITÁCORA & ROI"
+        ],
+        label_visibility="collapsed"
+    )
+
+if opcion_extra != "-- Seleccionar otro módulo --":
+    vista_seleccionada = opcion_extra
+else:
+    vista_seleccionada = tab_activa_rapida
 
 # ---------------------------------------------------------
 # PESTAÑA 1: RADAR AUTOMÁTICO
 # ---------------------------------------------------------
-with pestana_radar:
+if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
     st.caption("Escaneo de cuotas en tiempo real · Modelo Dixon-Coles · SureBets · Coberturas · Dropping Odds")
 
@@ -1190,9 +1228,9 @@ with pestana_radar:
                             st.toast("¡Enviado a Telegram!", icon="📤")
 
 # ---------------------------------------------------------
-# PESTAÑA 2: CALCULADORA EXTERNA & MONTE CARLO (OCR CORREGIDO)
+# PESTAÑA 2: CALCULADORA EXTERNA & MONTE CARLO
 # ---------------------------------------------------------
-with pestana_verificador:
+elif vista_seleccionada == "🧮 CALCULADORA & OCR":
     st.title("🧮 Analizador, Lector OCR & Simulador Monte Carlo")
     st.caption("Analiza cuotas de boletos externos, simula 10,000 iteraciones o lee datos desde capturas de pantalla.")
 
@@ -1227,12 +1265,10 @@ with pestana_verificador:
                         image = Image.open(imagen_subida)
                         texto_ocr = ""
                         
-                        # Intento 1: pytesseract si está disponible en el entorno
                         try:
                             import pytesseract
                             texto_ocr = pytesseract.image_to_string(image)
                         except Exception:
-                            # Intento 2: EasyOCR
                             try:
                                 import easyocr
                                 reader = easyocr.Reader(['es', 'en'], gpu=False)
@@ -1404,9 +1440,9 @@ with pestana_verificador:
                 st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
-# PESTAÑA 3: ANÁLISIS ESTADÍSTICO & H2H (INTEGRADO CON API-FOOTBALL)
+# PESTAÑA 3: ANÁLISIS ESTADÍSTICO & H2H
 # ---------------------------------------------------------
-with pestana_h2h:
+elif vista_seleccionada == "📊 ESTADÍSTICAS & H2H":
     st.title("📊 Análisis Estadístico y Cara a Cara (H2H)")
     st.caption("Historial reciente de enfrentamientos directos y métricas reales obtenidas desde API-Football.")
 
@@ -1525,7 +1561,7 @@ with pestana_h2h:
 # ---------------------------------------------------------
 # PESTAÑA 4: MATRIZ DE COBERTURAS Y CASHOUT
 # ---------------------------------------------------------
-with pestana_coberturas:
+elif vista_seleccionada == "🛡️ MATRIZ DE COBERTURAS":
     st.title("🛡️ Matriz de Coberturas & Calculadora SureBet")
     st.caption("Asegura ganancias en partidos en vivo o calcula arbitrajes libres de riesgo.")
 
@@ -1577,7 +1613,7 @@ with pestana_coberturas:
 # ---------------------------------------------------------
 # PESTAÑA 5: CAZADOR AUTOMÁTICO DE VALUEBETS (+EV) & DROPPING ODDS
 # ---------------------------------------------------------
-with pestana_value:
+elif vista_seleccionada == "🔥 CAZADOR +EV & DROPPING":
     st.title("🔥 Cazador de Valor (+EV) y Cuotas Cayendo (Dropping Odds)")
     st.caption("Detección de movimientos bruscos del mercado y líneas desajustadas frente al modelo matemático.")
 
@@ -1638,9 +1674,9 @@ with pestana_value:
         st.caption("No se han detectado caídas drásticas de cuotas en las consultas consecutivas recientes.")
 
 # ---------------------------------------------------------
-# PESTAÑA 6: NOTICIAS & BAJAS IMPORTANTES (INTEGRADO CON API-FOOTBALL)
+# PESTAÑA 6: NOTICIAS & BAJAS IMPORTANTES
 # ---------------------------------------------------------
-with pestana_noticias:
+elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
     st.title("📰 Centro de Bajas, Lesiones y Alineaciones")
     st.caption("Información contextual en tiempo real mediante API-Football para validar tus selecciones.")
 
@@ -1707,7 +1743,7 @@ with pestana_noticias:
 # ---------------------------------------------------------
 # PESTAÑA 7: GENERADOR DE CARTEL / EXPORTADOR TIPSTER
 # ---------------------------------------------------------
-with pestana_tipster:
+elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.title("🎨 Generador Visual de Pronósticos para Redes")
     st.caption("Crea carteles elegantes y profesionales con tus jugadas para compartir en Telegram, WhatsApp o Redes.")
 
@@ -1742,7 +1778,7 @@ with pestana_tipster:
 # ---------------------------------------------------------
 # PESTAÑA 8: AUDITORÍA Y BITÁCORA PRO
 # ---------------------------------------------------------
-with pestana_historial:
+elif vista_seleccionada == "📈 BITÁCORA & ROI":
     st.title("📊 Módulo de Auditoría Financiera Avanzada Pro")
 
     col_exp_j, col_imp_j, col_exp_csv = st.columns(3)
