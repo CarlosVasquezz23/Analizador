@@ -23,6 +23,7 @@ st.set_page_config(
 )
 
 DB_FILE = "bitacora_backup.json"
+CONFIG_FILE = "user_config.json"
 
 API_KEY = st.secrets.get("ODDS_API_KEY", "e6414a3efabaf34994030cd0a8ea88b1")
 HL_API_KEY = st.secrets.get("HL_API_KEY", "f18c6837-5aaf-4880-8148-9b7a133b5557")
@@ -57,6 +58,27 @@ class BitacoraManager:
         if os.path.exists(DB_FILE):
             os.remove(DB_FILE)
         st.session_state['historial_apuestas'] = []
+
+class ConfigManager:
+    @staticmethod
+    def cargar() -> Dict[str, Any]:
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    @staticmethod
+    def guardar(key: str, val: Any) -> None:
+        config = ConfigManager.cargar()
+        config[key] = val
+        try:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            st.sidebar.error(f"Error al guardar configuración: {e}")
 
 def enviar_telegram(mensaje: str) -> bool:
     token = st.session_state.get('tg_token', '')
@@ -658,8 +680,10 @@ diccionario_mercados = {
 }
 
 # =========================================================
-# 8. ESTADOS DE SESIÓN
+# 8. ESTADOS DE SESIÓN Y PERSISTENCIA DE CONFIGURACIÓN
 # =========================================================
+user_config = ConfigManager.cargar()
+
 if 'historial_apuestas' not in st.session_state:
     st.session_state.historial_apuestas = BitacoraManager.cargar()
 if 'version_ticket' not in st.session_state:
@@ -680,6 +704,16 @@ if 'creditos_restantes' not in st.session_state:
     st.session_state.creditos_restantes = "No consultado"
 if 'creditos_restantes_af' not in st.session_state:
     st.session_state.creditos_restantes_af = "No consultado"
+
+# Carga de preferencias persistentes del usuario
+if 'casas_preferidas' not in st.session_state:
+    st.session_state.casas_preferidas = user_config.get('casas_preferidas', [])
+if 'bankroll_total' not in st.session_state:
+    st.session_state.bankroll_total = user_config.get('bankroll_total', 200.0)
+if 'tg_token' not in st.session_state:
+    st.session_state.tg_token = user_config.get('tg_token', '')
+if 'tg_chat_id' not in st.session_state:
+    st.session_state.tg_chat_id = user_config.get('tg_chat_id', '')
 
 # =========================================================
 # 9. SIDEBAR ORGANIZADO EN ACCORDEONES
@@ -729,10 +763,15 @@ with st.sidebar:
         ligas_af_sels = st.multiselect("Ligas extra:", list(AF_LEAGUE_IDS.keys()), default=[]) if habilitar_af else []
 
     with st.expander("🏬 Casas y Mercados", expanded=True):
+        def _on_change_bookies():
+            ConfigManager.guardar('casas_preferidas', st.session_state.casas_preferidas_widget)
+
         casas_preferidas = st.multiselect(
             "Mis Bookies:",
             ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"],
-            default=[]
+            default=st.session_state.casas_preferidas,
+            key="casas_preferidas_widget",
+            on_change=_on_change_bookies
         )
         mercados_sels = st.multiselect("Mercados:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
         sin_limite_fecha = st.checkbox("🌐 Traer todo sin filtro de días", value=False)
@@ -750,7 +789,17 @@ with st.sidebar:
             limite_h = 999999
 
     with st.expander("🧮 Banca & Criterio Kelly"):
-        bankroll_total = st.number_input("Banca Total ($):", min_value=10.0, value=200.0, step=10.0)
+        def _on_change_bankroll():
+            ConfigManager.guardar('bankroll_total', st.session_state.bankroll_widget)
+
+        bankroll_total = st.number_input(
+            "Banca Total ($):", 
+            min_value=10.0, 
+            value=float(st.session_state.bankroll_total), 
+            step=10.0,
+            key="bankroll_widget",
+            on_change=_on_change_bankroll
+        )
         fraccion_kelly = st.slider("Fracción de Kelly:", min_value=0.1, max_value=1.0, value=0.25, step=0.05)
         monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0, key="monto_inversion_base")
 
@@ -764,8 +813,26 @@ with st.sidebar:
         generar_auto = st.button("🎲 Pre-seleccionar", use_container_width=True)
 
     with st.expander("🔔 Alertas Telegram"):
-        st.session_state['tg_token'] = st.text_input("Bot Token:", value=st.session_state.get('tg_token', ''), type="password")
-        st.session_state['tg_chat_id'] = st.text_input("Chat ID:", value=st.session_state.get('tg_chat_id', ''))
+        def _on_change_tg_token():
+            ConfigManager.guardar('tg_token', st.session_state.tg_token_widget)
+        def _on_change_tg_chat():
+            ConfigManager.guardar('tg_chat_id', st.session_state.tg_chat_id_widget)
+
+        st.text_input(
+            "Bot Token:", 
+            value=st.session_state.tg_token, 
+            type="password", 
+            key="tg_token_widget",
+            on_change=_on_change_tg_token
+        )
+        st.text_input(
+            "Chat ID:", 
+            value=st.session_state.tg_chat_id, 
+            key="tg_chat_id_widget",
+            on_change=_on_change_tg_chat
+        )
+        st.session_state['tg_token'] = st.session_state.get('tg_token_widget', st.session_state.tg_token)
+        st.session_state['tg_chat_id'] = st.session_state.get('tg_chat_id_widget', st.session_state.tg_chat_id)
         st.session_state['auto_alertas_telegram'] = st.checkbox("🚀 Auto-alertas (+EV > 5%)", value=False)
 
 # =========================================================
@@ -1900,7 +1967,6 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
             for nombre_m, m_info in part['mercados'].items():
                 for opcion, val_data in m_info['value_bets'].items():
                     clave_chk = f"ap_{part['id']}_{nombre_m}_{opcion}"
-                    # Verificación síncrona en st.session_state para mantener coherencia
                     if st.session_state.get(f"render_{clave_chk}_v{st.session_state.version_ticket}", False) or clave_chk in st.session_state.claves_auto:
                         apuestas_en_boleto.append({
                             "evento": f"{part['local']} vs {part['visitante']}",
@@ -1958,7 +2024,6 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     with c_t2:
         cuota_txt = f"x{round(cuota_acumulada_cartel, 2)}" if cuota_acumulada_cartel > 0 else "x1.00"
 
-        # HTML limpio en una sola cadena sin saltos de línea crudos
         cartel_html = (
             f"<div style='background: linear-gradient(135deg, #12161f 0%, #0a0d13 100%); "
             f"border: 2px solid #00d2d3; padding: 20px; border-radius: 15px; text-align: center;'>"
