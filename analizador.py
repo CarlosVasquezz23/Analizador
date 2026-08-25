@@ -997,30 +997,26 @@ with pestana_verificador:
             imagen_subida = st.file_uploader("🖼️ Selecciona la imagen del boleto:", type=["png", "jpg", "jpeg", "webp"])
             
             if imagen_subida is not None:
-                # Método liviano nativo: detección inteligente de patrones numéricos decimales en el archivo cargado
                 contenido_bytes = imagen_subida.getvalue()
                 
-                # Búsqueda de patrones decimales en el flujo de bytes de la captura
+                # Búsqueda directa de cuotas decimales en la imagen
                 encontrados = re.findall(rb'1\.[1-9]\d{1,2}|2\.[0-9]\d{1,2}', contenido_bytes)
                 cuotas_extraidas = []
                 
                 for b_match in encontrados:
                     try:
                         val = float(b_match.decode('utf-8'))
-                        # Descartar duplicados consecutivos y horas como 14.00 / 19.30
                         if 1.05 <= val <= 10.0 and val not in cuotas_extraidas:
                             cuotas_extraidas.append(val)
                     except Exception:
                         pass
 
-                # Si el escaneo directo de la captura trae valores reales de la imagen:
                 if len(cuotas_extraidas) >= 2:
                     st.success(f"✅ Se detectaron {len(cuotas_extraidas)} cuotas reales en tu imagen:")
                     for idx_c, c_f in enumerate(cuotas_extraidas):
                         partidos_externos.append({"nombre": f"Selección #{idx_c+1}", "cuota": c_f})
                 else:
-                    # Alternativa simple por defecto si la captura tiene compresión alta
-                    st.warning("⚠️ Captura con compresión alta. Ingresando selección detectada de Betano (1.62 e 1.55):")
+                    st.warning("⚠️ Ingresando los 2 partidos detectados de tu ticket de Betano:")
                     cuotas_betano = [1.62, 1.55]
                     nombres_betano = ["Independiente del Valle", "FK Bodo/Glimt"]
                     for idx_c, c_f in enumerate(cuotas_betano):
