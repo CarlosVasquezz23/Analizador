@@ -76,7 +76,7 @@ def enviar_telegram(mensaje: str) -> bool:
         return False
 
 # =========================================================
-# 3. MODELADO MATEMÁTICO: POISSON & DIXON-COLES
+# 3. MODELADO MATEMÁTICO: POISSON, DIXON-COLES & IMPACTO DE BAJAS
 # =========================================================
 def poisson_pmf(k: int, mu: float) -> float:
     return (math.pow(mu, k) * math.exp(-mu)) / math.factorial(k)
@@ -91,6 +91,11 @@ def dixon_coles_factor(i: int, j: int, lambda_l: float, lambda_v: float, rho: fl
     elif i == 1 and j == 1:
         return 1.0 - rho
     return 1.0
+
+def calcular_impacto_bajas(lambda_base: float, peso_bajas: float) -> float:
+    """Aplica un descuento ajustado al lambda ofensivo según la importancia de los lesionados."""
+    factor_ajuste = max(0.3, 1.0 - (peso_bajas / 100.0))
+    return lambda_base * factor_ajuste
 
 def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1.10, usar_dixon_coles: bool = True) -> Dict[str, float]:
     max_goles = 6
@@ -1440,11 +1445,11 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
                 st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
-# PESTAÑA 3: ANÁLISIS ESTADÍSTICO & H2H
+# PESTAÑA 3: ANÁLISIS ESTADÍSTICO & H2H (INCLUYE SIMULADOR xG E IMPACTO DE BAJAS)
 # ---------------------------------------------------------
 elif vista_seleccionada == "📊 ESTADÍSTICAS & H2H":
-    st.title("📊 Análisis Estadístico y Cara a Cara (H2H)")
-    st.caption("Historial reciente de enfrentamientos directos y métricas reales obtenidas desde API-Football.")
+    st.title("📊 Análisis Estadístico, Simulador xG y H2H")
+    st.caption("Historial reciente de enfrentamientos directos, simulación de goles esperados (xG) e impacto de bajas.")
 
     @st.cache_data(ttl=3600)
     def obtener_id_equipo_af(team_name):
@@ -1525,6 +1530,31 @@ elif vista_seleccionada == "📊 ESTADÍSTICAS & H2H":
             col_m2.metric("Forma Visitante (Últimos 5)", f_vis, r_vis)
             col_m3.metric("Promedio Goles Local", f"{g_loc} / partido")
             col_m4.metric("Promedio Goles Visitante", f"{g_vis} / partido")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # --- SECCIÓN AÑADIDA: SIMULADOR xG E IMPACTO POR BAJAS ---
+            with st.expander("🎯 Simulador de Goles Esperados (xG) & Calculador de Impacto por Bajas", expanded=True):
+                col_xg1, col_xg2 = st.columns(2)
+                with col_xg1:
+                    xg_local_input = st.number_input(f"xG Promedio {eq_local}:", min_value=0.1, max_value=5.0, value=max(0.5, g_loc if g_loc > 0 else 1.45), step=0.05)
+                    bajas_local_pct = st.slider(f"Penalización por bajas {eq_local} (%):", 0.0, 50.0, 0.0, step=5.0, help="Descuento ofensivo por falta de titulares clave.")
+                with col_xg2:
+                    xg_visit_input = st.number_input(f"xG Promedio {eq_visit}:", min_value=0.1, max_value=5.0, value=max(0.5, g_vis if g_vis > 0 else 1.10), step=0.05)
+                    bajas_visit_pct = st.slider(f"Penalización por bajas {eq_visit} (%):", 0.0, 50.0, 0.0, step=5.0, help="Descuento ofensivo por falta de titulares clave.")
+                
+                lambda_l_adj = calcular_impacto_bajas(xg_local_input, bajas_local_pct)
+                lambda_v_adj = calcular_impacto_bajas(xg_visit_input, bajas_visit_pct)
+
+                probs_custom_xg = calcular_modelo_poisson(lambda_l_adj, lambda_v_adj, usar_dixon_coles=True)
+                
+                st.markdown(f"**Lambdas Ajustados:** `{eq_local}`: **{round(lambda_l_adj, 2)}** goles esperados | `{eq_visit}`: **{round(lambda_v_adj, 2)}** goles esperados")
+                
+                cx1, cx2, cx3, cx4 = st.columns(4)
+                cx1.metric(f"Victoria {eq_local}", f"{round(probs_custom_xg['Local'], 1)}%")
+                cx2.metric("Empate", f"{round(probs_custom_xg['Empate'], 1)}%")
+                cx3.metric(f"Victoria {eq_visit}", f"{round(probs_custom_xg['Visitante'], 1)}%")
+                cx4.metric("Más de 2.5 Goles", f"{round(probs_custom_xg['Más de 2.5'], 1)}%")
 
             st.markdown("<br>", unsafe_allow_html=True)
             st.subheader("📜 Histórico de Enfrentamientos Directos (H2H)")
@@ -1611,13 +1641,16 @@ elif vista_seleccionada == "🛡️ MATRIZ DE COBERTURAS":
         col_r2.success(f"🛡️ **Apostar ${round(hedge_stake, 2)} en Cobertura:** Ganas **${round(ganancia_hedge, 2)}** netos en cualquier resultado")
 
 # ---------------------------------------------------------
-# PESTAÑA 5: CAZADOR AUTOMÁTICO DE VALUEBETS (+EV) & DROPPING ODDS
+# PESTAÑA 5: CAZADOR AUTOMÁTICO DE VALUEBETS (+EV) & FILTRO VALUE STREAM
 # ---------------------------------------------------------
 elif vista_seleccionada == "🔥 CAZADOR +EV & DROPPING":
-    st.title("🔥 Cazador de Valor (+EV) y Cuotas Cayendo (Dropping Odds)")
-    st.caption("Detección de movimientos bruscos del mercado y líneas desajustadas frente al modelo matemático.")
+    st.title("🔥 Cazador de Valor (+EV), Value Stream y Dropping Odds")
+    st.caption("Detección de movimientos bruscos del mercado y filtrado dinámico de brechas de valor positivo (+EV).")
 
-    st.subheader("🎯 Oportunidades +EV Destacadas en Tiempo Real")
+    st.subheader("🎯 Value Stream: Filtrado Dinámico de Oportunidades +EV")
+
+    # --- SECCIÓN AÑADIDA: FILTRO VALUE STREAM ---
+    umbral_ev_min = st.slider("Filtrar por Umbral Mínimo de Valor (+EV %):", min_value=1.0, max_value=25.0, value=5.0, step=0.5)
 
     dict_partidos = st.session_state.get('datos_cargados', {})
     
@@ -1627,11 +1660,11 @@ elif vista_seleccionada == "🔥 CAZADOR +EV & DROPPING":
         for p_id, part in dict_partidos.items():
             for nombre_m, m_info in part['mercados'].items():
                 for opcion, val_data in m_info['value_bets'].items():
-                    if val_data.get('es_value', False):
+                    ev_porcentaje = round(val_data['ev'] * 100, 1)
+                    if val_data.get('es_value', False) and ev_porcentaje >= umbral_ev_min:
                         cuota_bookie = m_info['max_cuotas'][opcion]
                         prob_r = val_data['prob_real'] / 100.0
                         cuota_justa = round(1.0 / prob_r, 2) if prob_r > 0 else 0
-                        ev_porcentaje = round(val_data['ev'] * 100, 1)
                         
                         lista_valuebets_reales.append({
                             "Partido": f"{part['local']} vs {part['visitante']}",
@@ -1640,14 +1673,14 @@ elif vista_seleccionada == "🔥 CAZADOR +EV & DROPPING":
                             "Cuota Bookie": cuota_bookie,
                             "Cuota Justa": cuota_justa,
                             "Valor (+EV)": f"+{ev_porcentaje}%",
-                            "Casa": m_info['max_bookies'][opcion]
+                            "Casa Top": m_info['max_bookies'][opcion]
                         })
 
     if lista_valuebets_reales:
-        df_value_real = pd.DataFrame(lista_valuebets_reales)
+        df_value_real = pd.DataFrame(lista_valuebets_reales).sort_values("Valor (+EV)", ascending=False)
         st.dataframe(df_value_real, use_container_width=True, hide_index=True)
     else:
-        st.info("ℹ️ Haz clic en **'🔍 Escanear Mercado Now'** en el panel lateral para cargar cuotas reales con valor matemáticamente positivo (+EV).")
+        st.info(f"ℹ️ No se detectaron apuestas con valor superior a **+{umbral_ev_min}%**. Realiza un nuevo escaneo o ajusta el slider del umbral.")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("📉 Alertas de Dropping Odds (Cuotas en Caída Libre)")
