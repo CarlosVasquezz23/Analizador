@@ -1310,11 +1310,45 @@ with pestana_verificador:
                 st.dataframe(pd.DataFrame(detalles_tabla), use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------
-# PESTAÑA 3: ANÁLISIS ESTADÍSTICO & H2H
+# PESTAÑA 3: ANÁLISIS ESTADÍSTICO & H2H (INTEGRADO CON API-FOOTBALL)
 # ---------------------------------------------------------
 with pestana_h2h:
     st.title("📊 Análisis Estadístico y Cara a Cara (H2H)")
-    st.caption("Consulta el historial reciente de enfrentamientos directos, rachas de forma y métricas de goles.")
+    st.caption("Historial reciente de enfrentamientos directos y métricas reales obtenidas desde API-Football.")
+
+    @st.cache_data(ttl=3600)
+    def obtener_id_equipo_af(team_name):
+        if not AF_API_KEY or not team_name:
+            return None
+        try:
+            r = requests.get(f"{AF_BASE_URL}/teams", headers=af_headers(), params={"search": team_name}, timeout=10)
+            _actualizar_creditos_af(r.headers)
+            data = r.json().get("response", [])
+            return data[0]["team"]["id"] if data else None
+        except Exception:
+            return None
+
+    @st.cache_data(ttl=3600)
+    def consultar_h2h_af(team1_id, team2_id):
+        if not AF_API_KEY or not team1_id or not team2_id:
+            return []
+        try:
+            r = requests.get(f"{AF_BASE_URL}/fixtures/headtohead", headers=af_headers(), params={"h2h": f"{team1_id}-{team2_id}", "last": 10}, timeout=10)
+            _actualizar_creditos_af(r.headers)
+            return r.json().get("response", [])
+        except Exception:
+            return []
+
+    @st.cache_data(ttl=3600)
+    def consultar_ultimos_partidos_af(team_id):
+        if not AF_API_KEY or not team_id:
+            return []
+        try:
+            r = requests.get(f"{AF_BASE_URL}/fixtures", headers=af_headers(), params={"team": team_id, "last": 5}, timeout=10)
+            _actualizar_creditos_af(r.headers)
+            return r.json().get("response", [])
+        except Exception:
+            return []
 
     c_h1, c_h2 = st.columns(2)
     with c_h1:
@@ -1322,22 +1356,77 @@ with pestana_h2h:
     with c_h2:
         eq_visit = st.text_input("⚽ Equipo Visitante:", value="Deportes Tolima")
 
-    st.subheader(f"⚔️ Comparativa Directa: {eq_local} vs {eq_visit}")
-    
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("Forma Local (Últimos 5)", "W-W-D-W-L", "80% Rend.")
-    col_m2.metric("Forma Visitante (Últimos 5)", "D-W-L-D-W", "53% Rend.")
-    col_m3.metric("Promedio Goles Local", "1.8 / partido", "Altos")
-    col_m4.metric("Promedio Goles Visitante", "1.1 / partido", "Medios")
+    if eq_local and eq_visit:
+        st.subheader(f"⚔️ Comparativa Directa: {eq_local} vs {eq_visit}")
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.subheader("📜 Histórico de Enfrentamientos Directos (H2H)")
-    h2h_demo = pd.DataFrame([
-        {"Fecha": "12/04/2025", "Torneo": "Copa Libertadores", "Resultado": f"{eq_local} 2 - 1 {eq_visit}", "Ganador": eq_local},
-        {"Fecha": "24/09/2024", "Torneo": "Amistoso Clubes", "Resultado": f"{eq_local} 1 - 1 {eq_visit}", "Ganador": "Empate"},
-        {"Fecha": "18/05/2023", "Torneo": "Copa Libertadores", "Resultado": f"{eq_visit} 0 - 2 {eq_local}", "Ganador": eq_local},
-    ])
-    st.dataframe(h2h_demo, use_container_width=True, hide_index=True)
+        with st.spinner("Consultando estadísticas en API-Football..."):
+            id_local = obtener_id_equipo_af(eq_local)
+            id_visit = obtener_id_equipo_af(eq_visit)
+
+        if id_local and id_visit:
+            ult_local = consultar_ultimos_partidos_af(id_local)
+            ult_visit = consultar_ultimos_partidos_af(id_visit)
+
+            def procesar_forma_y_goles(partidos, team_id):
+                forma, goles = [], []
+                for p in partidos:
+                    goals = p.get("goals", {})
+                    teams = p.get("teams", {})
+                    es_home = teams.get("home", {}).get("id") == team_id
+                    g_favor = goals.get("home") if es_home else goals.get("away")
+                    g_contra = goals.get("away") if es_home else goals.get("home")
+                    
+                    if g_favor is not None and g_contra is not None:
+                        goles.append(g_favor)
+                        if g_favor > g_contra: forma.append("W")
+                        elif g_favor == g_contra: forma.append("D")
+                        else: forma.append("L")
+                
+                cadena_forma = "-".join(forma) if forma else "N/A"
+                prom_goles = round(sum(goles) / len(goles), 2) if goles else 0.0
+                rend = round((forma.count("W") * 3 + forma.count("D")) / (len(forma) * 3) * 100) if forma else 0
+                return cadena_forma, f"{rend}% Rend.", prom_goles
+
+            f_loc, r_loc, g_loc = procesar_forma_y_goles(ult_local, id_local)
+            f_vis, r_vis, g_vis = procesar_forma_y_goles(ult_visit, id_visit)
+
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            col_m1.metric("Forma Local (Últimos 5)", f_loc, r_loc)
+            col_m2.metric("Forma Visitante (Últimos 5)", f_vis, r_vis)
+            col_m3.metric("Promedio Goles Local", f"{g_loc} / partido")
+            col_m4.metric("Promedio Goles Visitante", f"{g_vis} / partido")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.subheader("📜 Histórico de Enfrentamientos Directos (H2H)")
+
+            partidos_h2h = consultar_h2h_af(id_local, id_visit)
+
+            if partidos_h2h:
+                filas_h2h = []
+                for item in partidos_h2h:
+                    fixture = item.get("fixture", {})
+                    league = item.get("league", {})
+                    teams = item.get("teams", {})
+                    goals = item.get("goals", {})
+
+                    fecha = fixture.get("date", "")[:10]
+                    torneo = league.get("name", "N/A")
+                    res = f"{teams.get('home', {}).get('name')} {goals.get('home')} - {goals.get('away')} {teams.get('away', {}).get('name')}"
+                    
+                    if goals.get('home') > goals.get('away'):
+                        ganador = teams.get('home', {}).get('name')
+                    elif goals.get('away') > goals.get('home'):
+                        ganador = teams.get('away', {}).get('name')
+                    else:
+                        ganador = "Empate"
+
+                    filas_h2h.append({"Fecha": fecha, "Torneo": torneo, "Resultado": res, "Ganador": ganador})
+
+                st.dataframe(pd.DataFrame(filas_h2h), use_container_width=True, hide_index=True)
+            else:
+                st.info(f"ℹ️ No se registraron partidos previos entre **{eq_local}** y **{eq_visit}** en la base de datos de API-Football.")
+        else:
+            st.warning("⚠️ No se encontraron los IDs oficiales de los equipos ingresados. Asegúrate de escribir el nombre correctamente.")
 
 # ---------------------------------------------------------
 # PESTAÑA 4: MATRIZ DE COBERTURAS Y CASHOUT
