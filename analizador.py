@@ -321,7 +321,6 @@ def evaluar_riesgo_parlay(partidos: List[Dict[str, Any]]) -> Dict[str, Any]:
     cuotas_altas = sum(1 for c in cuotas if c > 2.20)
     cuotas_muy_bajas = sum(1 for c in cuotas if c < 1.20)
     
-    # Cálculo del score redondeado
     score = 100 - (cant * 12) - (cuota_total * 2) - (cuotas_altas * 15)
     score = round(max(5, min(95, score)), 1)
     
@@ -333,7 +332,6 @@ def evaluar_riesgo_parlay(partidos: List[Dict[str, Any]]) -> Dict[str, Any]:
     if cuotas_muy_bajas >= 2:
         consejos.append("🛡️ **Trampa de favoritismo**: Las cuotas menores a 1.20 aportan poco valor y acumulan riesgo.")
     
-    # Determinar nivel y mensaje adecuado según el score real
     if score > 70:
         nivel = "🟢 Bajo"
         if not consejos:
@@ -436,7 +434,7 @@ def generar_resumen_ejecutivo_ai(dict_partidos: Dict[str, Any]) -> str:
     if total_valuebets > 0:
         resumen += f"📈 Se hallaron **{total_valuebets} apuestas de valor positivo (+EV)**. La liga con mayor concentración de valor es **{top_liga}** ({val_top_count} apuestas +EV)."
     else:
-        resumen += "El mercado muestra líneas highly ajustadas por los bookmakers."
+        resumen += "El mercado muestra líneas ajustadas por las casas."
 
     return resumen
 
@@ -513,7 +511,7 @@ def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_v
         st.toast(f"❌ Eliminado del boleto: {opcion_nombre}", icon="🗑️")
 
 # =========================================================
-# 7. TEMA VISUAL CSS DINÁMICO (MODO OSCURO / CLARO)
+# 7. TEMA VISUAL CSS DINÁMICO
 # =========================================================
 modo_claro = (st.session_state.tema_visual == "Claro")
 
@@ -552,9 +550,7 @@ st.markdown(f"""
         max-width: 98% !important;
     }}
 
-    h1, h2, h3 {{
-        color: var(--rg-text) !important;
-    }}
+    h1, h2, h3 {{ color: var(--rg-text) !important; }}
 
     h1 {{
         font-family: 'Inter', sans-serif;
@@ -565,62 +561,6 @@ st.markdown(f"""
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         margin-bottom: 0.2rem !important;
-    }}
-
-    div[data-testid="stRadio"] > div {{
-        flex-direction: row !important;
-        gap: 6px !important;
-    }}
-
-    div[data-testid="stRadio"] label {{
-        background-color: var(--rg-card) !important;
-        border: 1px solid var(--rg-border) !important;
-        border-radius: 8px !important;
-        padding: 6px 12px !important;
-        font-weight: 700 !important;
-        font-size: 12px !important;
-        color: var(--rg-text-soft) !important;
-        cursor: pointer;
-        transition: all 0.2s ease;
-    }}
-
-    div[data-testid="stRadio"] label:hover {{
-        border-color: var(--rg-accent) !important;
-        color: var(--rg-text) !important;
-    }}
-
-    div[data-testid="stRadio"] label[data-checked="true"] {{
-        background-color: var(--rg-card-alt) !important;
-        border-color: var(--rg-accent) !important;
-        color: var(--rg-text) !important;
-    }}
-
-    div[data-baseweb="tab-list"] {{
-        gap: 4px !important;
-        margin-bottom: 18px !important;
-        padding-bottom: 4px !important;
-        border-bottom: 1px solid var(--rg-border) !important;
-        overflow-x: auto !important;
-        flex-wrap: nowrap !important;
-        white-space: nowrap !important;
-    }}
-
-    button[data-baseweb="tab"] {{
-        font-weight: 700 !important;
-        font-size: 11.5px !important;
-        padding: 7px 12px !important;
-        border-radius: 8px !important;
-        color: var(--rg-text-soft) !important;
-        background-color: transparent !important;
-        transition: all 0.2s ease;
-        border: 1px solid transparent !important;
-        flex-shrink: 0 !important;
-    }}
-
-    button[data-baseweb="tab"][aria-selected="true"] {{
-        color: var(--rg-text) !important;
-        background-color: var(--rg-card-alt) !important;
-        border: 1px solid var(--rg-border) !important;
     }}
 
     .ai-summary-box {{
@@ -689,18 +629,6 @@ st.markdown(f"""
         align-items: center;
     }}
 
-    div[class*="st-key-match_"] {{
-        background: var(--rg-card) !important;
-        border: 1px solid var(--rg-border) !important;
-        border-radius: 14px !important;
-    }}
-
-    div[class*="st-key-ticket_card"] {{
-        background: var(--rg-card-alt) !important;
-        border: 2px dashed rgba(0,210,211,0.45) !important;
-        border-radius: 16px !important;
-    }}
-
     .ticket-titulo {{
         font-family: 'Inter', sans-serif; font-weight: 800; font-size: 14px; letter-spacing: 0.04em;
         text-transform: uppercase; color: var(--rg-accent); text-align: center; margin-bottom: 6px;
@@ -710,14 +638,6 @@ st.markdown(f"""
     .ticket-cuota-tag {{
         font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--rg-accent);
         background: rgba(0,210,211,0.08); border-radius: 6px; padding: 1px 6px; font-size: 12px;
-    }}
-
-    div.stButton > button[kind="primary"] {{
-        background: linear-gradient(90deg, #00b3b4, #00d2d3) !important;
-        color: #000000 !important;
-        font-weight: 700 !important;
-        border: none !important;
-        box-shadow: 0 4px 16px rgba(0,210,211,0.25);
     }}
 
     .kpi-card {{
@@ -1045,7 +965,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         except (ValueError, KeyError):
             continue
 
-        horas = (fecha_utc - ahora_utc).total_seconds() / 3600
+        horas = (fecha_utc - ahora_utc).total_seconds() / 3600.0
         
         es_en_vivo = partido.get('in_play', False) or (horas <= 0 and horas >= -2.2)
         marcador_local = partido.get('scores', {}).get('home', 0) if es_en_vivo else None
@@ -1577,7 +1497,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             with col_b1:
                 confirmar_limpieza = st.checkbox("⚠️ Confirmar limpiar boleto", value=False, key="chk_conf_limpiar")
             with col_b2:
-                if st.button("🧹 Limpiar", use_container_width=True, disabled=not confirmar_limpieza):
+                if st.button("🧹 Limpiar", use_container_width=True, disabled=not bool(confirmar_limpieza)):
                     st.session_state.ticket_persistente.clear()
                     st.session_state.claves_auto.clear()
                     st.toast("Boleto limpiado con éxito", icon="🧹")
@@ -1746,7 +1666,6 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
                         if texto_ocr.strip():
                             lineas = texto_ocr.strip().split('\n')
                             
-                            # Palabras clave de encabezados o totales a ignorar
                             palabras_ignorar = [
                                 "doble", "triple", "cuadruple", "cuádruple", "parlay", 
                                 "combinada", "sistema", "apuesta", "boleta", "total", 
@@ -1758,7 +1677,6 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
                                 if not linea_clean:
                                     continue
                                 
-                                # Ignorar si la línea coincide con un encabezado de parlay
                                 linea_lower = linea_clean.lower()
                                 if any(re.search(rf'\b{p}\b', linea_lower) for p in palabras_ignorar):
                                     continue
@@ -1772,7 +1690,6 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
                                 if cuotas_validas:
                                     cuota_val = cuotas_validas[-1]
                                     
-                                    # Limpieza intensiva de caracteres inválidos de OCR (&, %, +2, etc.)
                                     nombre_txt = re.sub(r'\(\+\d+\)', '', linea_clean)
                                     nombre_txt = re.sub(r'[\|\-\>\:\@\&\%\*\+\(\)]', ' ', nombre_txt)
                                     nombre_txt = re.sub(r'\b[xX@]?\s*\d+[\.,]?\d*\b', '', nombre_txt)
@@ -2124,7 +2041,7 @@ elif vista_seleccionada == "🛡️ MATRIZ DE COBERTURAS":
         col_r2.success(f"🛡️ **Apostar ${round(hedge_stake, 2)} en Cobertura:** Ganas **${round(ganancia_hedge, 2)}** netos en cualquier resultado")
 
 # ---------------------------------------------------------
-# PESTAÑA 5: CAZADOR AUTOMÁTICO DE VALUEBETS (+EV) & FILTRO VALUE STREAM
+# PESTAÑA 5: CAZADOR AUTOMÁTICO DE VALUEBETS (+EV)
 # ---------------------------------------------------------
 elif vista_seleccionada == "🔥 CAZADOR +EV & DROPPING":
     st.title("🔥 Cazador de Valor (+EV), Value Stream y Dropping Odds")
@@ -2311,7 +2228,7 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
             st.caption("Escanea partidos desde el panel lateral para habilitar este módulo.")
 
 # ---------------------------------------------------------
-# PESTAÑA 7: GENERADOR DE CARTEL Y DESCARGA PNG MULTIFORMATO
+# PESTAÑA 7: GENERADOR DE CARTEL
 # ---------------------------------------------------------
 elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.title("🎨 Generador Visual de Pronósticos para Redes")
@@ -2571,7 +2488,7 @@ elif vista_seleccionada == "📈 BITÁCORA & ROI":
         with col_b1:
             confirmar_borrado_bit = st.checkbox("⚠️ Confirmar borrado", value=False, key="chk_conf_bitacora")
         with col_b2:
-            if st.button("🗑️ Reiniciar", use_container_width=True, disabled=not confirmar_borrado_bit):
+            if st.button("🗑️ Reiniciar", use_container_width=True, disabled=not bool(confirmar_borrado_bit)):
                 BitacoraManager.limpiar()
                 st.toast("Bitácora reiniciada por completo", icon="🧹")
                 st.rerun()
@@ -2587,7 +2504,7 @@ elif vista_seleccionada == "📈 BITÁCORA & ROI":
         """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# PESTAÑA 9: ATENCIÓN AL CLIENTE, SOPORTE Y MEJORAS
+# PESTAÑA 9: ATENCIÓN AL CLIENTE Y SOPORTE
 # ---------------------------------------------------------
 elif vista_seleccionada == "💬 ATENCIÓN Y MEJORAS":
     st.title("💬 Centro de Atención, Soporte y Sugerencias")
