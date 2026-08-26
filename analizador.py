@@ -1243,7 +1243,8 @@ with col_nav_extra:
             "🔥 CAZADOR +EV & DROPPING",
             "📰 BAJAS & ALINEACIONES",
             "🎨 GENERADOR DE CARTEL",
-            "📈 BITÁCORA & ROI"
+            "📈 BITÁCORA & ROI",
+            "💬 ATENCIÓN Y MEJORAS"
         ],
         label_visibility="collapsed"
     )
@@ -2533,3 +2534,112 @@ elif vista_seleccionada == "📈 BITÁCORA & ROI":
                 </p>
             </div>
         """, unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# PESTAÑA 9: ATENCIÓN AL CLIENTE, SOPORTE Y MEJORAS
+# ---------------------------------------------------------
+elif vista_seleccionada == "💬 ATENCIÓN Y MEJORAS":
+    st.title("💬 Centro de Atención, Soporte y Sugerencias")
+    st.caption("Envía tus comentarios, reporta fallos o sugiere nuevas funcionalidades para el sistema.")
+
+    col_form, col_info = st.columns([1.2, 1], gap="large")
+
+    with col_form:
+        with st.container(border=True):
+            st.subheader("📬 Formulario de Contacto y Feedback")
+            
+            tipo_mensaje = st.selectbox(
+                "Categoría del mensaje:",
+                ["💡 Sugerencia de Mejora / Feature Request", "🐛 Reportar un Error / Bug", "❓ Consulta de Soporte / Ayuda", "⭐ Comentario General"]
+            )
+
+            nombre_usuario = st.text_input("Tu Nombre o Usuario (Opcional):", placeholder="Ej: Carlos V.")
+            contacto_usuario = st.text_input("Correo o Telegram de contacto (Opcional):", placeholder="Ej: @usuario_tg o correo@ejemplo.com")
+
+            prioridad = st.select_slider(
+                "Nivel de urgencia / importancia:",
+                options=["🟢 Baja", "🟡 Media", "🔴 Alta / Crítica"]
+            )
+
+            mensaje_cuerpo = st.text_area(
+                "Detalle de tu mensaje o mejora propuesta:",
+                height=150,
+                placeholder="Describe a detalle la funcionalidad que te gustaría ver o el fallo detectado..."
+            )
+
+            if st.button("🚀 Enviar Mensaje de Feedback", type="primary", use_container_width=True):
+                if not mensaje_cuerpo.strip():
+                    st.warning("⚠️ Por favor escribe un mensaje antes de enviar.")
+                else:
+                    fecha_envio = datetime.now().strftime("%d/%m/%Y %H:%M")
+                    usr_str = nombre_usuario.strip() if nombre_usuario.strip() else "Anónimo"
+                    cnt_str = contacto_usuario.strip() if contacto_usuario.strip() else "No provisto"
+
+                    texto_feedback = (
+                        f"📩 *NUEVO FEEDBACK / SOPORTE*\n\n"
+                        f"📌 *Categoría:* {tipo_mensaje}\n"
+                        f"👤 *Usuario:* {usr_str}\n"
+                        f"📇 *Contacto:* {cnt_str}\n"
+                        f"🚨 *Urgencia:* {prioridad}\n"
+                        f"📅 *Fecha:* {fecha_envio}\n\n"
+                        f"💬 *Mensaje:*\n{mensaje_cuerpo.strip()}"
+                    )
+
+                    enviado_tg = enviar_telegram(texto_feedback)
+
+                    feedback_file = "feedback_registros.json"
+                    registros = []
+                    if os.path.exists(feedback_file):
+                        try:
+                            with open(feedback_file, "r", encoding="utf-8") as f:
+                                registros = json.load(f)
+                        except Exception:
+                            registros = []
+
+                    registros.append({
+                        "fecha": fecha_envio,
+                        "tipo": tipo_mensaje,
+                        "usuario": usr_str,
+                        "contacto": cnt_str,
+                        "prioridad": prioridad,
+                        "mensaje": mensaje_cuerpo.strip()
+                    })
+
+                    try:
+                        with open(feedback_file, "w", encoding="utf-8") as f:
+                            json.dump(registros, f, ensure_ascii=False, indent=4)
+                    except Exception as e:
+                        st.error(f"Error al guardar registro local: {e}")
+
+                    if enviado_tg:
+                        st.success("✅ ¡Mensaje enviado con éxito directamente al canal de soporte por Telegram y registrado en la base de datos!")
+                    else:
+                        st.success("✅ Mensaje registrado localmente con éxito (Configura tu Bot Token y Chat ID en el sidebar para recibir las notificaciones en Telegram).")
+
+                    st.balloons()
+
+    with col_info:
+        with st.container(border=True):
+            st.subheader("ℹ️ Canales Directos y FAQ")
+            st.markdown("""
+                **¿Necesitas ayuda inmediata?**
+                * ✉️ **Soporte Directo:** Recibirás las sugerencias al instante en Telegram.
+                * ⚡ **Respuesta:** Las sugerencias de mejoras se revisan periódicamente para ser incluidas en los próximos parches.
+
+                ---
+
+                **🛠️ ¿Qué puedes reportar aquí?**
+                1. **Incompatibilidad de cuotas:** Si una casa de apuestas muestra valores desfasados.
+                2. **Nuevos mercados:** Si deseas que se agreguen hándicaps, córners o tarjetas.
+                3. **Errores visuales:** Problemas de carga en móvil o exportación de carteles.
+            """)
+
+            if os.path.exists("feedback_registros.json"):
+                with st.expander("📋 Ver registro local de mensajes enviados"):
+                    try:
+                        with open("feedback_registros.json", "r", encoding="utf-8") as f:
+                            data_fb = json.load(f)
+                            if data_fb:
+                                st.dataframe(pd.DataFrame(data_fb), use_container_width=True, hide_index=True)
+                    except Exception:
+                        st.caption("Sin registros que mostrar.")
