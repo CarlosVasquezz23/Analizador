@@ -321,20 +321,32 @@ def evaluar_riesgo_parlay(partidos: List[Dict[str, Any]]) -> Dict[str, Any]:
     cuotas_altas = sum(1 for c in cuotas if c > 2.20)
     cuotas_muy_bajas = sum(1 for c in cuotas if c < 1.20)
     
+    # Cálculo del score redondeado
     score = 100 - (cant * 12) - (cuota_total * 2) - (cuotas_altas * 15)
-    score = max(5, min(95, score))
+    score = round(max(5, min(95, score)), 1)
     
     consejos = []
     if cant >= 5:
         consejos.append("🔴 **Riesgo acumulado alto**: Parlays de más de 4 eventos sufren caídas drásticas de probabilidad exponencial.")
-    if cuotas_altas >= 2:
-        consejos.append("⚠️ **Cuotas individuales altas**: Estás combinando eventos de alta volatilidad (> 2.20). Considera jugarlas en simples o reducidas.")
+    if cuotas_altas >= 1:
+        consejos.append(f"⚠️ **Cuota individual alta (>2.20)**: Tienes {cuotas_altas} selección(es) con mayor volatilidad.")
     if cuotas_muy_bajas >= 2:
-        consejos.append("🛡️ **Trampa de favoritismo**: Las cuotas menores a 1.20 añaden poco valor acumulado y aumentan el riesgo marginal innecesariamente.")
-    if not consejos:
-        consejos.append("✅ **Parlay bien equilibrado**: El número de selecciones y cuotas mantiene una relación de riesgo aceptable.")
+        consejos.append("🛡️ **Trampa de favoritismo**: Las cuotas menores a 1.20 aportan poco valor y acumulan riesgo.")
+    
+    # Determinar nivel y mensaje adecuado según el score real
+    if score > 70:
+        nivel = "🟢 Bajo"
+        if not consejos:
+            consejos.append("✅ **Parlay bien equilibrado**: El número de selecciones y cuotas mantiene una relación de riesgo aceptable.")
+    elif score > 40:
+        nivel = "🟡 Moderado"
+        if not consejos:
+            consejos.append("🟡 **Riesgo Moderado**: Combina varias selecciones; monitorea la inversión.")
+    else:
+        nivel = "🔴 Muy Alto"
+        if not consejos:
+            consejos.append("🔴 **Riesgo Elevado**: La cuota total o la volatilidad individual hacen este parlay altamente especulativo.")
 
-    nivel = "🟢 Bajo" if score > 70 else ("🟡 Moderado" if score > 40 else "🔴 Muy Alto")
     return {"nivel": nivel, "score": score, "consejos": consejos}
 
 def ejecutar_simulacion_montecarlo(partidos: List[Dict[str, Any]], num_simulaciones: int = 10000) -> Dict[str, Any]:
@@ -1733,20 +1745,36 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
 
                         if texto_ocr.strip():
                             lineas = texto_ocr.strip().split('\n')
+                            
+                            # Palabras clave de encabezados o totales a ignorar
+                            palabras_ignorar = [
+                                "doble", "triple", "cuadruple", "cuádruple", "parlay", 
+                                "combinada", "sistema", "apuesta", "boleta", "total", 
+                                "cuota total", "ganancia", "importe", "resultado del partido"
+                            ]
+
                             for linea in lineas:
                                 linea_clean = linea.strip()
                                 if not linea_clean:
                                     continue
                                 
+                                # Ignorar si la línea coincide con un encabezado de parlay
+                                linea_lower = linea_clean.lower()
+                                if any(re.search(rf'\b{p}\b', linea_lower) for p in palabras_ignorar):
+                                    continue
+
                                 linea_norm = re.sub(r'([^\w\d]|^)[xX@]\s*(?=\d)', r'\1', linea_clean)
                                 linea_norm = linea_norm.replace(',', '.')
                                 
                                 cuotas_encontradas = re.findall(r'\b\d+\.\d+\b', linea_norm)
-                                cuotas_validas = [float(c) for c in cuotas_encontradas if float(c) > 1.01 and float(c) < 100.0]
+                                cuotas_validas = [float(c) for c in cuotas_encontradas if 1.01 <= float(c) <= 100.0]
                                 
                                 if cuotas_validas:
                                     cuota_val = cuotas_validas[-1]
-                                    nombre_txt = re.sub(r'[\|\-\>\:\@]', ' ', linea_clean)
+                                    
+                                    # Limpieza intensiva de caracteres inválidos de OCR (&, %, +2, etc.)
+                                    nombre_txt = re.sub(r'\(\+\d+\)', '', linea_clean)
+                                    nombre_txt = re.sub(r'[\|\-\>\:\@\&\%\*\+\(\)]', ' ', nombre_txt)
                                     nombre_txt = re.sub(r'\b[xX@]?\s*\d+[\.,]?\d*\b', '', nombre_txt)
                                     nombre_txt = re.sub(r'\s+', ' ', nombre_txt).strip()
                                     
@@ -1872,7 +1900,7 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
                 k2.metric("Cuota Justa Sin Margen", f"x{round(cuota_justa, 2)}")
 
                 res_riesgo = evaluar_riesgo_parlay(partidos_para_mc)
-                with st.expander(f"🤖 Evaluador de Riesgo: Nivel {res_riesgo['nivel']} (Score: {res_riesgo['score']}/100)", expanded=True):
+                with st.expander(f"🤖 Evaluador de Riesgo: Nivel {res_riesgo['nivel']} (Score: {int(res_riesgo['score'])}/100)", expanded=True):
                     for cons in res_riesgo['consejos']:
                         st.write(cons)
 
