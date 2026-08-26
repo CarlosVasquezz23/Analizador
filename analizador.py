@@ -483,7 +483,6 @@ if 'tg_token' not in st.session_state:
 if 'tg_chat_id' not in st.session_state:
     st.session_state.tg_chat_id = DEFAULT_TG_CHAT_ID
 
-# [MEJORA UX 3]: Notificaciones Toast en interacciones secundarias
 def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_val, prob_val, clave_k):
     if st.session_state.get(clave_k, False):
         st.session_state.ticket_persistente[clave_k] = {
@@ -502,7 +501,7 @@ def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_v
         st.toast(f"❌ Eliminado del boleto: {opcion_nombre}", icon="🗑️")
 
 # =========================================================
-# 7. TEMA VISUAL CSS DINÁMICO (MODO OSCURO / CLARO - MEJORA UX 1)
+# 7. TEMA VISUAL CSS DINÁMICO (MODO OSCURO / CLARO)
 # =========================================================
 modo_claro = (st.session_state.tema_visual == "Claro")
 
@@ -832,12 +831,11 @@ diccionario_mercados = {
 }
 
 # =========================================================
-# 9. SIDEBAR ORGANIZADO EN ACCORDEONES CON UX MEJORADO
+# 9. SIDEBAR ORGANIZADO EN ACCORDEONES
 # =========================================================
 with st.sidebar:
     st.header("⚙️ Control Global")
     
-    # [MEJORA UX 1]: Selector dinámico Modo Oscuro / Claro
     def _cambiar_tema():
         ConfigManager.guardar('tema_visual', st.session_state.tema_visual_widget)
         st.session_state.tema_visual = st.session_state.tema_visual_widget
@@ -1231,7 +1229,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
         else:
             st.info(f"⏱️ **Cuotas actualizadas a las {hora_escaneo}** (hace {segundos_transcurridos} segundos).")
 
-    # [MEJORA UX 6]: Skeleton / Spinner con Progreso Paso a Paso
     if consultar:
         if (len(ligas_sels) > 0 or len(ligas_af_sels) > 0) and len(mercados_sels) > 0:
             st.cache_data.clear()
@@ -1380,7 +1377,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
     elif not dict_partidos:
         st.info("ℹ️ **No se encontraron partidos en el rango seleccionado.** Si estás buscando torneos europeos fuera de jornada inmediata, activa la casilla **'🌐 Traer todo sin filtro de días'** o amplia la ventana de tiempo.")
     else:
-        # [MEJORA UX 2]: Filtros Avanzados y Buscador en el Radar
         with st.expander("🎛️ Filtros Avanzados de Cuotas y Estado", expanded=True):
             col_busq, col_rango_cuota, col_chk1, col_chk2 = st.columns([2, 2, 1.2, 1.2])
             with col_busq:
@@ -1392,14 +1388,12 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             with col_chk2:
                 solo_ev = st.checkbox("🔥 Solo +EV", value=False)
 
-        # Aplicar Filtros Avanzados
         dict_partidos_filtrados = {}
         for p_id, p in dict_partidos.items():
             coincide_nombre = (busqueda_equipo in p['local'].lower() or busqueda_equipo in p['visitante'].lower())
             if not coincide_nombre: continue
             if solo_live and not p.get('es_en_vivo', False): continue
             
-            # Filtrar por cuotas y EV
             mercados_filtrados = {}
             for m_nombre, m_info in p['mercados'].items():
                 cuotas_ok = {}
@@ -1567,7 +1561,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             
             apuestas_seleccionadas = list(st.session_state.ticket_persistente.values())
 
-            # [MEJORA UX 7]: Confirmaciones para acciones destructivas (Limpiar Boleto)
             col_b1, col_b2 = st.columns([2, 1])
             with col_b1:
                 confirmar_limpieza = st.checkbox("⚠️ Confirmar limpiar boleto", value=False, key="chk_conf_limpiar")
@@ -1680,7 +1673,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             else:
                 st.info("🎟️ Marca casillas en el radar para construir tu boleto persistente.")
 
-    # [MEJORA UX 5]: Boleto flotante colapsable al final de pantalla para móviles
     if st.session_state.ticket_persistente:
         c_total_flotante = np.prod([float(ap['cuota']) for ap in st.session_state.ticket_persistente.values()])
         with st.expander(f"📱 🎟️ VER BOLETO FLOTANTE ({len(st.session_state.ticket_persistente)} Selecciones | x{round(c_total_flotante, 2)})", expanded=False):
@@ -1866,11 +1858,12 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
                 cuota_justa = (1.0 / prob_real_total) if prob_real_total > 0 else 0
                 ev_ticket = (cuota_total_ext * prob_real_total) - 1.0
 
+                intentos_str = round(100 / prob_porcentaje, 1) if prob_porcentaje > 0 else 0
                 st.markdown(f"""
                     <div class="kpi-card" style="border-left: 5px solid #00d2d3; margin-bottom: 15px;">
                         <div class="kpi-label">🎯 PROBABILIDAD REAL DE ACERTAR ESTE PARLAY</div>
                         <div class="kpi-value" style="color: #00d2d3;">{round(prob_porcentaje, 2)}%</div>
-                        <div class="kpi-sub">Equivale a acertar 1 de cada {round(100/prob_porcentaje, 1) if prob_porcentaje > 0 else 0} intentos</div>
+                        <div class="kpi-sub">Equivale a acertar 1 de cada {intentos_str} intentos</div>
                     </div>
                 """, unsafe_allow_html=True)
 
@@ -2141,7 +2134,6 @@ elif vista_seleccionada == "🔥 CAZADOR +EV & DROPPING":
         df_value_real = pd.DataFrame(lista_valuebets_reales).sort_values("Valor (+EV)", ascending=False)
         st.dataframe(df_value_real, use_container_width=True, hide_index=True)
     else:
-        # [MEJORA UX 4]: Empty State Dinámico en Cazador +EV
         st.markdown(f"""
             <div class="empty-state-card" style="text-align:center; padding: 30px 20px;">
                 <div style="font-size:38px; margin-bottom:8px;">🎯</div>
@@ -2253,7 +2245,6 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
                 else:
                     st.success(f"✅ No se reportan bajas oficiales registradas recientemente para **{equipo_sel}**.")
         else:
-            # [MEJORA UX 4]: Empty state ilustrativo
             st.markdown("""
                 <div class="empty-state-card" style="text-align:center; padding:30px 20px;">
                     <div style="font-size:36px; margin-bottom:8px;">🩹</div>
@@ -2547,7 +2538,6 @@ elif vista_seleccionada == "📈 BITÁCORA & ROI":
 
         st.dataframe(df_act, use_container_width=True)
 
-        # [MEJORA UX 7]: Confirmación para reiniciar Bitácora
         col_d, col_b1, col_b2 = st.columns([2, 1.5, 1])
         col_d.download_button("📊 Descargar Bitácora (CSV)", data=df_act.to_csv(index=False).encode('utf-8'), file_name="Reporte_Apuestas.csv", mime='text/csv', use_container_width=True)
         with col_b1:
@@ -2558,7 +2548,6 @@ elif vista_seleccionada == "📈 BITÁCORA & ROI":
                 st.toast("Bitácora reiniciada por completo", icon="🧹")
                 st.rerun()
     else:
-        # [MEJORA UX 4]: Empty State Dinámico en Bitácora con directo al escaneo
         st.markdown("""
             <div class="empty-state-card" style="text-align: center; padding: 40px 20px;">
                 <div style="font-size: 42px; margin-bottom: 10px;">📋</div>
