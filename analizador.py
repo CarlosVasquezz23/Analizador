@@ -19,7 +19,7 @@ import streamlit.components.v1 as components
 # 1. CONFIGURACIÓN DE PÁGINA Y CREDENCIALES
 # =========================================================
 st.set_page_config(
-    page_title="Radar Enterprise Parlay Global - Ultimate Edition",
+    page_title="Radar Enterprise Parlay Global - UX Edition",
     page_icon="⚽",
     layout="wide"
 )
@@ -424,7 +424,7 @@ def generar_resumen_ejecutivo_ai(dict_partidos: Dict[str, Any]) -> str:
     if total_valuebets > 0:
         resumen += f"📈 Se hallaron **{total_valuebets} apuestas de valor positivo (+EV)**. La liga con mayor concentración de valor es **{top_liga}** ({val_top_count} apuestas +EV)."
     else:
-        resumen += "El mercado muestra líneas highly ajustadas por los bookmakers."
+        resumen += "El mercado muestra líneas altamente ajustadas por los bookmakers."
 
     return resumen
 
@@ -436,54 +436,132 @@ def generar_csv_bitacora(historial: List[Dict[str, Any]]) -> bytes:
     return df_data.to_csv(index=False).encode('utf-8')
 
 # =========================================================
-# 6. TEMA VISUAL CSS AVANZADO
+# 6. ESTADOS DE SESIÓN Y PERSISTENCIA
 # =========================================================
-st.markdown("""
+user_config = ConfigManager.cargar()
+
+if 'tema_visual' not in st.session_state:
+    st.session_state.tema_visual = user_config.get('tema_visual', 'Oscuro')
+
+if 'historial_apuestas' not in st.session_state:
+    st.session_state.historial_apuestas = BitacoraManager.cargar()
+if 'version_ticket' not in st.session_state:
+    st.session_state.version_ticket = 0
+if 'datos_cargados' not in st.session_state:
+    st.session_state.datos_cargados = {}
+if 'datos_cargados_previos' not in st.session_state:
+    st.session_state.datos_cargados_previos = {}
+if 'historico_cuotas_live' not in st.session_state:
+    st.session_state.historico_cuotas_live = {}
+if 'ha_consultado' not in st.session_state:
+    st.session_state.ha_consultado = False
+if 'versiones_partidos' not in st.session_state:
+    st.session_state.versiones_partidos = {}
+if 'claves_auto' not in st.session_state:
+    st.session_state.claves_auto = set()
+if 'creditos_restantes' not in st.session_state:
+    st.session_state.creditos_restantes = "No consultado"
+if 'creditos_restantes_af' not in st.session_state:
+    st.session_state.creditos_restantes_af = "No consultado"
+if 'overrides_live' not in st.session_state:
+    st.session_state.overrides_live = {}
+if 'notif_push_activas' not in st.session_state:
+    st.session_state.notif_push_activas = True
+
+if 'ticket_persistente' not in st.session_state:
+    st.session_state.ticket_persistente = {}
+
+if 'ultimo_escaneo_ts' not in st.session_state:
+    st.session_state.ultimo_escaneo_ts = None
+
+if 'casas_preferidas' not in st.session_state:
+    st.session_state.casas_preferidas = user_config.get('casas_preferidas', [])
+if 'bankroll_total' not in st.session_state:
+    st.session_state.bankroll_total = user_config.get('bankroll_total', 200.0)
+if 'tg_token' not in st.session_state:
+    st.session_state.tg_token = DEFAULT_TG_TOKEN
+if 'tg_chat_id' not in st.session_state:
+    st.session_state.tg_chat_id = DEFAULT_TG_CHAT_ID
+
+# [MEJORA UX 3]: Notificaciones Toast en interacciones secundarias
+def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_val, prob_val, clave_k):
+    if st.session_state.get(clave_k, False):
+        st.session_state.ticket_persistente[clave_k] = {
+            "evento": f"{partido_obj['local']} vs {partido_obj['visitante']}",
+            "liga": partido_obj['liga_origen'],
+            "mercado": mercado_nombre,
+            "seleccion": opcion_nombre,
+            "cuota": cuota_val,
+            "casa": casa_val,
+            "prob_real": prob_val,
+            "fecha_ts": partido_obj.get('fecha_ts', None)
+        }
+        st.toast(f"✅ Agregado al boleto: {opcion_nombre} (x{cuota_val})", icon="🎟️")
+    else:
+        st.session_state.ticket_persistente.pop(clave_k, None)
+        st.toast(f"❌ Eliminado del boleto: {opcion_nombre}", icon="🗑️")
+
+# =========================================================
+# 7. TEMA VISUAL CSS DINÁMICO (MODO OSCURO / CLARO - MEJORA UX 1)
+# =========================================================
+modo_claro = (st.session_state.tema_visual == "Claro")
+
+bg_val = "#f8fafc" if modo_claro else "#0b0e14"
+card_val = "#ffffff" if modo_claro else "#12161f"
+card_alt_val = "#f1f5f9" if modo_claro else "#171c27"
+border_val = "#cbd5e1" if modo_claro else "#232a38"
+text_val = "#0f172a" if modo_claro else "#ffffff"
+text_soft_val = "#64748b" if modo_claro else "#8a94a6"
+
+st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
 
-    :root {
-        --rg-bg: #0b0e14;
-        --rg-card: #12161f;
-        --rg-card-alt: #171c27;
-        --rg-border: #232a38;
-        --rg-border-soft: #1b212c;
+    :root {{
+        --rg-bg: {bg_val};
+        --rg-card: {card_val};
+        --rg-card-alt: {card_alt_val};
+        --rg-border: {border_val};
+        --rg-text: {text_val};
         --rg-accent: #00d2d3;
         --rg-accent-2: #7c5cff;
         --rg-success: #2ecc71;
         --rg-warn: #f1c40f;
         --rg-danger: #e74c3c;
-        --rg-gold: #feca57;
-        --rg-text-soft: #8a94a6;
-    }
+        --rg-text-soft: {text_soft_val};
+    }}
 
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; color: var(--rg-text); }}
 
-    .block-container {
+    .block-container {{
         padding-top: 3.2rem !important;
         padding-bottom: 2rem !important;
         padding-left: 1.5rem !important;
         padding-right: 1.5rem !important;
         max-width: 98% !important;
-    }
+    }}
 
-    h1 {
+    h1, h2, h3 {{
+        color: var(--rg-text) !important;
+    }}
+
+    h1 {{
         font-family: 'Inter', sans-serif;
         font-weight: 800 !important;
         letter-spacing: -0.02em;
         font-size: clamp(1.5rem, 2.2vw, 2.1rem) !important;
-        background: linear-gradient(90deg, #ffffff 0%, #00d2d3 100%);
+        background: linear-gradient(90deg, var(--rg-text) 0%, #00d2d3 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         margin-bottom: 0.2rem !important;
-    }
+    }}
 
-    div[data-testid="stRadio"] > div {
+    div[data-testid="stRadio"] > div {{
         flex-direction: row !important;
         gap: 6px !important;
-    }
+    }}
 
-    div[data-testid="stRadio"] label {
+    div[data-testid="stRadio"] label {{
         background-color: var(--rg-card) !important;
         border: 1px solid var(--rg-border) !important;
         border-radius: 8px !important;
@@ -493,20 +571,20 @@ st.markdown("""
         color: var(--rg-text-soft) !important;
         cursor: pointer;
         transition: all 0.2s ease;
-    }
+    }}
 
-    div[data-testid="stRadio"] label:hover {
+    div[data-testid="stRadio"] label:hover {{
         border-color: var(--rg-accent) !important;
-        color: #ffffff !important;
-    }
+        color: var(--rg-text) !important;
+    }}
 
-    div[data-testid="stRadio"] label[data-checked="true"] {
+    div[data-testid="stRadio"] label[data-checked="true"] {{
         background-color: var(--rg-card-alt) !important;
         border-color: var(--rg-accent) !important;
-        color: #ffffff !important;
-    }
+        color: var(--rg-text) !important;
+    }}
 
-    div[data-baseweb="tab-list"] {
+    div[data-baseweb="tab-list"] {{
         gap: 4px !important;
         margin-bottom: 18px !important;
         padding-bottom: 4px !important;
@@ -514,71 +592,55 @@ st.markdown("""
         overflow-x: auto !important;
         flex-wrap: nowrap !important;
         white-space: nowrap !important;
-    }
+    }}
 
-    button[data-baseweb="tab"] {
+    button[data-baseweb="tab"] {{
         font-weight: 700 !important;
         font-size: 11.5px !important;
         padding: 7px 12px !important;
         border-radius: 8px !important;
-        color: #8a94a6 !important;
+        color: var(--rg-text-soft) !important;
         background-color: transparent !important;
         transition: all 0.2s ease;
         border: 1px solid transparent !important;
         flex-shrink: 0 !important;
-    }
+    }}
 
-    button[data-baseweb="tab"][aria-selected="true"] {
-        color: #ffffff !important;
+    button[data-baseweb="tab"][aria-selected="true"] {{
+        color: var(--rg-text) !important;
         background-color: var(--rg-card-alt) !important;
         border: 1px solid var(--rg-border) !important;
-    }
+    }}
 
-    button[data-baseweb="tab"]:hover {
-        color: var(--rg-accent) !important;
-    }
-
-    div[data-baseweb="tab-highlight"] { 
-        background-color: var(--rg-accent) !important; 
-        height: 2px !important;
-        box-shadow: 0 0 10px var(--rg-accent);
-    }
-
-    .ai-summary-box {
+    .ai-summary-box {{
         background: linear-gradient(90deg, rgba(124, 92, 255, 0.12) 0%, rgba(0, 210, 211, 0.12) 100%);
         border: 1px solid rgba(0, 210, 211, 0.35);
         border-radius: 12px;
         padding: 12px 18px;
         margin-bottom: 18px;
         font-size: 13.5px;
-        color: #ffffff;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-    }
+        color: var(--rg-text);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }}
 
-    .empty-state-card {
-        background: linear-gradient(135deg, #121722 0%, #0d1017 100%);
+    .empty-state-card {{
+        background: linear-gradient(135deg, var(--rg-card) 0%, var(--rg-card-alt) 100%);
         border: 1px solid var(--rg-border);
         border-radius: 16px;
         padding: 30px;
-        box-shadow: 0 12px 30px rgba(0,0,0,0.35);
-    }
+        box-shadow: 0 12px 30px rgba(0,0,0,0.15);
+    }}
     
-    .empty-state-step {
+    .empty-state-step {{
         background: var(--rg-card-alt);
-        border: 1px solid var(--rg-border-soft);
+        border: 1px solid var(--rg-border);
         border-radius: 12px;
         padding: 18px 14px;
         text-align: center;
         transition: all 0.25s ease-in-out;
-    }
+    }}
 
-    .empty-state-step:hover {
-        border-color: rgba(0, 210, 211, 0.4);
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(0, 210, 211, 0.08);
-    }
-
-    .step-badge {
+    .step-badge {{
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -591,44 +653,22 @@ st.markdown("""
         font-weight: 800;
         font-size: 14px;
         margin-bottom: 12px;
-    }
+    }}
 
-    div[data-testid="stNotification"] {
-        border-radius: 10px !important;
-        border: 1px solid var(--rg-border) !important;
-        background-color: var(--rg-card-alt) !important;
-    }
-
-    div[data-baseweb="input"] {
-        border-radius: 8px !important;
-        border: 1px solid var(--rg-border) !important;
-        background-color: var(--rg-card) !important;
-    }
-
-    .hint-box {
-        background: rgba(0, 210, 211, 0.05);
-        border: 1px solid rgba(0, 210, 211, 0.25);
-        border-radius: 10px;
-        padding: 10px 14px;
-        margin-bottom: 12px;
-        font-size: 12.5px;
-        color: #cfd8e3;
-    }
-
-    .match-header { font-size: 16px; font-weight: 700; margin-bottom: 2px; letter-spacing: -0.01em; }
-    .liga-chip {
+    .match-header {{ font-size: 16px; font-weight: 700; margin-bottom: 2px; color: var(--rg-text); }}
+    .liga-chip {{
         display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
         letter-spacing: 0.04em; color: var(--rg-accent); background: rgba(0,210,211,0.10);
         border: 1px solid rgba(0,210,211,0.35); border-radius: 999px; padding: 2px 8px; margin-bottom: 4px;
-    }
-    .kickoff-chip {
-        display: inline-block; font-size: 11px; font-weight: 600; color: #cfd8e3;
+    }}
+    .kickoff-chip {{
+        display: inline-block; font-size: 11px; font-weight: 600; color: var(--rg-text-soft);
         background: var(--rg-card-alt); border: 1px solid var(--rg-border); border-radius: 999px;
         padding: 2px 8px; margin-top: 2px;
-    }
+    }}
 
-    .creditos-caja-pro {
-        background: linear-gradient(135deg, #151b26 0%, #0f131a 100%);
+    .creditos-caja-pro {{
+        background: var(--rg-card-alt);
         padding: 8px 12px;
         border-radius: 8px;
         border: 1px solid var(--rg-border);
@@ -636,76 +676,55 @@ st.markdown("""
         display: flex;
         justify-content: space-between;
         align-items: center;
-    }
+    }}
 
-    div[class*="st-key-match_"] {
-        background: linear-gradient(180deg, var(--rg-card) 0%, #0f131b 100%) !important;
+    div[class*="st-key-match_"] {{
+        background: var(--rg-card) !important;
         border: 1px solid var(--rg-border) !important;
         border-radius: 14px !important;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.25);
-    }
+    }}
 
-    div[class*="st-key-ticket_card"] {
-        background: linear-gradient(180deg, #12161f 0%, #0d1017 100%) !important;
+    div[class*="st-key-ticket_card"] {{
+        background: var(--rg-card-alt) !important;
         border: 2px dashed rgba(0,210,211,0.45) !important;
         border-radius: 16px !important;
-        box-shadow: 0 0 15px rgba(0,210,211,0.08);
-    }
-    .ticket-titulo {
+    }}
+
+    .ticket-titulo {{
         font-family: 'Inter', sans-serif; font-weight: 800; font-size: 14px; letter-spacing: 0.04em;
         text-transform: uppercase; color: var(--rg-accent); text-align: center; margin-bottom: 6px;
-    }
-    .ticket-item { border-bottom: 1px dashed var(--rg-border); padding: 6px 0 8px 0; }
-    .ticket-item:last-of-type { border-bottom: none; }
-    .ticket-cuota-tag {
+    }}
+    .ticket-item {{ border-bottom: 1px dashed var(--rg-border); padding: 6px 0 8px 0; color: var(--rg-text); }}
+    .ticket-item:last-of-type {{ border-bottom: none; }}
+    .ticket-cuota-tag {{
         font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--rg-accent);
         background: rgba(0,210,211,0.08); border-radius: 6px; padding: 1px 6px; font-size: 12px;
-    }
+    }}
 
-    div[data-testid="stSegmentedControl"] button {
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-        font-size: 12px !important;
-    }
-
-    div.stButton > button {
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-        font-size: 13px !important;
-        padding: 6px 12px !important;
-        transition: transform .08s ease;
-        border: 1px solid var(--rg-border) !important;
-    }
-    div.stButton > button:hover { transform: translateY(-1px); }
-    div.stButton > button[kind="primary"] {
+    div.stButton > button[kind="primary"] {{
         background: linear-gradient(90deg, #00b3b4, #00d2d3) !important;
         color: #000000 !important;
         font-weight: 700 !important;
         border: none !important;
         box-shadow: 0 4px 16px rgba(0,210,211,0.25);
-    }
+    }}
 
-    div[data-testid="stMetric"] {
-        background: var(--rg-card-alt); border: 1px solid var(--rg-border);
-        border-radius: 10px; padding: 8px 12px;
-    }
-
-    .kpi-card {
+    .kpi-card {{
         border-radius: 12px;
         padding: 16px;
         border: 1px solid var(--rg-border);
-        background: linear-gradient(145deg, var(--rg-card) 0%, #0d1017 100%);
-        box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        background: var(--rg-card);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.1);
         height: 100%;
-    }
-    .kpi-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--rg-text-soft); margin-bottom: 6px; }
-    .kpi-value { font-family: 'JetBrains Mono', monospace; font-size: clamp(20px, 2.5vw, 28px); font-weight: 700; line-height: 1.1; }
-    .kpi-sub { font-size: 11.5px; margin-top: 6px; font-weight: 500; }
+    }}
+    .kpi-label {{ font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--rg-text-soft); margin-bottom: 6px; }}
+    .kpi-value {{ font-family: 'JetBrains Mono', monospace; font-size: clamp(20px, 2.5vw, 28px); font-weight: 700; line-height: 1.1; color: var(--rg-text); }}
+    .kpi-sub {{ font-size: 11.5px; margin-top: 6px; font-weight: 500; color: var(--rg-text-soft); }}
     </style>
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 7. CLIENTES API Y MAPEO EXTENDIDO DE LIGAS (TOTALMENTE ACTIVADAS)
+# 8. CLIENTES API Y LIGAS
 # =========================================================
 def hl_headers(): return {"x-rapidapi-key": HL_API_KEY}
 
@@ -813,71 +832,25 @@ diccionario_mercados = {
 }
 
 # =========================================================
-# 8. ESTADOS DE SESIÓN Y PERSISTENCIA DE CONFIGURACIÓN
-# =========================================================
-user_config = ConfigManager.cargar()
-
-if 'historial_apuestas' not in st.session_state:
-    st.session_state.historial_apuestas = BitacoraManager.cargar()
-if 'version_ticket' not in st.session_state:
-    st.session_state.version_ticket = 0
-if 'datos_cargados' not in st.session_state:
-    st.session_state.datos_cargados = {}
-if 'datos_cargados_previos' not in st.session_state:
-    st.session_state.datos_cargados_previos = {}
-if 'historico_cuotas_live' not in st.session_state:
-    st.session_state.historico_cuotas_live = {}
-if 'ha_consultado' not in st.session_state:
-    st.session_state.ha_consultado = False
-if 'versiones_partidos' not in st.session_state:
-    st.session_state.versiones_partidos = {}
-if 'claves_auto' not in st.session_state:
-    st.session_state.claves_auto = set()
-if 'creditos_restantes' not in st.session_state:
-    st.session_state.creditos_restantes = "No consultado"
-if 'creditos_restantes_af' not in st.session_state:
-    st.session_state.creditos_restantes_af = "No consultado"
-if 'overrides_live' not in st.session_state:
-    st.session_state.overrides_live = {}
-if 'notif_push_activas' not in st.session_state:
-    st.session_state.notif_push_activas = True
-
-if 'ticket_persistente' not in st.session_state:
-    st.session_state.ticket_persistente = {}
-
-if 'ultimo_escaneo_ts' not in st.session_state:
-    st.session_state.ultimo_escaneo_ts = None
-
-if 'casas_preferidas' not in st.session_state:
-    st.session_state.casas_preferidas = user_config.get('casas_preferidas', [])
-if 'bankroll_total' not in st.session_state:
-    st.session_state.bankroll_total = user_config.get('bankroll_total', 200.0)
-if 'tg_token' not in st.session_state:
-    st.session_state.tg_token = DEFAULT_TG_TOKEN
-if 'tg_chat_id' not in st.session_state:
-    st.session_state.tg_chat_id = DEFAULT_TG_CHAT_ID
-
-def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_val, prob_val, clave_k):
-    if st.session_state.get(clave_k, False):
-        st.session_state.ticket_persistente[clave_k] = {
-            "evento": f"{partido_obj['local']} vs {partido_obj['visitante']}",
-            "liga": partido_obj['liga_origen'],
-            "mercado": mercado_nombre,
-            "seleccion": opcion_nombre,
-            "cuota": cuota_val,
-            "casa": casa_val,
-            "prob_real": prob_val,
-            "fecha_ts": partido_obj.get('fecha_ts', None)
-        }
-    else:
-        st.session_state.ticket_persistente.pop(clave_k, None)
-
-# =========================================================
-# 9. SIDEBAR ORGANIZADO EN ACCORDEONES
+# 9. SIDEBAR ORGANIZADO EN ACCORDEONES CON UX MEJORADO
 # =========================================================
 with st.sidebar:
     st.header("⚙️ Control Global")
     
+    # [MEJORA UX 1]: Selector dinámico Modo Oscuro / Claro
+    def _cambiar_tema():
+        ConfigManager.guardar('tema_visual', st.session_state.tema_visual_widget)
+        st.session_state.tema_visual = st.session_state.tema_visual_widget
+
+    st.radio(
+        "🎨 Tema Visual:",
+        options=["Oscuro", "Claro"],
+        index=0 if st.session_state.tema_visual == "Oscuro" else 1,
+        key="tema_visual_widget",
+        on_change=_cambiar_tema,
+        horizontal=True
+    )
+
     auto_ref = st.checkbox("⚡ Monitoreo en Vivo", value=False)
     if auto_ref:
         intervalo_sec = st.selectbox("Recarga cada:", [30, 60, 120], index=1)
@@ -888,14 +861,14 @@ with st.sidebar:
     st.markdown(f"""
         <div class="creditos-caja-pro">
             <div>
-                <small style="color:#8a94a6; text-transform:uppercase; font-weight:700;">Odds API</small><br>
-                <span style="font-size:16px; font-weight:bold; color:#00d2d3;">🔑 {st.session_state.creditos_restantes}</span>
+                <small style="color:var(--rg-text-soft); text-transform:uppercase; font-weight:700;">Odds API</small><br>
+                <span style="font-size:16px; font-weight:bold; color:var(--rg-accent);">🔑 {st.session_state.creditos_restantes}</span>
             </div>
             <div>🟢</div>
         </div>
         <div class="creditos-caja-pro">
             <div>
-                <small style="color:#8a94a6; text-transform:uppercase; font-weight:700;">Football API</small><br>
+                <small style="color:var(--rg-text-soft); text-transform:uppercase; font-weight:700;">Football API</small><br>
                 <span style="font-size:16px; font-weight:bold; color:#feca57;">🔑 {st.session_state.creditos_restantes_af}</span>
             </div>
             <div>🟡</div>
@@ -910,10 +883,12 @@ with st.sidebar:
         with col_sel_todas:
             if st.button("✅ Todas", use_container_width=True):
                 st.session_state.ligas_sels_widget = list(todas_las_ligas.keys())
+                st.toast("Todas las ligas seleccionadas", icon="✅")
                 st.rerun()
         with col_sel_limpiar:
             if st.button("🧹 Ninguna", use_container_width=True):
                 st.session_state.ligas_sels_widget = []
+                st.toast("Selección de ligas limpia", icon="🧹")
                 st.rerun()
 
         ligas_sels = st.multiselect("Ligas principales:", list(todas_las_ligas.keys()), key="ligas_sels_widget")
@@ -924,6 +899,7 @@ with st.sidebar:
     with st.expander("🏬 Casas y Mercados", expanded=True):
         def _on_change_bookies():
             ConfigManager.guardar('casas_preferidas', st.session_state.casas_preferidas_widget)
+            st.toast("Preferencias de casas actualizadas", icon="🏬")
 
         casas_preferidas = st.multiselect(
             "Mis Bookies:",
@@ -950,6 +926,7 @@ with st.sidebar:
     with st.expander("🧮 Banca & Criterio Kelly"):
         def _on_change_bankroll():
             ConfigManager.guardar('bankroll_total', st.session_state.bankroll_widget)
+            st.toast("Bankroll guardado", icon="💰")
 
         bankroll_total = st.number_input(
             "Banca Total ($):", 
@@ -1254,6 +1231,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
         else:
             st.info(f"⏱️ **Cuotas actualizadas a las {hora_escaneo}** (hace {segundos_transcurridos} segundos).")
 
+    # [MEJORA UX 6]: Skeleton / Spinner con Progreso Paso a Paso
     if consultar:
         if (len(ligas_sels) > 0 or len(ligas_af_sels) > 0) and len(mercados_sels) > 0:
             st.cache_data.clear()
@@ -1262,40 +1240,47 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
 
             total_ligas = len(ligas_sels) + len(ligas_af_sels)
 
-            with st.status(f"🔄 Consultando {total_ligas} liga(s)...", expanded=True) as status_consulta:
+            with st.status(f"🔄 Iniciando escaneo de mercado ({total_ligas} ligas)...", expanded=True) as status_consulta:
                 for idx_liga, liga in enumerate(ligas_sels, start=1):
                     sport_keys_list = todas_las_ligas.get(liga, [])
-                    status_consulta.update(label=f"🔄 Consultando ({idx_liga}/{total_ligas}): {liga}")
+                    status_consulta.update(label=f"📡 Conectando API Odds ({idx_liga}/{total_ligas}): {liga}...")
                     
                     if sport_keys_list:
                         raw_h2h = consultar_api_odds_con_fallback(sport_keys_list, market_key="h2h")
                         
                         if "1X2 (Ganador)" in mercados_sels:
+                            status_consulta.update(label=f"📊 Procesando 1X2 & Poisson Dixon-Coles: {liga}")
                             procesar_e_inyectar_mercado(raw_h2h, "1X2 (Ganador)", limite_h, liga, consolidador)
 
                         if "Doble Oportunidad" in mercados_sels:
+                            status_consulta.update(label=f"⚖️ Calculando Doble Oportunidad sintética: {liga}")
                             raw_dc = consultar_api_odds_con_fallback(sport_keys_list, market_key="double_chance")
                             if not raw_dc or len(raw_dc) == 0:
                                 raw_dc = calcular_doble_oportunidad_sintetica(raw_h2h)
                             procesar_e_inyectar_mercado(raw_dc, "Doble Oportunidad", limite_h, liga, consolidador)
 
                         if "Goles Más/Menos 2.5" in mercados_sels:
+                            status_consulta.update(label=f"⚽ Analizando Totales de Goles: {liga}")
                             raw_totals = consultar_api_odds_con_fallback(sport_keys_list, market_key="totals")
                             procesar_e_inyectar_mercado(raw_totals, "Goles Más/Menos 2.5", limite_h, liga, consolidador)
 
                         if "Ambos Anotan (BTTS)" in mercados_sels:
+                            status_consulta.update(label=f"🎯 Escaneando Mercado BTTS: {liga}")
                             for p_base in raw_h2h:
                                 datos_evento = consultar_api_odds_evento(sport_keys_list[0], p_base['id'], "btts")
                                 if datos_evento:
                                     procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
 
-                status_consulta.update(label=f"✅ Consulta completa: {len(consolidador)} partidos procesados.", state="complete")
+                status_consulta.update(label=f"💰 Buscando SureBets de Arbitraje y brechas +EV...", state="running")
+                time.sleep(0.3)
+                status_consulta.update(label=f"✅ Consulta completa: {len(consolidador)} partidos procesados exitosamente.", state="complete")
 
             st.session_state.datos_cargados_previos = st.session_state.datos_cargados
             st.session_state.datos_cargados = consolidador
             st.session_state.claves_auto = set()
             st.session_state.version_ticket += 1
             st.session_state.ultimo_escaneo_ts = time.time()
+            st.toast(f"✅ Escaneo finalizado. {len(consolidador)} partidos cargados.", icon="🎯")
 
             if st.session_state.get('auto_alertas_telegram', False):
                 alertas_ev = []
@@ -1366,28 +1351,28 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                     "fecha_ts": item_sel['partido_obj'].get('fecha_ts', None)
                 }
             st.session_state.version_ticket += 1
-            st.success(f"🎯 Marcados automáticamente {len(mejores_opciones)} eventos.")
+            st.toast(f"🎯 Marcados automáticamente {len(mejores_opciones)} eventos.", icon="🎲")
 
     if not st.session_state.ha_consultado:
         st.markdown("""
             <div class="empty-state-card">
-                <h3 style="color:#00d2d3; margin-bottom:8px; font-weight:800;">⚡ Sistema Listo para el Análisis</h3>
-                <p style="color:#8a94a6; margin-bottom:22px; font-size:13.5px;">Sigue estos pasos en el panel lateral para iniciar la búsqueda de cuotas y ValueBets:</p>
+                <h3 style="color:var(--rg-accent); margin-bottom:8px; font-weight:800;">⚡ Sistema Listo para el Análisis</h3>
+                <p style="color:var(--rg-text-soft); margin-bottom:22px; font-size:13.5px;">Sigue estos pasos en el panel lateral para iniciar la búsqueda de cuotas y ValueBets:</p>
                 <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap:16px;">
                     <div class="empty-state-step">
                         <div class="step-badge">1</div><br>
-                        <strong style="color:#ffffff; font-size:14px;">Selecciona Torneos</strong>
-                        <p style="font-size:12px; color:#8a94a6; margin-top:6px; margin-bottom:0;">Añade Champions, Europa League o Ligas Domésticas.</p>
+                        <strong style="color:var(--rg-text); font-size:14px;">Selecciona Torneos</strong>
+                        <p style="font-size:12px; color:var(--rg-text-soft); margin-top:6px; margin-bottom:0;">Añade Champions, Europa League o Ligas Domésticas.</p>
                     </div>
                     <div class="empty-state-step">
                         <div class="step-badge">2</div><br>
-                        <strong style="color:#ffffff; font-size:14px;">Casas y Mercados</strong>
-                        <p style="font-size:12px; color:#8a94a6; margin-top:6px; margin-bottom:0;">Selecciona la ventana de tiempo o activa 'Traer todo'.</p>
+                        <strong style="color:var(--rg-text); font-size:14px;">Casas y Mercados</strong>
+                        <p style="font-size:12px; color:var(--rg-text-soft); margin-top:6px; margin-bottom:0;">Selecciona la ventana de tiempo o activa 'Traer todo'.</p>
                     </div>
                     <div class="empty-state-step">
                         <div class="step-badge">3</div><br>
-                        <strong style="color:#ffffff; font-size:14px;">Escanea y Ejecuta</strong>
-                        <p style="font-size:12px; color:#8a94a6; margin-top:6px; margin-bottom:0;">Haz clic en 'Escanear Mercado Now' para analizar cuotas.</p>
+                        <strong style="color:var(--rg-text); font-size:14px;">Escanea y Ejecuta</strong>
+                        <p style="font-size:12px; color:var(--rg-text-soft); margin-top:6px; margin-bottom:0;">Haz clic en 'Escanear Mercado Now' para analizar cuotas.</p>
                     </div>
                 </div>
             </div>
@@ -1395,13 +1380,41 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
     elif not dict_partidos:
         st.info("ℹ️ **No se encontraron partidos en el rango seleccionado.** Si estás buscando torneos europeos fuera de jornada inmediata, activa la casilla **'🌐 Traer todo sin filtro de días'** o amplia la ventana de tiempo.")
     else:
-        col_busq, col_valor, col_orden = st.columns([2.2, 1.3, 1.5])
-        with col_busq: busqueda_equipo = st.text_input("🔍 Buscador rápido por equipo:", "").strip().lower()
-        
-        dict_partidos_filtrados = {
-            p_id: p for p_id, p in dict_partidos.items()
-            if busqueda_equipo in p['local'].lower() or busqueda_equipo in p['visitante'].lower()
-        }
+        # [MEJORA UX 2]: Filtros Avanzados y Buscador en el Radar
+        with st.expander("🎛️ Filtros Avanzados de Cuotas y Estado", expanded=True):
+            col_busq, col_rango_cuota, col_chk1, col_chk2 = st.columns([2, 2, 1.2, 1.2])
+            with col_busq:
+                busqueda_equipo = st.text_input("🔍 Buscador por equipo:", "").strip().lower()
+            with col_rango_cuota:
+                filtro_rango_c = st.slider("Filtro de Cuotas Máximas:", 1.05, 10.0, (1.10, 5.00), step=0.05)
+            with col_chk1:
+                solo_live = st.checkbox("🔴 Solo En Vivo", value=False)
+            with col_chk2:
+                solo_ev = st.checkbox("🔥 Solo +EV", value=False)
+
+        # Aplicar Filtros Avanzados
+        dict_partidos_filtrados = {}
+        for p_id, p in dict_partidos.items():
+            coincide_nombre = (busqueda_equipo in p['local'].lower() or busqueda_equipo in p['visitante'].lower())
+            if not coincide_nombre: continue
+            if solo_live and not p.get('es_en_vivo', False): continue
+            
+            # Filtrar por cuotas y EV
+            mercados_filtrados = {}
+            for m_nombre, m_info in p['mercados'].items():
+                cuotas_ok = {}
+                for op, c_val in m_info['max_cuotas'].items():
+                    if filtro_rango_c[0] <= c_val <= filtro_rango_c[1]:
+                        if solo_ev and not m_info['value_bets'].get(op, {}).get('es_value', False):
+                            continue
+                        cuotas_ok[op] = c_val
+                if cuotas_ok:
+                    mercados_filtrados[m_nombre] = m_info
+
+            if mercados_filtrados:
+                p_copy = dict(p)
+                p_copy['mercados'] = mercados_filtrados
+                dict_partidos_filtrados[p_id] = p_copy
 
         col_izq, col_der = st.columns([6.5, 3.5])
 
@@ -1423,7 +1436,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                         m_loc = override_data.get('goles_loc', part.get('marcador_local', 0))
                                         m_vis = override_data.get('goles_vis', part.get('marcador_visita', 0))
                                         min_v = f"{override_data.get('minuto', part.get('minuto_num', 30))}'"
-                                        st.markdown(f"<div class='match-header'>⚽ {part['local']} <span style='color:#00d2d3; font-weight:800;'>{m_loc} - {m_vis}</span> {part['visitante']}</div>", unsafe_allow_html=True)
+                                        st.markdown(f"<div class='match-header'>⚽ {part['local']} <span style='color:var(--rg-accent); font-weight:800;'>{m_loc} - {m_vis}</span> {part['visitante']}</div>", unsafe_allow_html=True)
                                         st.markdown(f"<span style='background:#e74c3c; color:white; padding:2px 8px; border-radius:12px; font-weight:bold; font-size:11px;'>🔴 EN VIVO</span> <span class='kickoff-chip'>⏱️ {min_v}</span>", unsafe_allow_html=True)
                                     else:
                                         st.markdown(f"<div class='match-header'>⚽ {part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
@@ -1460,27 +1473,27 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                                     if op_key in nuevas_probs:
                                                         val_dict['prob_poisson'] = nuevas_probs[op_key]
 
-                                            st.toast("⚡ ¡Poisson Live recalculado exitosamente!", icon="🎯")
+                                            st.toast("⚡ Poisson Live recalculado exitosamente", icon="🎯")
                                             st.rerun()
 
-                                    with st.expander("⚡ Cobertura en Vivo / Hedging Automático (Live Trigger)", expanded=False):
-                                        c_h1, c_h2 = st.columns(2)
-                                        monto_prev = c_h1.number_input("Inversión previa ($):", min_value=1.0, value=10.0, key=f"h_inv_{part['id']}")
-                                        cuota_prev = c_h2.number_input("Cuota previa lograda:", min_value=1.01, value=2.50, key=f"h_cuota_{part['id']}")
+                                with st.expander("⚡ Cobertura en Vivo / Hedging Automático", expanded=False):
+                                    c_h1, c_h2 = st.columns(2)
+                                    monto_prev = c_h1.number_input("Inversión previa ($):", min_value=1.0, value=10.0, key=f"h_inv_{part['id']}")
+                                    cuota_prev = c_h2.number_input("Cuota previa lograda:", min_value=1.01, value=2.50, key=f"h_cuota_{part['id']}")
+                                    
+                                    ret_esperado = monto_prev * cuota_prev
+                                    st.caption(f"Retorno esperado si gana tu apuesta inicial: **${round(ret_esperado, 2)}**")
+                                    
+                                    m_1x2 = part['mercados'].get("1X2 (Ganador)", {})
+                                    if m_1x2:
+                                        cuota_contra_live = min(m_1x2.get('max_cuotas', {}).values()) if m_1x2.get('max_cuotas') else 2.0
+                                        stake_hedge_live = ret_esperado / cuota_contra_live
+                                        ganancia_asegurada_live = ret_esperado - monto_prev - stake_hedge_live
                                         
-                                        ret_esperado = monto_prev * cuota_prev
-                                        st.caption(f"Retorno esperado si gana tu apuesta inicial: **${round(ret_esperado, 2)}**")
-                                        
-                                        m_1x2 = part['mercados'].get("1X2 (Ganador)", {})
-                                        if m_1x2:
-                                            cuota_contra_live = min(m_1x2.get('max_cuotas', {}).values()) if m_1x2.get('max_cuotas') else 2.0
-                                            stake_hedge_live = ret_esperado / cuota_contra_live
-                                            ganancia_asegurada_live = ret_esperado - monto_prev - stake_hedge_live
-                                            
-                                            if ganancia_asegurada_live > 0:
-                                                st.success(f"🔥 **¡Oportunidad de Cobertura!** Apuesta **${round(stake_hedge_live, 2)}** a la contra-opción (x{cuota_contra_live}) para **asegurar ${round(ganancia_asegurada_live, 2)} libres de riesgo**.")
-                                            else:
-                                                st.info(f"💡 Apostar **${round(stake_hedge_live, 2)}** a la contraopción equilibra pérdidas si el marcador cambia.")
+                                        if ganancia_asegurada_live > 0:
+                                            st.success(f"🔥 **¡Oportunidad de Cobertura!** Apuesta **${round(stake_hedge_live, 2)}** a la contra-opción (x{cuota_contra_live}) para **asegurar ${round(ganancia_asegurada_live, 2)} libres de riesgo**.")
+                                        else:
+                                            st.info(f"💡 Apostar **${round(stake_hedge_live, 2)}** a la contraopción equilibra pérdidas si el marcador cambia.")
 
                                 sub_tabs = st.tabs(list(part['mercados'].keys()))
                                 for m_idx, text_m in enumerate(part['mercados'].keys()):
@@ -1504,7 +1517,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                                     "Ganancia Potencial": (c_max_par * monto_inversion) - monto_inversion
                                                 })
                                                 BitacoraManager.guardar(st.session_state.historial_apuestas)
-                                                st.toast("⚡ ¡SureBet registrada directamente en Bitácora!", icon="🚀")
+                                                st.toast("⚡ ¡SureBet registrada en Bitácora!", icon="🚀")
 
                                         for op_k, var_k in m_info.get('variaciones', {}).items():
                                             if "Bajando" in var_k and part.get('es_en_vivo'):
@@ -1554,10 +1567,16 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             
             apuestas_seleccionadas = list(st.session_state.ticket_persistente.values())
 
-            if st.button("🧹 Limpiar Boleto", use_container_width=True):
-                st.session_state.ticket_persistente.clear()
-                st.session_state.claves_auto.clear()
-                st.rerun()
+            # [MEJORA UX 7]: Confirmaciones para acciones destructivas (Limpiar Boleto)
+            col_b1, col_b2 = st.columns([2, 1])
+            with col_b1:
+                confirmar_limpieza = st.checkbox("⚠️ Confirmar limpiar boleto", value=False, key="chk_conf_limpiar")
+            with col_b2:
+                if st.button("🧹 Limpiar", use_container_width=True, disabled=not confirmar_limpieza):
+                    st.session_state.ticket_persistente.clear()
+                    st.session_state.claves_auto.clear()
+                    st.toast("Boleto limpiado con éxito", icon="🧹")
+                    st.rerun()
 
             if apuestas_seleccionadas:
                 alertas_correlacion = detectar_correlaciones(apuestas_seleccionadas)
@@ -1600,7 +1619,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                     with st.expander("📱 Transferencia Móvil mediante Código QR"):
                         datos_qr_encoded = urllib.parse.quote(texto_whatsapp)
                         url_qr = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={datos_qr_encoded}"
-                        st.markdown(f"<div style='text-align:center;'><img src='{url_qr}' width='160' style='border-radius:10px; border:2px solid #00d2d3;'><br><small style='color:#8a94a6;'>Escanea para transferir boleto al móvil</small></div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='text-align:center;'><img src='{url_qr}' width='160' style='border-radius:10px; border:2px solid #00d2d3;'><br><small style='color:var(--rg-text-soft);'>Escanea para transferir boleto al móvil</small></div>", unsafe_allow_html=True)
 
                     with st.expander("🛡️ Optimizador de Sistemas (TRIXIE / YANKEE)"):
                         res_sistema = calcular_sistema_cobertura(apuestas_seleccionadas, monto_ticket)
@@ -1632,7 +1651,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                             "Ganancia Potencial": ganancia_neta
                         })
                         BitacoraManager.guardar(st.session_state.historial_apuestas)
-                        st.toast("¡Guardado localmente!", icon="💾")
+                        st.toast("¡Guardado localmente en la Bitácora!", icon="💾")
                         st.rerun()
 
                     html_ticket = f"""
@@ -1645,7 +1664,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                     html_ticket += f"<hr><h4>Cuota Total: x{round(cuota_acumulada,2)} | Inversión: ${monto_ticket}</h4></div>"
                     
                     st.download_button(
-                        "📄 Descargar Boleto HTML/PDF",
+                        "📄 Descargar Boleto HTML",
                         data=html_ticket,
                         file_name=f"Boleto_Parlay_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
                         mime="text/html",
@@ -1657,9 +1676,17 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
 
                     if st.button("📤 Enviar a Telegram", use_container_width=True, key="telegram_btn"):
                         if enviar_telegram(texto_whatsapp):
-                            st.toast("¡Enviado a Telegram!", icon="📤")
+                            st.toast("¡Boleto enviado a Telegram!", icon="📤")
             else:
                 st.info("🎟️ Marca casillas en el radar para construir tu boleto persistente.")
+
+    # [MEJORA UX 5]: Boleto flotante colapsable al final de pantalla para móviles
+    if st.session_state.ticket_persistente:
+        c_total_flotante = np.prod([float(ap['cuota']) for ap in st.session_state.ticket_persistente.values()])
+        with st.expander(f"📱 🎟️ VER BOLETO FLOTANTE ({len(st.session_state.ticket_persistente)} Selecciones | x{round(c_total_flotante, 2)})", expanded=False):
+            st.write("**Eventos en Boleto:**")
+            for ap in st.session_state.ticket_persistente.values():
+                st.write(f"• **{ap['evento']}**: `{ap['seleccion']}` @ x{ap['cuota']}")
 
 # ---------------------------------------------------------
 # PESTAÑA 2: CALCULADORA EXTERNA & MONTE CARLO
@@ -1843,7 +1870,7 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
                     <div class="kpi-card" style="border-left: 5px solid #00d2d3; margin-bottom: 15px;">
                         <div class="kpi-label">🎯 PROBABILIDAD REAL DE ACERTAR ESTE PARLAY</div>
                         <div class="kpi-value" style="color: #00d2d3;">{round(prob_porcentaje, 2)}%</div>
-                        <div class="kpi-sub" style="color:#a4b0be;">Equivale a acertar 1 de cada {round(100/prob_porcentaje, 1) if prob_porcentaje > 0 else 0} intentos</div>
+                        <div class="kpi-sub">Equivale a acertar 1 de cada {round(100/prob_porcentaje, 1) if prob_porcentaje > 0 else 0} intentos</div>
                     </div>
                 """, unsafe_allow_html=True)
 
@@ -2114,7 +2141,16 @@ elif vista_seleccionada == "🔥 CAZADOR +EV & DROPPING":
         df_value_real = pd.DataFrame(lista_valuebets_reales).sort_values("Valor (+EV)", ascending=False)
         st.dataframe(df_value_real, use_container_width=True, hide_index=True)
     else:
-        st.info(f"ℹ️ No se detectaron apuestas con valor superior a **+{umbral_ev_min}%**. Realiza un nuevo escaneo o ajusta el slider del umbral.")
+        # [MEJORA UX 4]: Empty State Dinámico en Cazador +EV
+        st.markdown(f"""
+            <div class="empty-state-card" style="text-align:center; padding: 30px 20px;">
+                <div style="font-size:38px; margin-bottom:8px;">🎯</div>
+                <h3 style="color:var(--rg-accent); margin-bottom:8px;">Sin brechas de valor > +{umbral_ev_min}%</h3>
+                <p style="color:var(--rg-text-soft); font-size:13.5px; max-width:500px; margin:0 auto 15px auto;">
+                    Prueba reduciendo el umbral del slider o realiza un nuevo escaneo seleccionando más ligas en el sidebar.
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("📉 Alertas de Dropping Odds (Cuotas en Caída Libre)")
@@ -2217,7 +2253,14 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
                 else:
                     st.success(f"✅ No se reportan bajas oficiales registradas recientemente para **{equipo_sel}**.")
         else:
-            st.info("ℹ️ Haz clic en **'🔍 Escanear Mercado Now'** para cargar los equipos disponibles y consultar sus bajas.")
+            # [MEJORA UX 4]: Empty state ilustrativo
+            st.markdown("""
+                <div class="empty-state-card" style="text-align:center; padding:30px 20px;">
+                    <div style="font-size:36px; margin-bottom:8px;">🩹</div>
+                    <h4 style="color:var(--rg-accent);">Escaneo Requerido</h4>
+                    <p style="color:var(--rg-text-soft); font-size:12.5px;">Haz clic en 'Escanear Mercado Now' para listar los equipos y sus bajas.</p>
+                </div>
+            """, unsafe_allow_html=True)
 
     with col_info_2:
         st.subheader("📋 Alineaciones Confirmadas")
@@ -2404,7 +2447,7 @@ elif vista_seleccionada == "📈 BITÁCORA & ROI":
                 data_restaurada = json.load(uploaded_json)
                 st.session_state.historial_apuestas = data_restaurada
                 BitacoraManager.guardar(data_restaurada)
-                st.success("✅ Bitácora restaurada!")
+                st.toast("Bitácora restaurada exitosamente", icon="✅")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error JSON: {e}")
@@ -2432,6 +2475,7 @@ elif vista_seleccionada == "📈 BITÁCORA & ROI":
                 if nuevo != fila['Estado']:
                     st.session_state.historial_apuestas[idx]['Estado'] = nuevo
                     BitacoraManager.guardar(st.session_state.historial_apuestas)
+                    st.toast(f"Ticket #{idx+1} actualizado a {nuevo}", icon="📝")
                     st.rerun()
 
         total_inv = df_act['Inversión'].sum()
@@ -2503,18 +2547,24 @@ elif vista_seleccionada == "📈 BITÁCORA & ROI":
 
         st.dataframe(df_act, use_container_width=True)
 
-        col_d, col_b = st.columns([3, 1])
+        # [MEJORA UX 7]: Confirmación para reiniciar Bitácora
+        col_d, col_b1, col_b2 = st.columns([2, 1.5, 1])
         col_d.download_button("📊 Descargar Bitácora (CSV)", data=df_act.to_csv(index=False).encode('utf-8'), file_name="Reporte_Apuestas.csv", mime='text/csv', use_container_width=True)
-        if col_b.button("🗑️ Reiniciar Bitácora", use_container_width=True):
-            BitacoraManager.limpiar()
-            st.rerun()
+        with col_b1:
+            confirmar_borrado_bit = st.checkbox("⚠️ Confirmar borrado", value=False, key="chk_conf_bitacora")
+        with col_b2:
+            if st.button("🗑️ Reiniciar", use_container_width=True, disabled=not confirmar_borrado_bit):
+                BitacoraManager.limpiar()
+                st.toast("Bitácora reiniciada por completo", icon="🧹")
+                st.rerun()
     else:
+        # [MEJORA UX 4]: Empty State Dinámico en Bitácora con directo al escaneo
         st.markdown("""
             <div class="empty-state-card" style="text-align: center; padding: 40px 20px;">
                 <div style="font-size: 42px; margin-bottom: 10px;">📋</div>
-                <h3 style="color:#00d2d3; margin-bottom: 8px;">Bitácora de Apuestas Vacía</h3>
-                <p style="color:#8a94a6; max-width: 500px; margin: 0 auto 20px auto; font-size: 14px;">
-                    Aún no registras apuestas en tu historial. Puedes guardar un parlay directamente desde la pestaña <b>Radar</b> o restaurar un respaldo JSON existente arriba.
+                <h3 style="color:var(--rg-accent); margin-bottom: 8px;">Bitácora de Apuestas Vacía</h3>
+                <p style="color:var(--rg-text-soft); max-width: 500px; margin: 0 auto 20px auto; font-size: 14px;">
+                    Aún no tienes registros guardados. Ve a la pestaña Radar para armar tu primer boleto y guardarlo aquí.
                 </p>
             </div>
         """, unsafe_allow_html=True)
@@ -2596,9 +2646,9 @@ elif vista_seleccionada == "💬 ATENCIÓN Y MEJORAS":
                         st.error(f"Error al guardar registro local: {e}")
 
                     if enviado_tg:
-                        st.success("✅ ¡Mensaje enviado con éxito directamente al canal de soporte por Telegram y registrado en la base de datos!")
+                        st.toast("✅ Mensaje enviado a Telegram y registrado localmente.", icon="🚀")
                     else:
-                        st.success("✅ Mensaje registrado localmente con éxito.")
+                        st.toast("✅ Mensaje registrado localmente.", icon="📝")
 
                     st.balloons()
 
