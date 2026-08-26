@@ -86,10 +86,10 @@ class ConfigManager:
             st.sidebar.error(f"Error al guardar configuración: {e}")
 
 def enviar_telegram(mensaje: str) -> bool:
-    token = st.session_state.get('tg_token', '').strip() or DEFAULT_TG_TOKEN
-    chat_id = st.session_state.get('tg_chat_id', '').strip() or DEFAULT_TG_CHAT_ID
+    token = DEFAULT_TG_TOKEN
+    chat_id = DEFAULT_TG_CHAT_ID
     if not token or not chat_id:
-        st.warning("⚠️ Configura tu Bot Token y Chat ID de Telegram en el sidebar antes de enviar.")
+        st.warning("⚠️ El bot de Telegram no está configurado correctamente.")
         return False
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
@@ -853,9 +853,9 @@ if 'casas_preferidas' not in st.session_state:
 if 'bankroll_total' not in st.session_state:
     st.session_state.bankroll_total = user_config.get('bankroll_total', 200.0)
 if 'tg_token' not in st.session_state:
-    st.session_state.tg_token = user_config.get('tg_token', DEFAULT_TG_TOKEN)
+    st.session_state.tg_token = DEFAULT_TG_TOKEN
 if 'tg_chat_id' not in st.session_state:
-    st.session_state.tg_chat_id = user_config.get('tg_chat_id', DEFAULT_TG_CHAT_ID)
+    st.session_state.tg_chat_id = DEFAULT_TG_CHAT_ID
 
 def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_val, prob_val, clave_k):
     if st.session_state.get(clave_k, False):
@@ -972,26 +972,7 @@ with st.sidebar:
         generar_auto = st.button("🎲 Pre-seleccionar", use_container_width=True)
 
     with st.expander("🔔 Alertas Telegram"):
-        def _on_change_tg_token():
-            ConfigManager.guardar('tg_token', st.session_state.tg_token_widget)
-        def _on_change_tg_chat():
-            ConfigManager.guardar('tg_chat_id', st.session_state.tg_chat_id_widget)
-
-        st.text_input(
-            "Bot Token:", 
-            value=st.session_state.tg_token, 
-            type="password", 
-            key="tg_token_widget",
-            on_change=_on_change_tg_token
-        )
-        st.text_input(
-            "Chat ID:", 
-            value=st.session_state.tg_chat_id, 
-            key="tg_chat_id_widget",
-            on_change=_on_change_tg_chat
-        )
-        st.session_state['tg_token'] = st.session_state.get('tg_token_widget', st.session_state.tg_token)
-        st.session_state['tg_chat_id'] = st.session_state.get('tg_chat_id_widget', st.session_state.tg_chat_id)
+        st.success("🤖 Bot de Notificaciones Activo (Modo Global Protegido)")
         st.session_state['auto_alertas_telegram'] = st.checkbox("🚀 Auto-alertas (+EV > 5%)", value=False)
 
 # =========================================================
@@ -2617,7 +2598,7 @@ elif vista_seleccionada == "💬 ATENCIÓN Y MEJORAS":
                     if enviado_tg:
                         st.success("✅ ¡Mensaje enviado con éxito directamente al canal de soporte por Telegram y registrado en la base de datos!")
                     else:
-                        st.success("✅ Mensaje registrado localmente con éxito (Configura tu Bot Token y Chat ID en el sidebar para recibir las notificaciones en Telegram).")
+                        st.success("✅ Mensaje registrado localmente con éxito.")
 
                     st.balloons()
 
