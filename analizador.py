@@ -33,6 +33,9 @@ HL_BASE_URL = "https://soccer.highlightly.net"
 AF_API_KEY = st.secrets.get("AF_API_KEY", "5cca912e78e3ec42256f42db0b59fda2")
 AF_BASE_URL = "https://v3.football.api-sports.io"
 
+DEFAULT_TG_TOKEN = "8904966094:AAGjNdo21MI8XiJ111sJ_J1rUP2KM3HIUXo"
+DEFAULT_TG_CHAT_ID = "5832993106"
+
 # =========================================================
 # 2. CAPA DE PERSISTENCIA Y SERVICIOS
 # =========================================================
@@ -83,8 +86,8 @@ class ConfigManager:
             st.sidebar.error(f"Error al guardar configuración: {e}")
 
 def enviar_telegram(mensaje: str) -> bool:
-    token = st.session_state.get('tg_token', '')
-    chat_id = st.session_state.get('tg_chat_id', '')
+    token = st.session_state.get('tg_token', '').strip() or DEFAULT_TG_TOKEN
+    chat_id = st.session_state.get('tg_chat_id', '').strip() or DEFAULT_TG_CHAT_ID
     if not token or not chat_id:
         st.warning("⚠️ Configura tu Bot Token y Chat ID de Telegram en el sidebar antes de enviar.")
         return False
@@ -421,7 +424,7 @@ def generar_resumen_ejecutivo_ai(dict_partidos: Dict[str, Any]) -> str:
     if total_valuebets > 0:
         resumen += f"📈 Se hallaron **{total_valuebets} apuestas de valor positivo (+EV)**. La liga con mayor concentración de valor es **{top_liga}** ({val_top_count} apuestas +EV)."
     else:
-        resumen += "El mercado muestra líneas altamente ajustadas por los bookmakers."
+        resumen += "El mercado muestra líneas highly ajustadas por los bookmakers."
 
     return resumen
 
@@ -850,9 +853,9 @@ if 'casas_preferidas' not in st.session_state:
 if 'bankroll_total' not in st.session_state:
     st.session_state.bankroll_total = user_config.get('bankroll_total', 200.0)
 if 'tg_token' not in st.session_state:
-    st.session_state.tg_token = user_config.get('tg_token', '')
+    st.session_state.tg_token = user_config.get('tg_token', DEFAULT_TG_TOKEN)
 if 'tg_chat_id' not in st.session_state:
-    st.session_state.tg_chat_id = user_config.get('tg_chat_id', '')
+    st.session_state.tg_chat_id = user_config.get('tg_chat_id', DEFAULT_TG_CHAT_ID)
 
 def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_val, prob_val, clave_k):
     if st.session_state.get(clave_k, False):
