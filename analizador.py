@@ -100,6 +100,8 @@ def enviar_telegram(mensaje: str) -> bool:
         return False
 
 def disparar_alerta_sonora_y_notificacion(titulo: str, mensaje: str):
+    if not st.session_state.get('notif_push_activas', True):
+        return
     js_code = f"""
     <script>
     if ("Notification" in window) {{
@@ -151,7 +153,6 @@ def calcular_impacto_bajas(lambda_base: float, peso_bajas: float) -> float:
     return lambda_base * factor_ajuste
 
 def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1.10, usar_dixon_coles: bool = True, bajas_local_pct: float = 0.0, bajas_visita_pct: float = 0.0) -> Dict[str, float]:
-    # Aplicar ajuste por bajas a las tasas base
     lambda_l = calcular_impacto_bajas(lambda_local, bajas_local_pct)
     lambda_v = calcular_impacto_bajas(lambda_visita, bajas_visita_pct)
 
@@ -229,7 +230,6 @@ def detectar_surebet(cuotas_max_dict: Dict[str, float]) -> Dict[str, Any]:
     if not cuotas_max_dict or len(cuotas_max_dict) < 2:
         return {"es_surebet": False, "overround": 1.0, "lucro": 0.0}
     
-    # Calcular overround para cualquier conjunto de cuotas que cubran un mercado completo
     overround = sum(1.0 / float(c) for c in cuotas_max_dict.values() if float(c) > 0)
     es_surebet = overround < 1.0
     lucro = ((1.0 / overround) - 1.0) * 100.0 if es_surebet else 0.0
@@ -291,6 +291,21 @@ def detectar_correlaciones(apuestas: List[Dict[str, Any]]) -> List[str]:
                     alertas.append(f"⚠️ **{ev}**: Conflicto de alta correlación negativa (Menos de 2.5 Goles y Ambos Anotan Sí).")
 
     return alertas
+
+def detectar_conflictos_horarios(apuestas: List[Dict[str, Any]]) -> List[str]:
+    alertas_horario = []
+    fechas = []
+    for ap in apuestas:
+        ts = ap.get('fecha_ts', None)
+        if ts:
+            fechas.append((ap['evento'], ts))
+    
+    if len(fechas) > 1:
+        for (ev1, ts1), (ev2, ts2) in itertools.combinations(fechas, 2):
+            diff_min = abs(ts1 - ts2) / 60.0
+            if diff_min < 110:
+                alertas_horario.append(f"⏰ **Conflicto de Horario**: *{ev1}* y *{ev2}* se juegan simultáneamente (diferencia de {int(diff_min)} min). Esto impedirá hacer Cashout o Cobertura manual (*Hedge*) entre ambos partidos.")
+    return alertas_horario
 
 def evaluar_riesgo_parlay(partidos: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not partidos:
@@ -374,6 +389,41 @@ def calcular_sistema_cobertura(partidos: List[Dict[str, Any]], stake_total: floa
         stake_unitario = stake_total / num_apuestas
         retorno_max = (sum(np.prod(c) for c in comb_dobles) + sum(np.prod(c) for c in comb_triples) + sum(np.prod(c) for c in comb_cuad) + sum(np.prod(c) for c in comb_quin)) * stake_unitario
         return {"tipo": "CANADIAN (5 Selecciones Top)", "apuestas": num_apuestas, "stake_unitario": stake_unitario, "retorno_max": retorno_max}
+
+def generar_resumen_ejecutivo_ai(dict_partidos: Dict[str, Any]) -> str:
+    if not dict_partidos:
+        return ""
+    
+    total_partidos = len(dict_partidos)
+    total_surebets = 0
+    total_valuebets = 0
+    liga_con_mas_valor = {}
+
+    for p in dict_partidos.values():
+        liga = p['liga_origen']
+        for m_nombre, m_info in p['mercados'].items():
+            if m_info.get('surebet', {}).get('es_surebet', False):
+                total_surebets += 1
+            for val_item in m_info.get('value_bets', {}).values():
+                if val_item.get('ev', 0) > 0.03:
+                    total_valuebets += 1
+                    liga_con_mas_valor[liga] = liga_con_mas_valor.get(liga, 0) + 1
+
+    top_liga = max(liga_con_mas_valor, key=liga_con_mas_valor.get) if liga_con_mas_valor else "General"
+    val_top_count = liga_con_mas_valor.get(top_liga, 0)
+
+    resumen = f"🧠 **AI Insight Summary:** Actualmente hay **{total_partidos} partidos escaneados** en el radar. "
+    if total_surebets > 0:
+        resumen += f"🔥 Se han detectado **{total_surebets} SureBet(s) de arbitraje sin riesgo**. "
+    else:
+        resumen += "Sin SureBets activas por el momento. "
+
+    if total_valuebets > 0:
+        resumen += f"📈 Se hallaron **{total_valuebets} apuestas de valor positivo (+EV)**. La liga con mayor concentración de valor es **{top_liga}** ({val_top_count} apuestas +EV)."
+    else:
+        resumen += "El mercado muestra líneas altamente ajustadas por los bookmakers."
+
+    return resumen
 
 # =========================================================
 # 5. EXPORTADOR CSV
@@ -489,6 +539,17 @@ st.markdown("""
         background-color: var(--rg-accent) !important; 
         height: 2px !important;
         box-shadow: 0 0 10px var(--rg-accent);
+    }
+
+    .ai-summary-box {
+        background: linear-gradient(90deg, rgba(124, 92, 255, 0.12) 0%, rgba(0, 210, 211, 0.12) 100%);
+        border: 1px solid rgba(0, 210, 211, 0.35);
+        border-radius: 12px;
+        padding: 12px 18px;
+        margin-bottom: 18px;
+        font-size: 13.5px;
+        color: #ffffff;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
 
     .empty-state-card {
@@ -775,16 +836,15 @@ if 'creditos_restantes_af' not in st.session_state:
     st.session_state.creditos_restantes_af = "No consultado"
 if 'overrides_live' not in st.session_state:
     st.session_state.overrides_live = {}
+if 'notif_push_activas' not in st.session_state:
+    st.session_state.notif_push_activas = True
 
-# DICCIONARIO PARA TICKET GLOBAL PERSISTENTE
 if 'ticket_persistente' not in st.session_state:
     st.session_state.ticket_persistente = {}
 
-# Timestamp del último escaneo
 if 'ultimo_escaneo_ts' not in st.session_state:
     st.session_state.ultimo_escaneo_ts = None
 
-# Carga de preferencias persistentes del usuario
 if 'casas_preferidas' not in st.session_state:
     st.session_state.casas_preferidas = user_config.get('casas_preferidas', [])
 if 'bankroll_total' not in st.session_state:
@@ -794,7 +854,6 @@ if 'tg_token' not in st.session_state:
 if 'tg_chat_id' not in st.session_state:
     st.session_state.tg_chat_id = user_config.get('tg_chat_id', '')
 
-# Callback centralizado para alternar selecciones de forma persistente
 def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_val, prob_val, clave_k):
     if st.session_state.get(clave_k, False):
         st.session_state.ticket_persistente[clave_k] = {
@@ -804,7 +863,8 @@ def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_v
             "seleccion": opcion_nombre,
             "cuota": cuota_val,
             "casa": casa_val,
-            "prob_real": prob_val
+            "prob_real": prob_val,
+            "fecha_ts": partido_obj.get('fecha_ts', None)
         }
     else:
         st.session_state.ticket_persistente.pop(clave_k, None)
@@ -819,6 +879,8 @@ with st.sidebar:
     if auto_ref:
         intervalo_sec = st.selectbox("Recarga cada:", [30, 60, 120], index=1)
         st.markdown(f"<meta http-equiv='refresh' content='{intervalo_sec}'>", unsafe_allow_html=True)
+
+    st.session_state.notif_push_activas = st.checkbox("🔔 Push Web & Alertas Sonoras", value=st.session_state.notif_push_activas, help="Emite alertas emergentes en pantalla e indicadores sonoros al hallar SureBets/ValueBets.")
 
     st.markdown(f"""
         <div class="creditos-caja-pro">
@@ -1263,6 +1325,11 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
     dict_partidos = st.session_state.datos_cargados
     dict_previos = st.session_state.datos_cargados_previos
 
+    if dict_partidos:
+        texto_ai = generar_resumen_ejecutivo_ai(dict_partidos)
+        if texto_ai:
+            st.markdown(f"<div class='ai-summary-box'>{texto_ai}</div>", unsafe_allow_html=True)
+
     if generar_auto and dict_partidos:
         opciones_todas = []
         for p_id, part in dict_partidos.items():
@@ -1310,7 +1377,8 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                     "seleccion": item_sel['opcion_nombre'],
                     "cuota": item_sel['cuota_val'],
                     "casa": item_sel['casa_val'],
-                    "prob_real": item_sel['prob_real']
+                    "prob_real": item_sel['prob_real'],
+                    "fecha_ts": item_sel['partido_obj'].get('fecha_ts', None)
                 }
             st.session_state.version_ticket += 1
             st.success(f"🎯 Marcados automáticamente {len(mejores_opciones)} eventos.")
@@ -1511,6 +1579,10 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                 for al in alertas_correlacion:
                     st.error(al)
 
+                alertas_horario = detectar_conflictos_horarios(apuestas_seleccionadas)
+                for al_h in alertas_horario:
+                    st.warning(al_h)
+
                 cuota_acumulada = 1.0
                 prob_combinada = 1.0
                 texto_whatsapp = "🚀 *TICKET PARLAY SUGERIDO DESDE RADAR GLOBAL* 🚀\n\n"
@@ -1539,6 +1611,11 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                     c_k1, c_k2 = st.columns(2)
                     c_k1.metric("💡 Stake Kelly Sugerido", f"${round(stake_kelly, 2)}", help=f"Recomendación para tu Bankroll de ${bankroll_total}")
                     c_k2.metric("⚡ Sharpe Ratio Parlay", f"{round(sharpe_parlay, 3)}", help="Relación de Rentabilidad Esperanza vs Volatilidad (> 0.05 es aceptable)")
+
+                    with st.expander("📱 Transferencia Móvil mediante Código QR"):
+                        datos_qr_encoded = urllib.parse.quote(texto_whatsapp)
+                        url_qr = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={datos_qr_encoded}"
+                        st.markdown(f"<div style='text-align:center;'><img src='{url_qr}' width='160' style='border-radius:10px; border:2px solid #00d2d3;'><br><small style='color:#8a94a6;'>Escanea para transferir boleto al móvil</small></div>", unsafe_allow_html=True)
 
                     with st.expander("🛡️ Optimizador de Sistemas (TRIXIE / YANKEE)"):
                         res_sistema = calcular_sistema_cobertura(apuestas_seleccionadas, monto_ticket)
@@ -1912,12 +1989,11 @@ elif vista_seleccionada == "📊 ESTADÍSTICAS & H2H":
                 lambda_l_adj = calcular_impacto_bajas(xg_local_input, bajas_local_pct)
                 lambda_v_adj = calcular_impacto_bajas(xg_visit_input, bajas_visit_pct)
 
-                # Se pasan los parámetros ajustados por bajas directamente al modelo
                 probs_custom_xg = calcular_modelo_poisson(
                     lambda_local=lambda_l_adj, 
                     lambda_visita=lambda_v_adj, 
                     usar_dixon_coles=True,
-                    bajas_local_pct=0.0, # Ya fueron aplicados arriba en lambda_l_adj
+                    bajas_local_pct=0.0,
                     bajas_visita_pct=0.0
                 )
                 
@@ -2188,11 +2264,17 @@ elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
             st.caption("Escanea partidos desde el panel lateral para habilitar este módulo.")
 
 # ---------------------------------------------------------
-# PESTAÑA 7: GENERADOR DE CARTEL Y DESCARGA PNG
+# PESTAÑA 7: GENERADOR DE CARTEL Y DESCARGA PNG MULTIFORMATO
 # ---------------------------------------------------------
 elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.title("🎨 Generador Visual de Pronósticos para Redes")
     st.caption("Crea carteles elegantes y profesionales ajustados automáticamente según las selecciones de tu boleto.")
+
+    formato_cartel = st.segmented_control(
+        "📐 Formato de Exportación:",
+        options=["📱 Stories / WhatsApp Status (9:16 - 1080x1920)", "🖼️ Cuadrado / Post (4:5 - 1080x1350)"],
+        default="📱 Stories / WhatsApp Status (9:16 - 1080x1920)"
+    )
 
     st.subheader("🖼️ Diseñador de Tarjeta de Apuesta")
     c_t1, c_t2 = st.columns([1, 1])
@@ -2208,8 +2290,8 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
             cuota_acumulada_cartel *= float(ap['cuota'])
             prob_combinada_cartel *= (float(ap['prob_real']) / 100.0)
             html_eventos += (
-                f"<div style='margin-bottom: 12px; text-align: left; background: rgba(255,255,255,0.03); padding: 8px 12px; border-radius: 8px; border: 1px solid #232a38;'>"
-                f"⚽ <b>{ap['evento']}</b><br>"
+                f"<div style='margin-bottom: 12px; text-align: left; background: rgba(255,255,255,0.04); padding: 12px 14px; border-radius: 10px; border: 1px solid #232a38;'>"
+                f"⚽ <b style='color:#ffffff; font-size:14px;'>{ap['evento']}</b><br>"
                 f"🎯 Selección: <span style='color:#00d2d3; font-weight:bold;'>{ap['seleccion']} (x{ap['cuota']})</span>"
                 f"</div>"
             )
@@ -2247,15 +2329,20 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     with c_t2:
         cuota_txt = f"x{round(cuota_acumulada_cartel, 2)}" if cuota_acumulada_cartel > 0 else "x1.00"
 
+        es_vertical = "Stories" in formato_cartel
+        ancho_px = "420px" if es_vertical else "480px"
+        alto_px = "680px" if es_vertical else "520px"
+        scale_val = "2.8" if es_vertical else "2.2"
+
         cartel_componente_html = f"""
         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
         <div id="cartel_container" style="
-            width: 480px; 
-            min-height: 480px; 
+            width: {ancho_px}; 
+            min-height: {alto_px}; 
             background: linear-gradient(135deg, #0b0e14 0%, #171c27 100%); 
             border: 2px solid #00d2d3; 
-            border-radius: 16px; 
-            padding: 24px; 
+            border-radius: 18px; 
+            padding: 26px; 
             box-sizing: border-box; 
             font-family: 'Inter', sans-serif; 
             color: white; 
@@ -2266,54 +2353,54 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
             justify-content: space-between;
         ">
             <div>
-                <div style="text-align: center; margin-bottom: 15px;">
-                    <span style="background: rgba(0,210,211,0.15); color: #00d2d3; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">PREDICCIÓN EXCLUSIVA</span>
-                    <h3 style="color: #00d2d3; margin: 10px 0 4px 0; font-size: 18px; font-weight: 800;">{titulo_cartel}</h3>
+                <div style="text-align: center; margin-bottom: 18px;">
+                    <span style="background: rgba(0,210,211,0.15); color: #00d2d3; padding: 5px 14px; border-radius: 20px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">PREDICCIÓN EXCLUSIVA</span>
+                    <h3 style="color: #00d2d3; margin: 12px 0 6px 0; font-size: 19px; font-weight: 800;">{titulo_cartel}</h3>
                     <p style="color: #8a94a6; font-size: 12px; margin: 0;">Tipster: <b style="color:#ffffff;">{analista_nombre}</b> | Stake: <b style="color:#feca57;">{monto_sugerido}/10</b></p>
                 </div>
-                <hr style="border: 0; border-top: 1px solid #232a38; margin: 12px 0;">
+                <hr style="border: 0; border-top: 1px solid #232a38; margin: 14px 0;">
                 <div style="font-size: 13px;">
                     {html_eventos}
                 </div>
             </div>
             <div>
-                <hr style="border: 0; border-top: 1px solid #232a38; margin: 12px 0;">
-                <div style="text-align: center; background: rgba(0,210,211,0.08); border-radius: 12px; padding: 12px; border: 1px dashed rgba(0,210,211,0.3);">
+                <hr style="border: 0; border-top: 1px solid #232a38; margin: 14px 0;">
+                <div style="text-align: center; background: rgba(0,210,211,0.08); border-radius: 14px; padding: 14px; border: 1px dashed rgba(0,210,211,0.3);">
                     <div style="color: #8a94a6; font-size: 11px; font-weight: 700; text-transform: uppercase;">Cuota Total Acumulada</div>
-                    <div style="color: #ffffff; font-size: 28px; font-weight: 800; font-family: sans-serif;">{cuota_txt}</div>
+                    <div style="color: #ffffff; font-size: 32px; font-weight: 800; font-family: sans-serif;">{cuota_txt}</div>
                     <div style="color: #00d2d3; font-size: 11px; margin-top: 2px;">💵 Inversión Recomendada: ${round(stake_sugerido_monto, 2)} USD</div>
                 </div>
             </div>
         </div>
 
-        <div style="text-align: center; margin-top: 15px;">
+        <div style="text-align: center; margin-top: 18px;">
             <button onclick="descargarPNG()" style="
                 background: linear-gradient(90deg, #00b3b4, #00d2d3); 
                 color: black; 
                 border: none; 
-                padding: 10px 20px; 
+                padding: 12px 22px; 
                 border-radius: 8px; 
                 font-weight: 800; 
-                font-size: 13px; 
+                font-size: 13.5px; 
                 cursor: pointer; 
                 box-shadow: 0 4px 15px rgba(0,210,211,0.3);
                 width: 100%;
-            ">📸 Descargar Imagen del Cartel (PNG Nativo 1080x1080)</button>
+            ">📸 Descargar Imagen del Cartel (HD High Resolution PNG)</button>
         </div>
 
         <script>
         function descargarPNG() {{
             const container = document.getElementById('cartel_container');
-            html2canvas(container, {{ scale: 2.2, backgroundColor: '#0b0e14' }}).then(canvas => {{
+            html2canvas(container, {{ scale: {scale_val}, backgroundColor: '#0b0e14' }}).then(canvas => {{
                 let link = document.createElement('a');
-                link.download = 'Cartel_Parlay_Pro.png';
+                link.download = 'Cartel_Parlay_HD.png';
                 link.href = canvas.toDataURL('image/png');
                 link.click();
             }});
         }}
         </script>
         """
-        components.html(cartel_componente_html, height=580)
+        components.html(cartel_componente_html, height=760 if es_vertical else 600)
 
 # ---------------------------------------------------------
 # PESTAÑA 8: AUDITORÍA Y BITÁCORA PRO
