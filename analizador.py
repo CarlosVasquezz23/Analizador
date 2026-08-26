@@ -424,7 +424,7 @@ def generar_resumen_ejecutivo_ai(dict_partidos: Dict[str, Any]) -> str:
     if total_valuebets > 0:
         resumen += f"📈 Se hallaron **{total_valuebets} apuestas de valor positivo (+EV)**. La liga con mayor concentración de valor es **{top_liga}** ({val_top_count} apuestas +EV)."
     else:
-        resumen += "El mercado muestra líneas altamente ajustadas por los bookmakers."
+        resumen += "El mercado muestra líneas highly ajustadas por los bookmakers."
 
     return resumen
 
