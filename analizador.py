@@ -150,14 +150,18 @@ def calcular_impacto_bajas(lambda_base: float, peso_bajas: float) -> float:
     factor_ajuste = max(0.3, 1.0 - (peso_bajas / 100.0))
     return lambda_base * factor_ajuste
 
-def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1.10, usar_dixon_coles: bool = True) -> Dict[str, float]:
+def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1.10, usar_dixon_coles: bool = True, bajas_local_pct: float = 0.0, bajas_visita_pct: float = 0.0) -> Dict[str, float]:
+    # Aplicar ajuste por bajas a las tasas base
+    lambda_l = calcular_impacto_bajas(lambda_local, bajas_local_pct)
+    lambda_v = calcular_impacto_bajas(lambda_visita, bajas_visita_pct)
+
     max_goles = 6
     matriz_prob = np.zeros((max_goles, max_goles))
     
     for i in range(max_goles):
         for j in range(max_goles):
-            p_base = poisson_pmf(i, lambda_local) * poisson_pmf(j, lambda_visita)
-            tau = dixon_coles_factor(i, j, lambda_local, lambda_visita) if usar_dixon_coles else 1.0
+            p_base = poisson_pmf(i, lambda_l) * poisson_pmf(j, lambda_v)
+            tau = dixon_coles_factor(i, j, lambda_l, lambda_v) if usar_dixon_coles else 1.0
             matriz_prob[i, j] = p_base * tau
             
     soma = np.sum(matriz_prob)
@@ -225,7 +229,8 @@ def detectar_surebet(cuotas_max_dict: Dict[str, float]) -> Dict[str, Any]:
     if not cuotas_max_dict or len(cuotas_max_dict) < 2:
         return {"es_surebet": False, "overround": 1.0, "lucro": 0.0}
     
-    overround = sum(1.0 / float(c) for c in cuotas_max_dict.values())
+    # Calcular overround para cualquier conjunto de cuotas que cubran un mercado completo
+    overround = sum(1.0 / float(c) for c in cuotas_max_dict.values() if float(c) > 0)
     es_surebet = overround < 1.0
     lucro = ((1.0 / overround) - 1.0) * 100.0 if es_surebet else 0.0
     
@@ -1907,7 +1912,14 @@ elif vista_seleccionada == "📊 ESTADÍSTICAS & H2H":
                 lambda_l_adj = calcular_impacto_bajas(xg_local_input, bajas_local_pct)
                 lambda_v_adj = calcular_impacto_bajas(xg_visit_input, bajas_visit_pct)
 
-                probs_custom_xg = calcular_modelo_poisson(lambda_l_adj, lambda_v_adj, usar_dixon_coles=True)
+                # Se pasan los parámetros ajustados por bajas directamente al modelo
+                probs_custom_xg = calcular_modelo_poisson(
+                    lambda_local=lambda_l_adj, 
+                    lambda_visita=lambda_v_adj, 
+                    usar_dixon_coles=True,
+                    bajas_local_pct=0.0, # Ya fueron aplicados arriba en lambda_l_adj
+                    bajas_visita_pct=0.0
+                )
                 
                 st.markdown(f"**Lambdas Ajustados:** `{eq_local}`: **{round(lambda_l_adj, 2)}** goles esperados | `{eq_visit}`: **{round(lambda_v_adj, 2)}** goles esperados")
                 
@@ -1967,11 +1979,12 @@ elif vista_seleccionada == "🛡️ MATRIZ DE COBERTURAS":
 
         monto_total_sb = st.number_input("Monto Total a Invertir ($):", min_value=10.0, value=100.0, step=10.0)
 
-        inv_p = (1/cuota_1) + (1/cuota_X) + (1/cuota_2)
-        lucro_sb = ((1 / inv_p) - 1) * 100
+        dicc_cuotas_input = {"Opción 1": cuota_1, "Opción X": cuota_X, "Opción 2": cuota_2}
+        res_surebet_calc = detectar_surebet(dicc_cuotas_input)
 
-        if inv_p < 1.0:
-            st.success(f"🔥 **SUREBET DETECTADA! Rendimiento Garantizado: +{round(lucro_sb, 2)}%**")
+        if res_surebet_calc["es_surebet"]:
+            st.success(f"🔥 **SUREBET DETECTADA! Rendimiento Garantizado: +{round(res_surebet_calc['lucro'], 2)}%**")
+            inv_p = res_surebet_calc["overround"]
             ap_1 = (monto_total_sb / (cuota_1 * inv_p))
             ap_X = (monto_total_sb / (cuota_X * inv_p))
             ap_2 = (monto_total_sb / (cuota_2 * inv_p))
@@ -1983,7 +1996,7 @@ elif vista_seleccionada == "🛡️ MATRIZ DE COBERTURAS":
             ])
             st.dataframe(res_df, use_container_width=True, hide_index=True)
         else:
-            st.warning(f"⚠️ No hay SureBet con estas cuotas (Overround/Margen de la casa: {round(inv_p*100, 2)}%).")
+            st.warning(f"⚠️ No hay SureBet con estas cuotas (Overround/Margen de la casa: {round(res_surebet_calc['overround']*100, 2)}%).")
 
     with sub_tab2:
         st.subheader("🔄 Evaluar Cashout vs. Cobertura Directa")
