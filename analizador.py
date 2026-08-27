@@ -27,7 +27,6 @@ st.set_page_config(
 DB_FILE = "bitacora_backup.json"
 CONFIG_FILE = "user_config.json"
 
-# Cargar credenciales únicamente desde st.secrets sin exponer fallback keys en duro
 API_KEY = st.secrets.get("ODDS_API_KEY", "")
 HL_API_KEY = st.secrets.get("HL_API_KEY", "")
 HL_BASE_URL = "https://soccer.highlightly.net"
@@ -95,10 +94,7 @@ def enviar_telegram(mensaje: str) -> bool:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
         r = requests.post(url, data={"chat_id": chat_id, "text": mensaje, "parse_mode": "Markdown"}, timeout=10)
-        if r.status_code == 200:
-            return True
-        st.error(f"❌ Error al enviar a Telegram ({r.status_code}): {r.text[:200]}")
-        return False
+        return r.status_code == 200
     except Exception as e:
         st.error(f"💥 Error de conexión con Telegram: {e}")
         return False
@@ -357,7 +353,7 @@ def evaluar_riesgo_parlay(partidos: List[Dict[str, Any]]) -> Dict[str, Any]:
     else:
         nivel = "🔴 Muy Alto"
         if not consejos:
-            consejos.append("🔴 **Riesgo Elevado**: La cuota total o la volatilidad individual hacen este parlay altamente especulativo.")
+            consejos.append("🔴 **Riesgo Elevado**: La cuota total o la volatilidad individual hacen este parlay highly especulativo.")
 
     return {"nivel": nivel, "score": score, "consejos": consejos}
 
@@ -1008,9 +1004,11 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         bookmakers = partido.get('bookmakers', [])
         if not bookmakers: continue
 
+        # MODIFICADO: No descartar partidos si la casa preferida no está en la API, mantener conjunto por defecto
         if casas_preferidas:
-            bookmakers = [b for b in bookmakers if any(cp.lower() in b['title'].lower() for cp in casas_preferidas)]
-            if not bookmakers: continue
+            bookies_filtrados = [b for b in bookmakers if any(cp.lower() in b['title'].lower() for cp in casas_preferidas)]
+            if bookies_filtrados:
+                bookmakers = bookies_filtrados
 
         cuotas_globales, betano_cuotas = {}, {}
 
@@ -1183,6 +1181,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             total_ligas = len(ligas_sels) + len(ligas_af_sels)
 
             with st.status(f"🔄 Iniciando escaneo de mercado ({total_ligas} ligas)...", expanded=True) as status_consulta:
+                # 1. Escaneo de Ligas Principales (Odds API)
                 for idx_liga, liga in enumerate(ligas_sels, start=1):
                     sport_keys_list = todas_las_ligas.get(liga, [])
                     status_consulta.update(label=f"📡 Conectando API Odds ({idx_liga}/{total_ligas}): {liga}...")
@@ -1206,12 +1205,50 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                             raw_totals = consultar_api_odds_con_fallback(sport_keys_list, market_key="totals")
                             procesar_e_inyectar_mercado(raw_totals, "Goles Más/Menos 2.5", limite_h, liga, consolidador)
 
-                        # Optimización: Escaneo de mercado BTTS en lote sin peticiones N+1 por partido
                         if "Ambos Anotan (BTTS)" in mercados_sels:
                             status_consulta.update(label=f"🎯 Escaneando Mercado BTTS: {liga}")
                             raw_btts = consultar_api_odds_con_fallback(sport_keys_list, market_key="btts")
                             if raw_btts:
                                 procesar_e_inyectar_mercado(raw_btts, "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
+
+                # 2. Escaneo de Ligas Extra (API-Football)
+                for idx_af, liga_af in enumerate(ligas_af_sels, start=len(ligas_sels) + 1):
+                    af_id = AF_LEAGUE_IDS.get(liga_af)
+                    status_consulta.update(label=f"📡 Conectando API Football ({idx_af}/{total_ligas}): {liga_af}...")
+                    if af_id and AF_API_KEY:
+                        try:
+                            r = requests.get(f"{AF_BASE_URL}/odds", headers=af_headers(), params={"league": af_id, "season": datetime.now().year}, timeout=10)
+                            _actualizar_creditos_af(r.headers)
+                            if r.status_code == 200:
+                                raw_af_odds = r.json().get("response", [])
+                                # Convertir datos de API-Football a estructura normalizada Odds-API
+                                datos_normalizados = []
+                                for item in raw_af_odds:
+                                    fix = item.get("fixture", {})
+                                    teams = item.get("teams", {})
+                                    bookies_af = item.get("bookmakers", [])
+                                    
+                                    bookmakers_converted = []
+                                    for b in bookies_af:
+                                        b_markets = []
+                                        for m in b.get("bets", []):
+                                            m_name = m.get("name")
+                                            key_m = "h2h" if m_name == "Match Winner" else ("totals" if m_name == "Goals Over/Under" else ("btts" if m_name == "Both Teams Score" else "double_chance"))
+                                            outcomes = [{"name": o.get("value"), "price": float(o.get("odd"))} for o in m.get("values", [])]
+                                            b_markets.append({"key": key_m, "outcomes": outcomes})
+                                        bookmakers_converted.append({"key": str(b.get("id")), "title": b.get("name"), "markets": b_markets})
+
+                                    datos_normalizados.append({
+                                        "id": f"af_{fix.get('id')}",
+                                        "home_team": teams.get("home", {}).get("name", "Local"),
+                                        "away_team": teams.get("away", {}).get("name", "Visitante"),
+                                        "commence_time": fix.get("date", datetime.now(timezone.utc).isoformat()),
+                                        "bookmakers": bookmakers_converted
+                                    })
+                                for m_sel in mercados_sels:
+                                    procesar_e_inyectar_mercado(datos_normalizados, m_sel, limite_h, liga_af, consolidador)
+                        except Exception:
+                            pass
 
                 status_consulta.update(label=f"💰 Buscando SureBets de Arbitraje y brechas +EV...", state="running")
                 time.sleep(0.3)
