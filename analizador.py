@@ -12,7 +12,7 @@ import io
 import itertools
 import time
 from typing import Dict, List, Any, Optional
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import streamlit.components.v1 as components
 
 # =========================================================
@@ -869,7 +869,7 @@ with st.sidebar:
         ligas_sels = st.multiselect("Ligas principales:", list(todas_las_ligas.keys()), key="ligas_sels_widget")
         
         habilitar_af = st.checkbox("Habilitar Ligas LATAM (API-Football)", value=True)
-        ligas_af_sels = st.multiselect("Ligas extra:", list(AF_LEAGUE_IDS.keys()), default=[]) if habilitar_af else []
+        ligas_af_sels = st.multiselect("Ligas extra:", list(AF_LEAGUE_IDS.keys()), default=["🇪🇨 LigaPro (Ecuador)"]) if habilitar_af else []
 
     with st.expander("🏬 Casas y Mercados", expanded=True):
         def _on_change_bookies():
@@ -884,7 +884,7 @@ with st.sidebar:
             on_change=_on_change_bookies
         )
         mercados_sels = st.multiselect("Mercados:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
-        sin_limite_fecha = st.checkbox("🌐 Traer todo sin filtro de días", value=False)
+        sin_limite_fecha = st.checkbox("🌐 Traer todo sin filtro de días", value=True)
         if not sin_limite_fecha:
             tiempo_sel = st.selectbox(
                 "Ventana de tiempo:", 
@@ -928,7 +928,7 @@ with st.sidebar:
         st.session_state['auto_alertas_telegram'] = st.checkbox("🚀 Auto-alertas (+EV > 5%)", value=False)
 
 # =========================================================
-# 10. PROCESAMIENTO DE CUOTAS
+# 10. PROCESAMIENTO DE CUOTAS Y FALLBACKS API-FOOTBALL
 # =========================================================
 def actualizar_creditos(headers):
     if 'x-requests-remaining' in headers:
@@ -968,16 +968,68 @@ def consultar_api_odds_con_fallback(sport_keys_list, market_key):
         st.session_state.debug_api_errors.extend(errores_locales)
     return []
 
-@st.cache_data(ttl=60)
-def consultar_api_odds_evento(sport_key, event_id, market_key):
-    if not sport_key or not event_id or not API_KEY: return None
-    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event_id}/odds/?apiKey={API_KEY}&regions=eu,us&markets={market_key}&oddsFormat=decimal"
+def consultar_af_con_fallback_fixtures(af_id, nombre_liga):
+    """
+    Intenta traer las cuotas masivas de la liga (/odds). Si vienen vacías ([]),
+    hace un respaldo automático buscando los próximos partidos programados 
+    (/fixtures?next=10) y consultando cuota por cuota para rescatar la LigaPro.
+    """
+    if not af_id or not AF_API_KEY:
+        return []
+
+    url_odds = f"{AF_BASE_URL}/odds"
+    season_actual = datetime.now().year
+    
+    # Intento 1: Consulta masiva global
     try:
-        response = requests.get(url, timeout=10)
-        actualizar_creditos(response.headers)
-        return response.json() if response.status_code == 200 else None
-    except Exception:
-        return None
+        r = requests.get(url_odds, headers=af_headers(), params={"league": af_id, "season": season_actual}, timeout=10)
+        _actualizar_creditos_af(r.headers)
+        if r.status_code == 200:
+            raw_data = r.json().get("response", [])
+            if raw_data:
+                return raw_data
+    except Exception as e:
+        st.session_state.debug_api_errors.append(f"[API-Football Odds] {nombre_liga}: Error masivo {e}")
+
+    # Intento 2: Fallback automático en 2 pasos si /odds masivo viene vacío
+    st.session_state.debug_api_errors.append(f"[API-Football] {nombre_liga}: /odds masivo volvió vacío. Ejecutando fallback automatico (/fixtures?next=10)...")
+    
+    url_fixtures = f"{AF_BASE_URL}/fixtures"
+    fixtures_encontrados = []
+    
+    try:
+        rf = requests.get(url_fixtures, headers=af_headers(), params={"league": af_id, "next": 10}, timeout=10)
+        _actualizar_creditos_af(rf.headers)
+        if rf.status_code == 200:
+            fixtures_encontrados = rf.json().get("response", [])
+    except Exception as e:
+        st.session_state.debug_api_errors.append(f"[API-Football Fixtures] {nombre_liga}: Error al buscar partidos: {e}")
+        return []
+
+    if not fixtures_encontrados:
+        st.session_state.debug_api_errors.append(f"[API-Football Fallback] {nombre_liga}: No hay próximos partidos programados en el calendario.")
+        return []
+
+    # Intento 3: Petición individual fixture por fixture
+    resultados_reconstruidos = []
+    for fix in fixtures_encontrados:
+        f_id = fix.get("fixture", {}).get("id")
+        if not f_id: continue
+            
+        try:
+            r_fix_odds = requests.get(url_odds, headers=af_headers(), params={"fixture": f_id}, timeout=8)
+            _actualizar_creditos_af(r_fix_odds.headers)
+            if r_fix_odds.status_code == 200:
+                resp_f = r_fix_odds.json().get("response", [])
+                if resp_f:
+                    resultados_reconstruidos.extend(resp_f)
+        except Exception as e:
+            st.session_state.debug_api_errors.append(f"[API-Football Odds Fixture {f_id}] Error: {e}")
+
+    if not resultados_reconstruidos:
+        st.session_state.debug_api_errors.append(f"[API-Football Fallback] {nombre_liga}: Se encontraron partidos programados pero las casas de apuestas aún no publican cuotas.")
+
+    return resultados_reconstruidos
 
 def calcular_doble_oportunidad_sintetica(raw_h2h_data):
     if not raw_h2h_data or not isinstance(raw_h2h_data, list): return []
@@ -1266,39 +1318,37 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                     status_consulta.update(label=f"📡 Conectando API Football ({idx_af}/{total_ligas}): {liga_af}...")
                     if af_id and AF_API_KEY:
                         try:
-                            r = requests.get(f"{AF_BASE_URL}/odds", headers=af_headers(), params={"league": af_id, "season": datetime.now().year}, timeout=10)
-                            _actualizar_creditos_af(r.headers)
-                            if r.status_code == 200:
-                                raw_af_odds = r.json().get("response", [])
-                                if not raw_af_odds:
-                                    st.session_state.debug_api_errors.append(f"[API-Football] {liga_af}: respuesta vacía (revisa temporada/season o si la liga tiene cuotas cargadas).")
-                                datos_normalizados = []
-                                for item in raw_af_odds:
-                                    fix = item.get("fixture", {})
-                                    teams = item.get("teams", {})
-                                    bookies_af = item.get("bookmakers", [])
-                                    
-                                    bookmakers_converted = []
-                                    for b in bookies_af:
-                                        b_markets = []
-                                        for m in b.get("bets", []):
-                                            m_name = m.get("name")
-                                            key_m = "h2h" if m_name == "Match Winner" else ("totals" if m_name == "Goals Over/Under" else ("btts" if m_name == "Both Teams Score" else "double_chance"))
-                                            outcomes = [{"name": o.get("value"), "price": float(o.get("odd"))} for o in m.get("values", [])]
-                                            b_markets.append({"key": key_m, "outcomes": outcomes})
-                                        bookmakers_converted.append({"key": str(b.get("id")), "title": b.get("name"), "markets": b_markets})
+                            # AQUÍ SE EJECUTA EL NUEVO FALLBACK AUTOMÁTICO PARA LIGAPRO
+                            raw_af_odds = consultar_af_con_fallback_fixtures(af_id, liga_af)
+                            
+                            if not raw_af_odds:
+                                st.session_state.debug_api_errors.append(f"[API-Football] {liga_af}: No se encontraron cuotas tras ejecutar consulta global y búsqueda por fixtures.")
+                            
+                            datos_normalizados = []
+                            for item in raw_af_odds:
+                                fix = item.get("fixture", {})
+                                teams = item.get("teams", {})
+                                bookies_af = item.get("bookmakers", [])
+                                
+                                bookmakers_converted = []
+                                for b in bookies_af:
+                                    b_markets = []
+                                    for m in b.get("bets", []):
+                                        m_name = m.get("name")
+                                        key_m = "h2h" if m_name == "Match Winner" else ("totals" if m_name == "Goals Over/Under" else ("btts" if m_name == "Both Teams Score" else "double_chance"))
+                                        outcomes = [{"name": o.get("value"), "price": float(o.get("odd"))} for o in m.get("values", [])]
+                                        b_markets.append({"key": key_m, "outcomes": outcomes})
+                                    bookmakers_converted.append({"key": str(b.get("id")), "title": b.get("name"), "markets": b_markets})
 
-                                    datos_normalizados.append({
-                                        "id": f"af_{fix.get('id')}",
-                                        "home_team": teams.get("home", {}).get("name", "Local"),
-                                        "away_team": teams.get("away", {}).get("name", "Visitante"),
-                                        "commence_time": fix.get("date", datetime.now(timezone.utc).isoformat()),
-                                        "bookmakers": bookmakers_converted
-                                    })
-                                for m_sel in mercados_sels:
-                                    procesar_e_inyectar_mercado(datos_normalizados, m_sel, limite_h, liga_af, consolidador)
-                            else:
-                                st.session_state.debug_api_errors.append(f"[API-Football] {liga_af}: HTTP {r.status_code}: {r.text[:250]}")
+                                datos_normalizados.append({
+                                    "id": f"af_{fix.get('id')}",
+                                    "home_team": teams.get("home", {}).get("name", "Local"),
+                                    "away_team": teams.get("away", {}).get("name", "Visitante"),
+                                    "commence_time": fix.get("date", datetime.now(timezone.utc).isoformat()),
+                                    "bookmakers": bookmakers_converted
+                                })
+                            for m_sel in mercados_sels:
+                                procesar_e_inyectar_mercado(datos_normalizados, m_sel, limite_h, liga_af, consolidador)
                         except Exception as e:
                             st.session_state.debug_api_errors.append(f"[API-Football] {liga_af}: EXCEPCIÓN {e}")
 
@@ -1728,7 +1778,6 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
     st.title("🧮 Analizador, Lector OCR & Simulador Monte Carlo")
     st.caption("Analiza cuotas de boletos externos, simula 10,000 iteraciones o lee datos desde capturas de pantalla.")
 
-    # Corrección para compatibilidad de Streamlit (pills / radio)
     modo_ingreso = st.radio(
         "⚡ Método de Ingreso:",
         options=["🚀 Pegado Rápido (Texto)", "📸 Captura de Pantalla / OCR", "📝 Registro Manual"],
@@ -2344,7 +2393,6 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.title("🎨 Generador Visual de Pronósticos para Redes")
     st.caption("Crea carteles elegantes y profesionales ajustados automáticamente según las selecciones de tu boleto.")
 
-    # Corrección para compatibilidad de Streamlit (pills / radio)
     formato_cartel = st.radio(
         "📐 Formato de Exportación:",
         options=["📱 Stories / WhatsApp Status (9:16 - 1080x1920)", "🖼️ Cuadrado / Post (4:5 - 1080x1350)"],
