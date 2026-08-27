@@ -1004,7 +1004,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         bookmakers = partido.get('bookmakers', [])
         if not bookmakers: continue
 
-        # MODIFICADO: No descartar partidos si la casa preferida no está en la API, mantener conjunto por defecto
         if casas_preferidas:
             bookies_filtrados = [b for b in bookmakers if any(cp.lower() in b['title'].lower() for cp in casas_preferidas)]
             if bookies_filtrados:
@@ -1181,7 +1180,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             total_ligas = len(ligas_sels) + len(ligas_af_sels)
 
             with st.status(f"🔄 Iniciando escaneo de mercado ({total_ligas} ligas)...", expanded=True) as status_consulta:
-                # 1. Escaneo de Ligas Principales (Odds API)
                 for idx_liga, liga in enumerate(ligas_sels, start=1):
                     sport_keys_list = todas_las_ligas.get(liga, [])
                     status_consulta.update(label=f"📡 Conectando API Odds ({idx_liga}/{total_ligas}): {liga}...")
@@ -1211,7 +1209,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                             if raw_btts:
                                 procesar_e_inyectar_mercado(raw_btts, "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
 
-                # 2. Escaneo de Ligas Extra (API-Football)
                 for idx_af, liga_af in enumerate(ligas_af_sels, start=len(ligas_sels) + 1):
                     af_id = AF_LEAGUE_IDS.get(liga_af)
                     status_consulta.update(label=f"📡 Conectando API Football ({idx_af}/{total_ligas}): {liga_af}...")
@@ -1221,7 +1218,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                             _actualizar_creditos_af(r.headers)
                             if r.status_code == 200:
                                 raw_af_odds = r.json().get("response", [])
-                                # Convertir datos de API-Football a estructura normalizada Odds-API
                                 datos_normalizados = []
                                 for item in raw_af_odds:
                                     fix = item.get("fixture", {})
