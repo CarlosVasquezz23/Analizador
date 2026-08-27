@@ -502,6 +502,10 @@ if 'tg_token' not in st.session_state:
     st.session_state.tg_token = DEFAULT_TG_TOKEN
 if 'tg_chat_id' not in st.session_state:
     st.session_state.tg_chat_id = DEFAULT_TG_CHAT_ID
+if 'debug_api_errors' not in st.session_state:
+    st.session_state.debug_api_errors = []
+if 'debug_mode' not in st.session_state:
+    st.session_state.debug_mode = False
 
 def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_val, prob_val, clave_k):
     if st.session_state.get(clave_k, False):
@@ -815,6 +819,45 @@ with st.sidebar:
         </div>
     """, unsafe_allow_html=True)
 
+    with st.expander("🐞 Diagnóstico de APIs", expanded=False):
+        st.session_state.debug_mode = st.checkbox("Modo diagnóstico detallado", value=st.session_state.debug_mode, help="Muestra en pantalla todos los errores HTTP crudos de cada consulta a las APIs.")
+
+        if not API_KEY:
+            st.error("❌ ODDS_API_KEY no está configurada en st.secrets.")
+        else:
+            st.success(f"✅ ODDS_API_KEY cargada (termina en ...{API_KEY[-4:]})")
+
+        if not AF_API_KEY:
+            st.warning("⚠️ AF_API_KEY (API-Football) no está configurada.")
+        else:
+            st.success(f"✅ AF_API_KEY cargada (termina en ...{AF_API_KEY[-4:]})")
+
+        if st.button("🔍 Ver ligas de soccer soportadas por Odds API", use_container_width=True):
+            if not API_KEY:
+                st.error("No se puede consultar: falta ODDS_API_KEY.")
+            else:
+                try:
+                    r = requests.get(f"https://api.the-odds-api.com/v4/sports/?apiKey={API_KEY}", timeout=10)
+                    if r.status_code == 200:
+                        todos_sports = r.json()
+                        soccer_keys = sorted([s['key'] for s in todos_sports if s.get('group') == 'Soccer'])
+                        st.write(f"**{len(soccer_keys)} ligas de soccer disponibles con tu clave:**")
+                        st.code("\n".join(soccer_keys))
+
+                        claves_usadas = set()
+                        for v in todas_las_ligas.values():
+                            claves_usadas.update(v)
+                        no_soportadas = sorted([k for k in claves_usadas if k not in soccer_keys])
+                        if no_soportadas:
+                            st.error("❌ Estas ligas de tu selector NO existen en tu plan/API y por eso siempre devuelven 0 partidos:")
+                            st.code("\n".join(no_soportadas))
+                        else:
+                            st.success("✅ Todas las claves de tu diccionario 'todas_las_ligas' existen en la API.")
+                    else:
+                        st.error(f"HTTP {r.status_code}: {r.text[:300]}")
+                except Exception as e:
+                    st.error(f"Excepción al consultar: {e}")
+
     with st.expander("⚽ Selección de Torneos", expanded=True):
         if 'ligas_sels_widget' not in st.session_state:
             st.session_state.ligas_sels_widget = []
@@ -901,20 +944,37 @@ def actualizar_creditos(headers):
 
 @st.cache_data(ttl=60)
 def consultar_api_odds(sport_key, market_key):
-    if not sport_key or not API_KEY: return []
+    """
+    Devuelve (datos, error).
+    datos: lista de eventos (puede ser []).
+    error: None si todo salió bien, o un string descriptivo del problema real.
+    """
+    if not API_KEY:
+        return [], "Falta ODDS_API_KEY en st.secrets"
+    if not sport_key:
+        return [], "sport_key vacío"
+
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu,us&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url, timeout=10)
         actualizar_creditos(response.headers)
-        return response.json() if response.status_code == 200 else []
-    except Exception:
-        return []
+        if response.status_code == 200:
+            return response.json(), None
+        else:
+            return [], f"[{sport_key}/{market_key}] HTTP {response.status_code}: {response.text[:250]}"
+    except Exception as e:
+        return [], f"[{sport_key}/{market_key}] EXCEPCIÓN: {e}"
 
 def consultar_api_odds_con_fallback(sport_keys_list, market_key):
+    errores_locales = []
     for key in sport_keys_list:
-        data = consultar_api_odds(key, market_key)
+        data, err = consultar_api_odds(key, market_key)
         if data and isinstance(data, list) and len(data) > 0:
             return data
+        if err:
+            errores_locales.append(err)
+    if errores_locales:
+        st.session_state.debug_api_errors.extend(errores_locales)
     return []
 
 @st.cache_data(ttl=60)
@@ -1176,6 +1236,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             st.cache_data.clear()
             consolidador = {}
             st.session_state.ha_consultado = True
+            st.session_state.debug_api_errors = []
 
             total_ligas = len(ligas_sels) + len(ligas_af_sels)
 
@@ -1218,6 +1279,8 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                             _actualizar_creditos_af(r.headers)
                             if r.status_code == 200:
                                 raw_af_odds = r.json().get("response", [])
+                                if not raw_af_odds:
+                                    st.session_state.debug_api_errors.append(f"[API-Football] {liga_af}: respuesta vacía (revisa temporada/season o si la liga tiene cuotas cargadas).")
                                 datos_normalizados = []
                                 for item in raw_af_odds:
                                     fix = item.get("fixture", {})
@@ -1243,8 +1306,10 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                     })
                                 for m_sel in mercados_sels:
                                     procesar_e_inyectar_mercado(datos_normalizados, m_sel, limite_h, liga_af, consolidador)
-                        except Exception:
-                            pass
+                            else:
+                                st.session_state.debug_api_errors.append(f"[API-Football] {liga_af}: HTTP {r.status_code}: {r.text[:250]}")
+                        except Exception as e:
+                            st.session_state.debug_api_errors.append(f"[API-Football] {liga_af}: EXCEPCIÓN {e}")
 
                 status_consulta.update(label=f"💰 Buscando SureBets de Arbitraje y brechas +EV...", state="running")
                 time.sleep(0.3)
@@ -1266,6 +1331,13 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                 alertas_ev.append(f"🔥 *VALUEBET +EV ({round(val['ev']*100, 1)}%)*\n⚽ {p['local']} vs {p['visitante']}\n🎯 {m_n}: *{op}* (x{m_v['max_cuotas'][op]})\n🏢 {m_v['max_bookies'][op]}")
                 if alertas_ev:
                     enviar_telegram("🚨 *OPORTUNIDADES DE VALOR ENCONTRADAS* 🚨\n\n" + "\n\n".join(alertas_ev[:5]))
+
+    if st.session_state.get('debug_api_errors'):
+        with st.expander(f"🐞 Diagnóstico: {len(st.session_state.debug_api_errors)} problema(s) detectado(s) durante el último escaneo", expanded=True):
+            st.caption("Esto explica por qué faltan partidos o por qué salieron 0. Revisa cada línea: claves de liga inexistentes en tu plan, cuota agotada, o clave inválida.")
+            errores_unicos = list(dict.fromkeys(st.session_state.debug_api_errors))
+            for err in errores_unicos[:40]:
+                st.code(err)
 
     dict_partidos = st.session_state.datos_cargados
     dict_previos = st.session_state.datos_cargados_previos
@@ -1353,7 +1425,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             </div>
         """, unsafe_allow_html=True)
     elif not dict_partidos:
-        st.info("ℹ️ **No se encontraron partidos en el rango seleccionado.** Si estás buscando torneos europeos fuera de jornada inmediata, activa la casilla **'🌐 Traer todo sin filtro de días'** o amplia la ventana de tiempo.")
+        st.info("ℹ️ **No se encontraron partidos en el rango seleccionado.** Si estás buscando torneos europeos fuera de jornada inmediata, activa la casilla **'🌐 Traer todo sin filtro de días'** o amplia la ventana de tiempo. Si el problema persiste, abre el panel **'🐞 Diagnóstico de APIs'** en la barra lateral para ver la causa exacta.")
     else:
         with st.expander("🎛️ Filtros Avanzados de Cuotas y Estado", expanded=True):
             col_busq, col_rango_cuota, col_chk1, col_chk2 = st.columns([2, 2, 1.2, 1.2])
