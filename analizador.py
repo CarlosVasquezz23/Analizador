@@ -16,7 +16,7 @@ from PIL import Image
 import streamlit.components.v1 as components
 
 # =========================================================
-# 1. CONFIGURACIÓN DE PÁGINA Y CREDENCIALES
+# 1. CONFIGURACIÓN DE PÁGINA Y CREDENCIALES SEGURAS
 # =========================================================
 st.set_page_config(
     page_title="Radar Enterprise Parlay Global - UX Edition",
@@ -27,14 +27,15 @@ st.set_page_config(
 DB_FILE = "bitacora_backup.json"
 CONFIG_FILE = "user_config.json"
 
-API_KEY = st.secrets.get("ODDS_API_KEY", "e6414a3efabaf34994030cd0a8ea88b1")
-HL_API_KEY = st.secrets.get("HL_API_KEY", "f18c6837-5aaf-4880-8148-9b7a133b5557")
+# Cargar credenciales únicamente desde st.secrets sin exponer fallback keys en duro
+API_KEY = st.secrets.get("ODDS_API_KEY", "")
+HL_API_KEY = st.secrets.get("HL_API_KEY", "")
 HL_BASE_URL = "https://soccer.highlightly.net"
-AF_API_KEY = st.secrets.get("AF_API_KEY", "5cca912e78e3ec42256f42db0b59fda2")
+AF_API_KEY = st.secrets.get("AF_API_KEY", "")
 AF_BASE_URL = "https://v3.football.api-sports.io"
 
-DEFAULT_TG_TOKEN = "8904966094:AAGjNdo21MI8XiJ111sJ_J1rUP2KM3HIUXo"
-DEFAULT_TG_CHAT_ID = "5832993106"
+DEFAULT_TG_TOKEN = st.secrets.get("TG_TOKEN", "")
+DEFAULT_TG_CHAT_ID = st.secrets.get("TG_CHAT_ID", "")
 
 # =========================================================
 # 2. CAPA DE PERSISTENCIA Y SERVICIOS
@@ -86,10 +87,10 @@ class ConfigManager:
             st.sidebar.error(f"Error al guardar configuración: {e}")
 
 def enviar_telegram(mensaje: str) -> bool:
-    token = DEFAULT_TG_TOKEN
-    chat_id = DEFAULT_TG_CHAT_ID
+    token = st.session_state.get('tg_token', DEFAULT_TG_TOKEN)
+    chat_id = st.session_state.get('tg_chat_id', DEFAULT_TG_CHAT_ID)
     if not token or not chat_id:
-        st.warning("⚠️ El bot de Telegram no está configurado correctamente.")
+        st.warning("⚠️ El bot de Telegram no está configurado correctamente en secrets.")
         return False
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
@@ -135,7 +136,7 @@ def disparar_alerta_sonora_y_notificacion(titulo: str, mensaje: str):
     components.html(js_code, height=0, width=0)
 
 # =========================================================
-# 3. MODELADO MATEMÁTICO: POISSON, DIXON-COLES & LIVE POISSON
+# 3. MODELADO MATEMÁTICO: POISSON, DIXON-COLES & LIVE POISSON DINÁMICO
 # =========================================================
 def poisson_pmf(k: int, mu: float) -> float:
     return (math.pow(mu, k) * math.exp(-mu)) / math.factorial(k)
@@ -196,7 +197,7 @@ def calcular_poisson_live(minuto: int, goles_loc: int, goles_vis: int, lambda_l_
     lambda_l_rem = lambda_l_base * tiempo_restante_pct
     lambda_v_rem = lambda_v_base * tiempo_restante_pct
 
-    max_goles_rem = 5
+    max_goles_rem = 6
     matriz_prob = np.zeros((max_goles_rem, max_goles_rem))
 
     for i in range(max_goles_rem):
@@ -208,13 +209,23 @@ def calcular_poisson_live(minuto: int, goles_loc: int, goles_vis: int, lambda_l_
         matriz_prob /= soma
 
     prob_local_win, prob_empate_win, prob_visita_win = 0.0, 0.0, 0.0
+    prob_over25_live, prob_btts_live = 0.0, 0.0
+    goles_actuales = goles_loc + goles_vis
+
     for i in range(max_goles_rem):
         for j in range(max_goles_rem):
             tot_loc = goles_loc + i
             tot_vis = goles_vis + j
-            if tot_loc > tot_vis: prob_local_win += matriz_prob[i, j]
-            elif tot_loc == tot_vis: prob_empate_win += matriz_prob[i, j]
-            else: prob_visita_win += matriz_prob[i, j]
+            p = matriz_prob[i, j]
+
+            if tot_loc > tot_vis: prob_local_win += p
+            elif tot_loc == tot_vis: prob_empate_win += p
+            else: prob_visita_win += p
+
+            if (goles_actuales + i + j) > 2.5:
+                prob_over25_live += p
+            if tot_loc > 0 and tot_vis > 0:
+                prob_btts_live += p
 
     return {
         "Local": float(prob_local_win * 100),
@@ -223,7 +234,10 @@ def calcular_poisson_live(minuto: int, goles_loc: int, goles_vis: int, lambda_l_
         "1X (Local o Empate)": float((prob_local_win + prob_empate_win) * 100),
         "X2 (Visitante o Empate)": float((prob_visita_win + prob_empate_win) * 100),
         "12 (Local o Visitante)": float((prob_local_win + prob_visita_win) * 100),
-        "Sí": 50.0, "No": 50.0, "Más de 2.5": 50.0, "Menos de 2.5": 50.0
+        "Sí": float(prob_btts_live * 100),
+        "No": float((1.0 - prob_btts_live) * 100),
+        "Más de 2.5": float(prob_over25_live * 100),
+        "Menos de 2.5": float((1.0 - prob_over25_live) * 100)
     }
 
 # =========================================================
@@ -661,7 +675,7 @@ def hl_headers(): return {"x-rapidapi-key": HL_API_KEY}
 
 @st.cache_data(ttl=86400)
 def hl_buscar_ligas(country_name):
-    if not country_name: return []
+    if not country_name or not HL_API_KEY: return []
     url = f"{HL_BASE_URL}/leagues"
     try:
         r = requests.get(url, headers=hl_headers(), params={"countryName": country_name, "limit": 100}, timeout=10)
@@ -687,7 +701,7 @@ def _actualizar_creditos_af(response_headers):
 
 @st.cache_data(ttl=86400)
 def af_buscar_ligas(country_name):
-    if not country_name: return []
+    if not country_name or not AF_API_KEY: return []
     url = f"{AF_BASE_URL}/leagues"
     try:
         r = requests.get(url, headers=af_headers(), params={"country": country_name}, timeout=10)
@@ -891,7 +905,7 @@ def actualizar_creditos(headers):
 
 @st.cache_data(ttl=60)
 def consultar_api_odds(sport_key, market_key):
-    if not sport_key: return []
+    if not sport_key or not API_KEY: return []
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu,us&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url, timeout=10)
@@ -909,7 +923,7 @@ def consultar_api_odds_con_fallback(sport_keys_list, market_key):
 
 @st.cache_data(ttl=60)
 def consultar_api_odds_evento(sport_key, event_id, market_key):
-    if not sport_key or not event_id: return None
+    if not sport_key or not event_id or not API_KEY: return None
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events/{event_id}/odds/?apiKey={API_KEY}&regions=eu,us&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url, timeout=10)
@@ -986,7 +1000,6 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             minuto_num = int(str(min_raw).replace("'", "").replace("+", ""))
         except Exception:
             minuto_num = minuto_estimado
-        minuto_en_vivo = f"{minuto_num}'" if es_en_vivo else None
 
         if limite_horas < 900000 and not es_en_vivo and (horas < -48.0 or horas > (limite_horas + 48)): 
             continue
@@ -1193,12 +1206,12 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                             raw_totals = consultar_api_odds_con_fallback(sport_keys_list, market_key="totals")
                             procesar_e_inyectar_mercado(raw_totals, "Goles Más/Menos 2.5", limite_h, liga, consolidador)
 
+                        # Optimización: Escaneo de mercado BTTS en lote sin peticiones N+1 por partido
                         if "Ambos Anotan (BTTS)" in mercados_sels:
                             status_consulta.update(label=f"🎯 Escaneando Mercado BTTS: {liga}")
-                            for p_base in raw_h2h:
-                                datos_evento = consultar_api_odds_evento(sport_keys_list[0], p_base['id'], "btts")
-                                if datos_evento:
-                                    procesar_e_inyectar_mercado([datos_evento], "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
+                            raw_btts = consultar_api_odds_con_fallback(sport_keys_list, market_key="btts")
+                            if raw_btts:
+                                procesar_e_inyectar_mercado(raw_btts, "Ambos Anotan (BTTS)", limite_h, liga, consolidador)
 
                 status_consulta.update(label=f"💰 Buscando SureBets de Arbitraje y brechas +EV...", state="running")
                 time.sleep(0.3)
@@ -1705,7 +1718,7 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
                             else:
                                 st.warning("⚠️ No se pudieron asociar cuotas válidas en el texto extraído.")
                         else:
-                            st.warning("⚠️ No se pudo procesar la imagen mediante el OCR nativo. Usa la pestaña '🚀 Pegado Rápido (Texto)' para ingresar los datos.")
+                            st.warning("⚠️ No se pudo procesar la imagen mediante OCR (asegúrate de instalar pytesseract o easyocr).")
                     except Exception as e:
                         st.error(f"Error procesando la imagen: {e}")
 
