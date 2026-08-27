@@ -353,7 +353,7 @@ def evaluar_riesgo_parlay(partidos: List[Dict[str, Any]]) -> Dict[str, Any]:
     else:
         nivel = "🔴 Muy Alto"
         if not consejos:
-            consejos.append("🔴 **Riesgo Elevado**: La cuota total o la volatilidad individual hacen este parlay altamente especulativo.")
+            consejos.append("🔴 **Riesgo Elevado**: La cuota total o la volatilidad individual hacen este parlay highly especulativo.")
 
     return {"nivel": nivel, "score": score, "consejos": consejos}
 
@@ -1728,10 +1728,11 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
     st.title("🧮 Analizador, Lector OCR & Simulador Monte Carlo")
     st.caption("Analiza cuotas de boletos externos, simula 10,000 iteraciones o lee datos desde capturas de pantalla.")
 
-    modo_ingreso = st.segmented_control(
+    # Corrección para compatibilidad de Streamlit (pills / radio)
+    modo_ingreso = st.radio(
         "⚡ Método de Ingreso:",
         options=["🚀 Pegado Rápido (Texto)", "📸 Captura de Pantalla / OCR", "📝 Registro Manual"],
-        default="🚀 Pegado Rápido (Texto)"
+        horizontal=True
     )
 
     col_ingreso, col_resultados = st.columns([1.1, 1], gap="medium")
@@ -2343,10 +2344,11 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
     st.title("🎨 Generador Visual de Pronósticos para Redes")
     st.caption("Crea carteles elegantes y profesionales ajustados automáticamente según las selecciones de tu boleto.")
 
-    formato_cartel = st.segmented_control(
+    # Corrección para compatibilidad de Streamlit (pills / radio)
+    formato_cartel = st.radio(
         "📐 Formato de Exportación:",
         options=["📱 Stories / WhatsApp Status (9:16 - 1080x1920)", "🖼️ Cuadrado / Post (4:5 - 1080x1350)"],
-        default="📱 Stories / WhatsApp Status (9:16 - 1080x1920)"
+        horizontal=True
     )
 
     st.subheader("🖼️ Diseñador de Tarjeta de Apuesta")
