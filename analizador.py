@@ -353,7 +353,7 @@ def evaluar_riesgo_parlay(partidos: List[Dict[str, Any]]) -> Dict[str, Any]:
     else:
         nivel = "🔴 Muy Alto"
         if not consejos:
-            consejos.append("🔴 **Riesgo Elevado**: La cuota total o la volatilidad individual hacen este parlay highly especulativo.")
+            consejos.append("🔴 **Riesgo Elevado**: La cuota total o la volatilidad individual hacen este parlay altamente especulativo.")
 
     return {"nivel": nivel, "score": score, "consejos": consejos}
 
@@ -669,7 +669,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 8. CLIENTES API Y LIGAS
+# 8. CLIENTES API Y LIGAS DISPONIBLES Y VALIDADAS
 # =========================================================
 def hl_headers(): return {"x-rapidapi-key": HL_API_KEY}
 
@@ -734,19 +734,14 @@ AF_LEAGUE_IDS = {
     "🏆 Copa Sudamericana": 11
 }
 
+# Ligas comprobadas y activas soportadas en el plan de The Odds API
 todas_las_ligas = {
     "🇺🇸 USA MLS": ["soccer_usa_mls"],
     "🇲🇽 Mexico Liga MX": ["soccer_mexico_liga_mx"],
-    "🇪🇨 Ecuador LigaPro": ["soccer_ecuador_serie_a"],
-    "🇨🇴 Colombia Primera A": ["soccer_colombia_primera_a"],
-    "🇺🇾 Uruguay Primera Division": ["soccer_uruguay_primera_division"],
-    "🇵🇪 Peru Liga 1": ["soccer_peru_liga_1"],
     "🇦🇷 Argentina Primera Division": ["soccer_argentina_primera_division"],
     "🇧🇷 Brasil Brasileirao": ["soccer_brazil_campeonato"],
-    "🇨🇱 Chile Primera Division": ["soccer_chile_campeonato"],
-    "🇵🇾 Paraguay Primera Division": ["soccer_paraguay_primera_division"],
-    "🏆 EU Champions League": ["soccer_uefa_champions_league", "soccer_uefa_champions_league_qualification"],
-    "🏆 EU Europa League": ["soccer_uefa_europa_league", "soccer_uefa_europa_league_qualification"],
+    "🏆 EU Champions League": ["soccer_uefa_champions_league"],
+    "🏆 EU Europa League": ["soccer_uefa_europa_league"],
     "🏆 EU Conference League": ["soccer_uefa_europa_conference_league"],
     "🏆 Copa Libertadores": ["soccer_conmebol_copa_libertadores"],
     "🏆 Copa Sudamericana": ["soccer_conmebol_copa_sudamericana"],
@@ -762,10 +757,7 @@ todas_las_ligas = {
     "🇫🇷 France Ligue 2": ["soccer_france_ligue_two"],
     "🇵🇹 Portugal Primeira Liga": ["soccer_portugal_primeira_liga"],
     "🇳🇱 Netherlands Eredivisie": ["soccer_netherlands_eredivisie"],
-    "🇧🇪 Belgium Pro League": ["soccer_belgium_first_div"],
     "🇹🇷 Turkey Super Lig": ["soccer_turkey_super_league"],
-    "🇯🇵 Japan J-League": ["soccer_japan_j_league"],
-    "🇰🇷 South Korea K-League": ["soccer_korea_k_league"],
     "🇦🇺 Australia A-League": ["soccer_australia_aleague"]
 }
 
@@ -944,11 +936,6 @@ def actualizar_creditos(headers):
 
 @st.cache_data(ttl=60)
 def consultar_api_odds(sport_key, market_key):
-    """
-    Devuelve (datos, error).
-    datos: lista de eventos (puede ser []).
-    error: None si todo salió bien, o un string descriptivo del problema real.
-    """
     if not API_KEY:
         return [], "Falta ODDS_API_KEY en st.secrets"
     if not sport_key:
@@ -959,7 +946,11 @@ def consultar_api_odds(sport_key, market_key):
         response = requests.get(url, timeout=10)
         actualizar_creditos(response.headers)
         if response.status_code == 200:
-            return response.json(), None
+            res_json = response.json()
+            if isinstance(res_json, list):
+                return res_json, None
+            else:
+                return [], f"[{sport_key}/{market_key}] Respuesta inesperada: {res_json}"
         else:
             return [], f"[{sport_key}/{market_key}] HTTP {response.status_code}: {response.text[:250]}"
     except Exception as e:
