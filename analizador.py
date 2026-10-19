@@ -25,7 +25,6 @@ st.set_page_config(
 DB_FILE = "bitacora_backup.json"
 CONFIG_FILE = "user_config.json"
 
-# Credenciales centralizadas desde Streamlit Secrets
 API_KEY = st.secrets.get("ODDS_API_KEY", "")
 AF_API_KEY = st.secrets.get("AF_API_KEY", "")
 AF_BASE_URL = "https://v3.football.api-sports.io"
@@ -40,7 +39,7 @@ DEFAULT_TG_TOKEN = st.secrets.get("TG_TOKEN", "")
 DEFAULT_TG_CHAT_ID = st.secrets.get("TG_CHAT_ID", "")
 
 # =========================================================
-# 2. CAPA DE PERSISTENCIA Y SERVICIOS EN MEMORIA
+# 2. CAPA DE PERSISTENCIA Y SERVICIOS
 # =========================================================
 class BitacoraManager:
     @staticmethod
@@ -172,13 +171,13 @@ def generar_resumen_ejecutivo_ai(dict_partidos: Dict[str, Any]) -> str:
     top_liga = max(liga_con_mas_valor, key=liga_con_mas_valor.get) if liga_con_mas_valor else "General"
     val_top_count = liga_con_mas_valor.get(top_liga, 0)
 
-    resumen = f"**Análisis de Mercado:** {total_partidos} eventos procesados. "
-    resumen += f"Oportunidades de Arbitraje (SureBets): **{total_surebets}**. " if total_surebets > 0 else "Sin arbitrajes activos. "
-    resumen += f"Oportunidades +EV: **{total_valuebets}**. Mayor concentración en **{top_liga}** ({val_top_count} +EV)." if total_valuebets > 0 else "Cuotas eficientes."
+    resumen = f"<b>Análisis de Mercado:</b> {total_partidos} eventos procesados. "
+    resumen += f"Oportunidades de Arbitraje (SureBets): <b>{total_surebets}</b>. " if total_surebets > 0 else "Sin arbitrajes activos. "
+    resumen += f"Oportunidades +EV: <b>{total_valuebets}</b>. Mayor concentración en <b>{top_liga}</b> ({val_top_count} +EV)." if total_valuebets > 0 else "Cuotas eficientes."
     return resumen
 
 # =========================================================
-# 4. ESTADOS DE SESIÓN Y ESTILOS PROFESIONALES (CSS SAAS)
+# 4. ESTADOS DE SESIÓN Y PALETA DE COLORES "EMERALD FINTECH"
 # =========================================================
 user_config = ConfigManager.cargar()
 
@@ -209,13 +208,13 @@ def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_v
         st.toast(f"Removido: {opcion_nombre}")
 
 modo_claro = (st.session_state.tema_visual == "Claro")
-bg_val = "#f8fafc" if modo_claro else "#0d1117"
-card_val = "#ffffff" if modo_claro else "#161b22"
-card_alt_val = "#f1f5f9" if modo_claro else "#21262d"
-border_val = "#e2e8f0" if modo_claro else "#30363d"
-text_val = "#0f172a" if modo_claro else "#c9d1d9"
-text_soft_val = "#64748b" if modo_claro else "#8b949e"
-accent_val = "#2f81f7"
+bg_val = "#f8fafc" if modo_claro else "#0b0f19"
+card_val = "#ffffff" if modo_claro else "#111827"
+card_alt_val = "#f1f5f9" if modo_claro else "#1f2937"
+border_val = "#e2e8f0" if modo_claro else "#374151"
+text_val = "#0f172a" if modo_claro else "#f3f4f6"
+text_soft_val = "#64748b" if modo_claro else "#9ca3af"
+accent_val = "#10b981"  # Verde Esmeralda
 
 st.markdown(f"""
     <style>
@@ -239,6 +238,28 @@ st.markdown(f"""
 
     .stApp {{
         background-color: {bg_val};
+    }}
+
+    /* RECRISTALIZACIÓN DE ELEMENTOS STREAMLIT A VERDE ESMERALDA */
+    div[data-baseweb="radio"] input:checked + div {{
+        background-color: {accent_val} !important;
+    }}
+    
+    .stTabs [data-baseweb="tab-highlight"] {{
+        background-color: {accent_val} !important;
+    }}
+    
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {{
+        color: {accent_val} !important;
+    }}
+
+    /* BOTONES PRIMARIOS EN VERDE ESMERALDA */
+    button[kind="primary"] {{
+        background-color: {accent_val} !important;
+        border-color: {accent_val} !important;
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
     }}
 
     .ai-summary-box {{
@@ -273,8 +294,8 @@ st.markdown(f"""
         font-size: 11px;
         font-weight: 600;
         color: {accent_val};
-        background: rgba(47, 129, 247, 0.1);
-        border: 1px solid rgba(47, 129, 247, 0.3);
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.3);
         border-radius: 4px;
         padding: 2px 8px;
     }}
@@ -318,7 +339,7 @@ st.markdown(f"""
     .ticket-cuota-tag {{
         font-weight: 600;
         color: {accent_val};
-        background: rgba(47, 129, 247, 0.12);
+        background: rgba(16, 185, 129, 0.12);
         border-radius: 4px;
         padding: 1px 5px;
         font-size: 12px;
@@ -809,9 +830,7 @@ if vista_seleccionada == "Radar Multi-Mercado":
                                         m_info = part['mercados'][text_m]
                                         todas_opciones = list(m_info['max_cuotas'].keys())
                                         
-                                        # =========================================================
                                         # ORDENAMIENTO ESTÁNDAR: LOCAL -> EMPATE -> VISITANTE
-                                        # =========================================================
                                         if "1X2" in text_m:
                                             orden_deseado = ["Local", "Empate", "Visitante"]
                                             todas_opciones = [op for op in orden_deseado if op in m_info['max_cuotas']]
