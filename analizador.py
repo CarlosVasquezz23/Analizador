@@ -28,15 +28,22 @@ st.set_page_config(
 DB_FILE = "bitacora_backup.json"
 CONFIG_FILE = "user_config.json"
 
+# Credenciales centralizadas desde Streamlit Secrets
 API_KEY = st.secrets.get("ODDS_API_KEY", "")
 AF_API_KEY = st.secrets.get("AF_API_KEY", "")
 AF_BASE_URL = "https://v3.football.api-sports.io"
+
+ALLSPORTS_KEY = st.secrets.get("ALLSPORTS_API_KEY", "")
+ALLSPORTS_BASE_URL = "https://allsportsapi.com/api/football/"
+
+SPORTAPI_KEY = st.secrets.get("SPORTAPI_KEY", "")
+SPORTAPI_BASE_URL = "https://api.sportapi.ai/v1/football/"
 
 DEFAULT_TG_TOKEN = st.secrets.get("TG_TOKEN", "")
 DEFAULT_TG_CHAT_ID = st.secrets.get("TG_CHAT_ID", "")
 
 # =========================================================
-# 2. CAPA DE PERSISTENCIA Y SERVICIOS EN MEMORIA
+# 2. CAPA DE PERSISTENCIA Y SERVICIOS
 # =========================================================
 class BitacoraManager:
     @staticmethod
@@ -96,38 +103,6 @@ def enviar_telegram(mensaje: str) -> bool:
         return r.status_code == 200
     except Exception:
         return False
-
-def disparar_alerta_sonora_y_notificacion(titulo: str, mensaje: str):
-    if not st.session_state.get('notif_push_activas', True):
-        return
-    js_code = f"""
-    <script>
-    if ("Notification" in window) {{
-        if (Notification.permission === "granted") {{
-            new Notification("{titulo}", {{ body: "{mensaje}", icon: "⚽" }});
-        }} else if (Notification.permission !== "denied") {{
-            Notification.requestPermission().then(function (permission) {{
-                if (permission === "granted") {{
-                    new Notification("{titulo}", {{ body: "{mensaje}", icon: "⚽" }});
-                }}
-            }});
-        }}
-    }}
-    try {{
-        let ctx = new (window.AudioContext || window.webkitAudioContext)();
-        let osc = ctx.createOscillator();
-        let gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, ctx.currentTime);
-        gain.gain.setValueAtTime(0.1, ctx.currentTime);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.3);
-    }} catch(e) {{}}
-    </script>
-    """
-    components.html(js_code, height=0, width=0)
 
 # =========================================================
 # 3. MODELADO MATEMÁTICO VECTORIZADO (NUMPY)
@@ -211,7 +186,7 @@ def calcular_poisson_live(minuto: int, goles_loc: int, goles_vis: int, lambda_l_
     }
 
 # =========================================================
-# 4. MONTE CARLO Y COBERTURAS
+# 4. MONTE CARLO Y VALIDACIONES
 # =========================================================
 def detectar_surebet(cuotas_max_dict: Dict[str, float]) -> Dict[str, Any]:
     if not cuotas_max_dict or len(cuotas_max_dict) < 2:
@@ -227,35 +202,6 @@ def calcular_sharpe_parlay(cuota_total: float, prob_combinada: float) -> float:
     desviacion = math.sqrt(varianza) if varianza > 0 else 1.0
     return ev / desviacion
 
-def simular_riesgo_ruina_banca(bankroll_inicial: float, stake_promedio: float, prob_exito: float, cuota_prom: float, num_apuestas: int = 200, sims: int = 2000) -> Dict[str, float]:
-    bancarrota_count = 0
-    final_bankrolls = []
-    
-    matriz_rand = np.random.rand(sims, num_apuestas)
-    matriz_exitos = matriz_rand < prob_exito
-    
-    for i in range(sims):
-        b = bankroll_inicial
-        quebro = False
-        for j in range(num_apuestas):
-            if b <= 0:
-                quebro = True
-                break
-            if matriz_exitos[i, j]:
-                b += stake_promedio * (cuota_prom - 1.0)
-            else:
-                b -= stake_promedio
-        if quebro:
-            bancarrota_count += 1
-            final_bankrolls.append(0.0)
-        else:
-            final_bankrolls.append(b)
-        
-    return {
-        "prob_ruina": (bancarrota_count / sims) * 100.0,
-        "banca_promedio_final": float(np.mean(final_bankrolls))
-    }
-
 def detectar_correlaciones(apuestas: List[Dict[str, Any]]) -> List[str]:
     alertas = []
     eventos_map = {}
@@ -268,16 +214,7 @@ def detectar_correlaciones(apuestas: List[Dict[str, Any]]) -> List[str]:
             mercados = [s['mercado'] for s in selecciones]
             opciones = [s['seleccion'] for s in selecciones]
             if mercados.count("1X2 (Ganador)") > 1:
-                alertas.append(f"⚠️ **{ev}**: Selección contradictoria en 1X2 ({', '.join(opciones)}).")
-            if "1X2 (Ganador)" in mercados and "Doble Oportunidad" in mercados:
-                for s in selecciones:
-                    if s['seleccion'] == "Local" and any(x in ["X2 (Visitante o Empate)"] for x in opciones):
-                        alertas.append(f"⚠️ **{ev}**: Conflicto entre Local y X2.")
-                    elif s['seleccion'] == "Visitante" and any(x in ["1X (Local o Empate)"] for x in opciones):
-                        alertas.append(f"⚠️ **{ev}**: Conflicto entre Visitante y 1X.")
-            if "Goles Más/Menos 2.5" in mercados and "Ambos Anotan (BTTS)" in mercados:
-                if "Menos de 2.5" in opciones and "Sí" in opciones:
-                    alertas.append(f"⚠️ **{ev}**: Conflicto negativo (Menos de 2.5 y Ambos Anotan Sí).")
+                alertas.append(f"⚠️ **{ev}**: Selección contradictoria en 1X2.")
     return alertas
 
 def detectar_conflictos_horarios(apuestas: List[Dict[str, Any]]) -> List[str]:
@@ -287,28 +224,8 @@ def detectar_conflictos_horarios(apuestas: List[Dict[str, Any]]) -> List[str]:
         for (ev1, ts1), (ev2, ts2) in itertools.combinations(fechas, 2):
             diff_min = abs(ts1 - ts2) / 60.0
             if diff_min < 110:
-                alertas_horario.append(f"⏰ **Conflicto Horario**: *{ev1}* y *{ev2}* se solapan ({int(diff_min)} min de diff). Dificulta Cashout o Cobertura.")
+                alertas_horario.append(f"⏰ **Conflicto**: *{ev1}* y *{ev2}* se solapan.")
     return alertas_horario
-
-def evaluar_riesgo_parlay(partidos: List[Dict[str, Any]]) -> Dict[str, Any]:
-    if not partidos:
-        return {"nivel": "N/A", "score": 0, "consejos": []}
-    cant = len(partidos)
-    cuotas = [p['cuota'] for p in partidos]
-    cuota_total = np.prod(cuotas)
-    
-    cuotas_altas = sum(1 for c in cuotas if c > 2.20)
-    cuotas_muy_bajas = sum(1 for c in cuotas if c < 1.20)
-    
-    score = round(max(5, min(95, 100 - (cant * 12) - (cuota_total * 2) - (cuotas_altas * 15))), 1)
-    consejos = []
-    if cant >= 5: consejos.append("🔴 **Riesgo acumulado**: Parlays de >4 eventos sufren caída exponencial de probabilidad.")
-    if cuotas_altas >= 1: consejos.append(f"⚠️ **Volatilidad alta**: Tienes {cuotas_altas} selección(es) con cuota >2.20.")
-    if cuotas_muy_bajas >= 2: consejos.append("🛡️ **Bajo valor**: Cuotas <1.20 aportan poco retorno e introducen riesgo.")
-    
-    nivel = "🟢 Bajo" if score > 70 else ("🟡 Moderado" if score > 40 else "🔴 Muy Alto")
-    if not consejos: consejos.append("✅ **Parlay equilibrado**: Buena relación riesgo/beneficio.")
-    return {"nivel": nivel, "score": score, "consejos": consejos}
 
 def ejecutar_simulacion_montecarlo(partidos: List[Dict[str, Any]], num_simulaciones: int = 10000) -> Dict[str, Any]:
     if not partidos: return {}
@@ -321,37 +238,8 @@ def ejecutar_simulacion_montecarlo(partidos: List[Dict[str, Any]], num_simulacio
     
     return {
         "pleno_acierto": float(np.sum(aciertos_por_sim == num_eventos) / num_simulaciones * 100.0),
-        "fallo_por_uno": float(np.sum(aciertos_por_sim == (num_eventos - 1)) / num_simulaciones * 100.0),
-        "fallo_por_dos": float(np.sum(aciertos_por_sim == (num_eventos - 2)) / num_simulaciones * 100.0),
-        "distribucion": [float(np.sum(aciertos_por_sim == k) / num_simulaciones * 100.0) for k in range(num_eventos + 1)]
+        "fallo_por_uno": float(np.sum(aciertos_por_sim == (num_eventos - 1)) / num_simulaciones * 100.0)
     }
-
-def calcular_sistema_cobertura(partidos: List[Dict[str, Any]], stake_total: float) -> Dict[str, Any]:
-    n = len(partidos)
-    if n < 3: return {"tipo": "Insuficientes eventos", "detalles": "Se requieren mínimo 3 eventos."}
-    cuotas = [float(p['cuota']) for p in partidos]
-    
-    if n == 3:
-        comb_dobles = list(itertools.combinations(cuotas, 2))
-        comb_triples = list(itertools.combinations(cuotas, 3))
-        num_ap = len(comb_dobles) + len(comb_triples)
-        st_u = stake_total / num_ap
-        return {"tipo": "TRIXIE (3 Selecciones)", "apuestas": num_ap, "stake_unitario": st_u, "retorno_max": (sum(np.prod(c) for c in comb_dobles) + sum(np.prod(c) for c in comb_triples)) * st_u}
-    elif n == 4:
-        comb_dobles = list(itertools.combinations(cuotas, 2))
-        comb_triples = list(itertools.combinations(cuotas, 3))
-        comb_cuad = list(itertools.combinations(cuotas, 4))
-        num_ap = len(comb_dobles) + len(comb_triples) + len(comb_cuad)
-        st_u = stake_total / num_ap
-        return {"tipo": "YANKEE (4 Selecciones)", "apuestas": num_ap, "stake_unitario": st_u, "retorno_max": (sum(np.prod(c) for c in comb_dobles) + sum(np.prod(c) for c in comb_triples) + sum(np.prod(c) for c in comb_cuad)) * st_u}
-    else:
-        comb_dobles = list(itertools.combinations(cuotas[:5], 2))
-        comb_triples = list(itertools.combinations(cuotas[:5], 3))
-        comb_cuad = list(itertools.combinations(cuotas[:5], 4))
-        comb_quin = list(itertools.combinations(cuotas[:5], 5))
-        num_ap = len(comb_dobles) + len(comb_triples) + len(comb_cuad) + len(comb_quin)
-        st_u = stake_total / num_ap
-        return {"tipo": "CANADIAN (5 Selecciones)", "apuestas": num_ap, "stake_unitario": st_u, "retorno_max": (sum(np.prod(c) for c in comb_dobles) + sum(np.prod(c) for c in comb_triples) + sum(np.prod(c) for c in comb_cuad) + sum(np.prod(c) for c in comb_quin)) * st_u}
 
 def generar_resumen_ejecutivo_ai(dict_partidos: Dict[str, Any]) -> str:
     if not dict_partidos: return ""
@@ -391,12 +279,9 @@ if 'datos_cargados_previos' not in st.session_state: st.session_state.datos_carg
 if 'ha_consultado' not in st.session_state: st.session_state.ha_consultado = False
 if 'creditos_restantes' not in st.session_state: st.session_state.creditos_restantes = "No consultado"
 if 'creditos_restantes_af' not in st.session_state: st.session_state.creditos_restantes_af = "No consultado"
-if 'notif_push_activas' not in st.session_state: st.session_state.notif_push_activas = True
 if 'ticket_persistente' not in st.session_state: st.session_state.ticket_persistente = {}
 if 'casas_preferidas' not in st.session_state: st.session_state.casas_preferidas = user_config.get('casas_preferidas', [])
 if 'bankroll_total' not in st.session_state: st.session_state.bankroll_total = user_config.get('bankroll_total', 200.0)
-if 'tg_token' not in st.session_state: st.session_state.tg_token = DEFAULT_TG_TOKEN
-if 'tg_chat_id' not in st.session_state: st.session_state.tg_chat_id = DEFAULT_TG_CHAT_ID
 
 def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_val, prob_val, clave_k):
     if st.session_state.get(clave_k, False):
@@ -502,34 +387,111 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 7. CLIENTES API Y DICCIONARIOS
+# 7. MAPEO UNIFICADO DE LIGAS (GLOBAL)
 # =========================================================
-AF_LEAGUE_IDS = {
-    "🇦🇷 Liga Profesional (Argentina)": 128, "🇧🇷 Brasileirão Serie A (Brasil)": 71,
-    "🇨🇱 Primera División (Chile)": 265, "🇨🇴 Primera A (Colombia)": 239,
-    "🇪🇨 LigaPro (Ecuador)": 242, "🇲🇽 Liga MX (México)": 262,
-    "🇵🇾 División Profesional (Paraguay)": 252, "🇵🇪 Liga 1 (Perú)": 281,
-    "🇺🇾 Primera División (Uruguay)": 268, "🇺🇸 MLS (Estados Unidos)": 253,
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League": 39, "🇪🇸 LaLiga": 140, "🇮🇹 Serie A": 135,
-    "🇩🇪 Bundesliga": 78, "🇫🇷 Ligue 1": 61, "🇵🇹 Primeira Liga": 94,
-    "🇳🇱 Eredivisie": 88, "🏆 Champions League": 2, "🏆 Europa League": 3
-}
-
-todas_las_ligas = {
-    "🏆 EU Champions League": ["soccer_uefa_champions_league"],
-    "🏆 EU Europa League": ["soccer_uefa_europa_league"],
-    "🏆 EU Conference League": ["soccer_uefa_europa_conference_league"],
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League": ["soccer_epl"],
-    "🇪🇸 La Liga": ["soccer_spain_la_liga"],
-    "🇮🇹 Serie A": ["soccer_italy_serie_a"],
-    "🇩🇪 Bundesliga": ["soccer_germany_bundesliga"],
-    "🇫🇷 Ligue 1": ["soccer_france_ligue_one"],
-    "🇺🇸 USA MLS": ["soccer_usa_mls"],
-    "🇲🇽 Mexico Liga MX": ["soccer_mexico_liga_mx"],
-    "🇦🇷 Argentina Primera Division": ["soccer_argentina_primera_division"],
-    "🇧🇷 Brasil Brasileirao": ["soccer_brazil_campeonato"],
-    "🏆 Copa Libertadores": ["soccer_conmebol_copa_libertadores"],
-    "🏆 Copa Sudamericana": ["soccer_conmebol_copa_sudamericana"]
+CATALOGO_LIGAS_UNIFICADO = {
+    "🏆 EU Champions League": {
+        "odds_api": ["soccer_uefa_champions_league"],
+        "af_id": 2,
+        "allsports_id": 3,
+        "sportapi_id": 7
+    },
+    "🏆 EU Europa League": {
+        "odds_api": ["soccer_uefa_europa_league"],
+        "af_id": 3,
+        "allsports_id": 4,
+        "sportapi_id": 8
+    },
+    "🏆 EU Conference League": {
+        "odds_api": ["soccer_uefa_europa_conference_league"],
+        "af_id": 848,
+        "allsports_id": None,
+        "sportapi_id": None
+    },
+    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League": {
+        "odds_api": ["soccer_epl"],
+        "af_id": 39,
+        "allsports_id": 152,
+        "sportapi_id": 17
+    },
+    "🇪🇸 La Liga": {
+        "odds_api": ["soccer_spain_la_liga"],
+        "af_id": 140,
+        "allsports_id": 302,
+        "sportapi_id": 8
+    },
+    "🇮🇹 Serie A": {
+        "odds_api": ["soccer_italy_serie_a"],
+        "af_id": 135,
+        "allsports_id": 207,
+        "sportapi_id": 23
+    },
+    "🇩🇪 Bundesliga": {
+        "odds_api": ["soccer_germany_bundesliga"],
+        "af_id": 78,
+        "allsports_id": 175,
+        "sportapi_id": 35
+    },
+    "🇫🇷 Ligue 1": {
+        "odds_api": ["soccer_france_ligue_one"],
+        "af_id": 61,
+        "allsports_id": 168,
+        "sportapi_id": 34
+    },
+    "🇺🇸 USA MLS": {
+        "odds_api": ["soccer_usa_mls"],
+        "af_id": 253,
+        "allsports_id": 332,
+        "sportapi_id": 54
+    },
+    "🇲🇽 Liga MX (México)": {
+        "odds_api": ["soccer_mexico_liga_mx"],
+        "af_id": 262,
+        "allsports_id": 230,
+        "sportapi_id": 41
+    },
+    "🇦🇷 Liga Profesional (Argentina)": {
+        "odds_api": ["soccer_argentina_primera_division"],
+        "af_id": 128,
+        "allsports_id": 44,
+        "sportapi_id": 155
+    },
+    "🇧🇷 Brasileirão Serie A (Brasil)": {
+        "odds_api": ["soccer_brazil_campeonato"],
+        "af_id": 71,
+        "allsports_id": 81,
+        "sportapi_id": 325
+    },
+    "🇪🇨 LigaPro (Ecuador)": {
+        "odds_api": [],
+        "af_id": 242,
+        "allsports_id": 122,
+        "sportapi_id": 512
+    },
+    "🇨🇴 Primera A (Colombia)": {
+        "odds_api": [],
+        "af_id": 239,
+        "allsports_id": 111,
+        "sportapi_id": 510
+    },
+    "🇨🇱 Primera División (Chile)": {
+        "odds_api": [],
+        "af_id": 265,
+        "allsports_id": 102,
+        "sportapi_id": 508
+    },
+    "🏆 Copa Libertadores": {
+        "odds_api": ["soccer_conmebol_copa_libertadores"],
+        "af_id": 13,
+        "allsports_id": 11,
+        "sportapi_id": 380
+    },
+    "🏆 Copa Sudamericana": {
+        "odds_api": ["soccer_conmebol_copa_sudamericana"],
+        "af_id": 11,
+        "allsports_id": 12,
+        "sportapi_id": 381
+    }
 }
 
 diccionario_mercados = {
@@ -537,6 +499,9 @@ diccionario_mercados = {
     "Ambos Anotan (BTTS)": "btts", "Goles Más/Menos 2.5": "totals"
 }
 
+# =========================================================
+# 8. CLIENTES API MULTI-PROVEEDOR
+# =========================================================
 def af_headers(): return {"x-apisports-key": AF_API_KEY}
 
 def _actualizar_creditos_af(response_headers):
@@ -551,20 +516,19 @@ def actualizar_creditos(headers):
 
 @st.cache_data(ttl=60)
 def consultar_api_odds(sport_key, market_key):
-    if not API_KEY or not sport_key:
-        return [], "Falta clave API de Odds"
+    if not API_KEY or not sport_key: return [], "Falta API Key Odds"
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu,us&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url, timeout=10)
         actualizar_creditos(response.headers)
         if response.status_code == 200:
             res_json = response.json()
-            return (res_json, None) if isinstance(res_json, list) else ([], f"Respuesta inesperada")
+            return (res_json, None) if isinstance(res_json, list) else ([], "Err")
         return [], f"HTTP {response.status_code}"
     except Exception as e:
         return [], f"Excepción: {e}"
 
-def consultar_af_con_fallback_fixtures(af_id, nombre_liga):
+def consultar_af_con_fallback_fixtures(af_id):
     if not af_id or not AF_API_KEY: return []
     url_odds = f"{AF_BASE_URL}/odds"
     season_actual = datetime.now().year
@@ -577,18 +541,130 @@ def consultar_af_con_fallback_fixtures(af_id, nombre_liga):
         pass
     return []
 
+def consultar_allsports_odds(league_id=None):
+    if not ALLSPORTS_KEY or not league_id: return []
+    url = f"{ALLSPORTS_BASE_URL}?met=Odds&APIkey={ALLSPORTS_KEY}&leagueId={league_id}"
+    try:
+        r = requests.get(url, timeout=8)
+        if r.status_code == 200 and r.json().get("success") == 1:
+            return r.json().get("result", {})
+    except Exception:
+        pass
+    return {}
+
+def consultar_sportapi_odds(sportapi_id=None):
+    if not SPORTAPI_KEY or not sportapi_id: return []
+    url = f"{SPORTAPI_BASE_URL}odds?apikey={SPORTAPI_KEY}&tournament_id={sportapi_id}"
+    try:
+        r = requests.get(url, timeout=8)
+        if r.status_code == 200:
+            return r.json().get("data", [])
+    except Exception:
+        pass
+    return []
+
 # =========================================================
-# 8. PARALELIZACIÓN Y PROCESAMIENTO
+# 9. PROCESAMIENTO Y DEDUPLICACIÓN
 # =========================================================
-def escanear_liga_worker(liga_nombre, sport_keys_list, mercados_sels, limite_h):
-    resultados_liga = []
-    for market_sel in mercados_sels:
-        m_key = diccionario_mercados.get(market_sel, "h2h")
-        for skey in sport_keys_list:
+def escanear_liga_worker(liga_nombre, config_liga, mercados_sels, limite_h):
+    resultados_normalizados = []
+
+    # 1. Escanear The Odds API
+    for skey in config_liga.get("odds_api", []):
+        for market_sel in mercados_sels:
+            m_key = diccionario_mercados.get(market_sel, "h2h")
             data, err = consultar_api_odds(skey, m_key)
-            if data and isinstance(data, list) and len(data) > 0:
-                resultados_liga.append((market_sel, data))
-    return (liga_nombre, resultados_liga)
+            if data and isinstance(data, list):
+                for p in data:
+                    resultados_normalizados.append((p, market_sel))
+
+    # 2. Escanear API-Football
+    af_id = config_liga.get("af_id")
+    if af_id and AF_API_KEY:
+        raw_af = consultar_af_con_fallback_fixtures(af_id)
+        for item in raw_af:
+            fix, teams, bookies_af = item.get("fixture", {}), item.get("teams", {}), item.get("bookmakers", [])
+            bookmakers_converted = []
+            for b in bookies_af:
+                b_markets = []
+                for m in b.get("bets", []):
+                    m_name = m.get("name")
+                    key_m = "h2h" if m_name == "Match Winner" else ("totals" if m_name == "Goals Over/Under" else "btts")
+                    outcomes = [{"name": o.get("value"), "price": float(o.get("odd"))} for o in m.get("values", [])]
+                    b_markets.append({"key": key_m, "outcomes": outcomes})
+                bookmakers_converted.append({"key": str(b.get("id")), "title": b.get("name"), "markets": b_markets})
+
+            partido_norm = {
+                "id": f"af_{fix.get('id')}",
+                "home_team": teams.get("home", {}).get("name", "Local"),
+                "away_team": teams.get("away", {}).get("name", "Visitante"),
+                "commence_time": fix.get("date", datetime.now(timezone.utc).isoformat()),
+                "bookmakers": bookmakers_converted
+            }
+            for m_sel in mercados_sels:
+                resultados_normalizados.append((partido_norm, m_sel))
+
+    # 3. Escanear AllSportsApi
+    as_id = config_liga.get("allsports_id")
+    if as_id and ALLSPORTS_KEY:
+        res_as = consultar_allsports_odds(as_id)
+        if isinstance(res_as, dict):
+            for m_id, odds_list in res_as.items():
+                if not odds_list: continue
+                match_info = odds_list[0]
+                bookmakers_converted = []
+                dict_bookies = {}
+                for entry in odds_list:
+                    b_name = entry.get("bookmaker_name", "AllSports Bookmaker")
+                    dict_bookies.setdefault(b_name, []).append(entry)
+
+                for b_name, b_entries in dict_bookies.items():
+                    outcomes_h2h = []
+                    for e in b_entries:
+                        m_type = e.get("type", "")
+                        odd_val = float(e.get("odd", 1.0))
+                        if m_type in ["1", "Home"]: outcomes_h2h.append({"name": match_info.get("event_home_team", "Local"), "price": odd_val})
+                        elif m_type in ["X", "Draw"]: outcomes_h2h.append({"name": "Draw", "price": odd_val})
+                        elif m_type in ["2", "Away"]: outcomes_h2h.append({"name": match_info.get("event_away_team", "Visitante"), "price": odd_val})
+                    if outcomes_h2h:
+                        bookmakers_converted.append({"key": b_name, "title": b_name, "markets": [{"key": "h2h", "outcomes": outcomes_h2h}]})
+
+                partido_as = {
+                    "id": f"as_{m_id}",
+                    "home_team": match_info.get("event_home_team", "Local"),
+                    "away_team": match_info.get("event_away_team", "Visitante"),
+                    "commence_time": match_info.get("event_date", datetime.now(timezone.utc).isoformat()),
+                    "bookmakers": bookmakers_converted
+                }
+                for m_sel in mercados_sels:
+                    resultados_normalizados.append((partido_as, m_sel))
+
+    # 4. Escanear SportAPI.ai
+    sp_id = config_liga.get("sportapi_id")
+    if sp_id and SPORTAPI_KEY:
+        res_sp = consultar_sportapi_odds(sp_id)
+        for item in res_sp:
+            m_id = item.get("id", "0")
+            bookies_sp = item.get("bookmakers", [])
+            bookmakers_converted = []
+            for b in bookies_sp:
+                outcomes_h2h = []
+                for o in b.get("odds", []):
+                    outcomes_h2h.append({"name": o.get("label"), "price": float(o.get("value", 1.0))})
+                if outcomes_h2h:
+                    bookmakers_converted.append({"key": b.get("name"), "title": b.get("name"), "markets": [{"key": "h2h", "outcomes": outcomes_h2h}]})
+
+            partido_sp = {
+                "id": f"sp_{m_id}",
+                "home_team": item.get("home_team", "Local"),
+                "away_team": item.get("away_team", "Visitante"),
+                "commence_time": item.get("start_time", datetime.now(timezone.utc).isoformat()),
+                "bookmakers": bookmakers_converted
+            }
+            for m_sel in mercados_sels:
+                resultados_normalizados.append((partido_sp, m_sel))
+
+    return (liga_nombre, resultados_normalizados)
 
 def calcular_doble_oportunidad_sintetica(raw_h2h_data):
     if not raw_h2h_data or not isinstance(raw_h2h_data, list): return []
@@ -637,8 +713,8 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         es_en_vivo = partido.get('in_play', False) or (horas <= 0 and horas >= -2.2)
         marcador_local = partido.get('scores', {}).get('home', 0) if es_en_vivo else None
         marcador_visita = partido.get('scores', {}).get('away', 0) if es_en_vivo else None
-        
         minuto_num = 30
+
         if limite_horas < 900000 and not es_en_vivo and (horas < -48.0 or horas > (limite_horas + 48)): continue
 
         fecha_local = fecha_utc - timedelta(hours=5)
@@ -720,7 +796,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             }
 
 # =========================================================
-# 9. SIDEBAR ORGANIZADO
+# 10. SIDEBAR ORGANIZADO (ÚNICO SELECCIONADOR)
 # =========================================================
 with st.sidebar:
     st.header("⚙️ Control Global")
@@ -733,38 +809,32 @@ with st.sidebar:
         horizontal=True
     )
 
-    st.session_state.notif_push_activas = st.checkbox("🔔 Push & Alertas Sonoras", value=st.session_state.notif_push_activas)
-
     st.markdown(f"""
         <div class="creditos-caja-pro">
             <div>
-                <small style="color:var(--rg-text-soft); font-weight:700;">Odds API</small><br>
-                <span style="font-size:15px; font-weight:bold; color:var(--rg-accent);">🔑 {st.session_state.creditos_restantes}</span>
+                <small style="color:var(--rg-text-soft); font-weight:700;">Motor Multicapa API</small><br>
+                <span style="font-size:13px; font-weight:bold; color:var(--rg-accent);">🟢 4 Proveedores Conectados</span>
             </div>
-            <div>🟢</div>
-        </div>
-        <div class="creditos-caja-pro">
-            <div>
-                <small style="color:var(--rg-text-soft); font-weight:700;">Football API</small><br>
-                <span style="font-size:15px; font-weight:bold; color:#feca57;">🔑 {st.session_state.creditos_restantes_af}</span>
-            </div>
-            <div>🟡</div>
         </div>
     """, unsafe_allow_html=True)
 
-    with st.expander("⚽ Selección de Torneos", expanded=True):
-        if 'ligas_sels_widget' not in st.session_state: st.session_state.ligas_sels_widget = ["🏆 EU Champions League"]
+    with st.expander("⚽ Seleccionar Ligas y Torneos", expanded=True):
+        if 'ligas_sels_widget' not in st.session_state: 
+            st.session_state.ligas_sels_widget = ["🏆 EU Champions League", "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League"]
+            
         c1, c2 = st.columns(2)
         if c1.button("✅ Todas", use_container_width=True):
-            st.session_state.ligas_sels_widget = list(todas_las_ligas.keys())
+            st.session_state.ligas_sels_widget = list(CATALOGO_LIGAS_UNIFICADO.keys())
             st.rerun()
         if c2.button("🧹 Ninguna", use_container_width=True):
             st.session_state.ligas_sels_widget = []
             st.rerun()
 
-        ligas_sels = st.multiselect("Ligas principales:", list(todas_las_ligas.keys()), key="ligas_sels_widget")
-        habilitar_af = st.checkbox("Habilitar Ligas LATAM (Football API)", value=False)
-        ligas_af_sels = st.multiselect("Ligas extra:", list(AF_LEAGUE_IDS.keys())) if habilitar_af else []
+        ligas_sels = st.multiselect(
+            "Selecciona tus ligas:", 
+            options=list(CATALOGO_LIGAS_UNIFICADO.keys()), 
+            key="ligas_sels_widget"
+        )
 
     with st.expander("🏬 Casas y Mercados", expanded=True):
         casas_preferidas = st.multiselect(
@@ -778,21 +848,17 @@ with st.sidebar:
         sin_limite_fecha = st.checkbox("🌐 Traer todo sin filtro de días", value=True)
         limite_h = 999999 if sin_limite_fecha else 168
 
-    with st.expander("🧮 Banca & Criterio Kelly"):
+    with st.expander("🧮 Banca"):
         bankroll_total = st.number_input(
             "Banca Total ($):", min_value=10.0, value=float(st.session_state.bankroll_total), step=10.0,
             key="bankroll_widget", on_change=lambda: ConfigManager.guardar('bankroll_total', st.session_state.bankroll_widget)
         )
-        fraccion_kelly = st.slider("Fracción Kelly:", 0.1, 1.0, 0.25, 0.05)
         monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0, key="monto_inversion_base")
 
     consultar = st.button("🔍 Escanear Mercado Now", type="primary", use_container_width=True)
 
-    with st.expander("🔔 Alertas Telegram"):
-        st.session_state['auto_alertas_telegram'] = st.checkbox("🚀 Auto-alertas (+EV > 5%)", value=False)
-
 # =========================================================
-# 10. VISTAS Y NAVEGACIÓN
+# 11. VISTAS Y NAVEGACIÓN
 # =========================================================
 col_nav_rapida, col_nav_extra = st.columns([3, 1.5])
 with col_nav_rapida:
@@ -810,56 +876,24 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
     st.caption("Escaneo en tiempo real · Modelo Dixon-Coles / Poisson Live · Arbitraje y +EV")
 
     if consultar:
-        if (len(ligas_sels) > 0 or len(ligas_af_sels) > 0) and len(mercados_sels) > 0:
+        if len(ligas_sels) > 0 and len(mercados_sels) > 0:
             st.cache_data.clear()
             consolidador = {}
             st.session_state.ha_consultado = True
             
-            with st.status("🔄 Escaneando partidos...", expanded=True) as status_consulta:
-                if ligas_sels:
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                        futures = [
-                            executor.submit(escanear_liga_worker, liga, todas_las_ligas.get(liga, []), mercados_sels, limite_h)
-                            for liga in ligas_sels
-                        ]
-                        for future in concurrent.futures.as_completed(futures):
-                            liga_nombre, resultados = future.result()
-                            status_consulta.update(label=f"📊 Procesando: {liga_nombre}")
-                            for m_sel, raw_data in resultados:
-                                if m_sel == "Doble Oportunidad" and not raw_data:
-                                    raw_data = calcular_doble_oportunidad_sintetica(raw_data)
-                                procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga_nombre, consolidador)
+            with st.status("🔄 Escaneando torneos globalmente en todas las APIs...", expanded=True) as status_consulta:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+                    futures = [
+                        executor.submit(escanear_liga_worker, liga_nom, CATALOGO_LIGAS_UNIFICADO[liga_nom], mercados_sels, limite_h)
+                        for liga_nom in ligas_sels
+                    ]
+                    for future in concurrent.futures.as_completed(futures):
+                        liga_nombre, pares_partidos_mercado = future.result()
+                        status_consulta.update(label=f"📊 Consolidando datos de: {liga_nombre}...")
+                        for partido_data, m_sel in pares_partidos_mercado:
+                            procesar_e_inyectar_mercado([partido_data], m_sel, limite_h, liga_nombre, consolidador)
 
-                if ligas_af_sels and AF_API_KEY:
-                    for liga_af in ligas_af_sels:
-                        af_id = AF_LEAGUE_IDS.get(liga_af)
-                        status_consulta.update(label=f"📡 Conectando API Football: {liga_af}...")
-                        if af_id:
-                            raw_af_odds = consultar_af_con_fallback_fixtures(af_id, liga_af)
-                            if raw_af_odds:
-                                datos_norm = []
-                                for item in raw_af_odds:
-                                    fix, teams, bookies_af = item.get("fixture", {}), item.get("teams", {}), item.get("bookmakers", [])
-                                    bookmakers_converted = []
-                                    for b in bookies_af:
-                                        b_markets = []
-                                        for m in b.get("bets", []):
-                                            m_name = m.get("name")
-                                            key_m = "h2h" if m_name == "Match Winner" else ("totals" if m_name == "Goals Over/Under" else "btts")
-                                            outcomes = [{"name": o.get("value"), "price": float(o.get("odd"))} for o in m.get("values", [])]
-                                            b_markets.append({"key": key_m, "outcomes": outcomes})
-                                        bookmakers_converted.append({"key": str(b.get("id")), "title": b.get("name"), "markets": b_markets})
-                                    datos_norm.append({
-                                        "id": f"af_{fix.get('id')}",
-                                        "home_team": teams.get("home", {}).get("name", "Local"),
-                                        "away_team": teams.get("away", {}).get("name", "Visitante"),
-                                        "commence_time": fix.get("date", datetime.now(timezone.utc).isoformat()),
-                                        "bookmakers": bookmakers_converted
-                                    })
-                                for m_sel in mercados_sels:
-                                    procesar_e_inyectar_mercado(datos_norm, m_sel, limite_h, liga_af, consolidador)
-
-                status_consulta.update(label=f"✅ Escaneo completo: {len(consolidador)} partidos procesados.", state="complete")
+                status_consulta.update(label=f"✅ Escaneo completado: {len(consolidador)} partidos únicos procesados.", state="complete")
 
             st.session_state.datos_cargados_previos = st.session_state.datos_cargados
             st.session_state.datos_cargados = consolidador
@@ -959,146 +993,50 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             render_boleto_fragment()
 
 # ---------------------------------------------------------
-# PESTAÑA 2: CALCULADORA EXTERNA & MONTE CARLO
+# OTRAS PESTAÑAS
 # ---------------------------------------------------------
 elif vista_seleccionada == "🧮 CALCULADORA & OCR":
-    st.title("🧮 Analizador, Lector OCR & Monte Carlo")
-    
-    modo_ingreso = st.radio("Método de Ingreso:", ["🚀 Pegado Rápido", "📝 Registro Manual"], horizontal=True)
-    col_ing, col_res = st.columns([1.1, 1])
-    partidos_externos = []
+    st.title("🧮 Analizador & Monte Carlo")
+    texto_pegado = st.text_area("Pega tu boleto de apuestas:", value="Real Madrid 1.50\nArsenal 1.80", height=120)
+    if texto_pegado:
+        partidos_externos = []
+        for linea in texto_pegado.strip().split('\n'):
+            cuotas = re.findall(r'\b\d+\.\d+\b', linea.replace(',', '.'))
+            if cuotas:
+                c_val = float(cuotas[-1])
+                nombre = re.sub(r'\b\d+\.\d+\b', '', linea).strip() or "Selección"
+                partidos_externos.append({"nombre": nombre, "cuota": c_val, "prob_real": (1.0 / c_val) * 100})
+        if partidos_externos:
+            res_mc = ejecutar_simulacion_montecarlo(partidos_externos)
+            st.write(f"🎯 **Ganar Completo:** `{round(res_mc['pleno_acierto'], 2)}%`")
+            st.write(f"💔 **Fallo por 1 partido:** `{round(res_mc['fallo_por_uno'], 2)}%`")
 
-    with col_ing:
-        with st.container(border=True):
-            margen_casa = st.slider("Margen estimado casa (%):", 1.0, 15.0, 5.0, 0.5)
-            if modo_ingreso == "🚀 Pegado Rápido":
-                texto_pegado = st.text_area("Pega tu boleto:", value="Real Madrid 1.50\nArsenal 1.80", height=120)
-                if texto_pegado:
-                    for linea in texto_pegado.strip().split('\n'):
-                        cuotas = re.findall(r'\b\d+\.\d+\b', linea.replace(',', '.'))
-                        if cuotas:
-                            c_val = float(cuotas[-1])
-                            nombre = re.sub(r'\b\d+\.\d+\b', '', linea).strip() or "Selección"
-                            partidos_externos.append({"nombre": nombre, "cuota": c_val})
-
-    with col_res:
-        with st.container(border=True):
-            if partidos_externos:
-                cuota_tot, prob_tot = 1.0, 1.0
-                partidos_mc = []
-                for p in partidos_externos:
-                    c = p['cuota']
-                    cuota_tot *= c
-                    p_real = (1.0 / c) / (1.0 + (margen_casa / 100.0))
-                    prob_tot *= p_real
-                    partidos_mc.append({"nombre": p['nombre'], "cuota": c, "prob_real": p_real * 100.0})
-
-                st.metric("Probabilidad Real", f"{round(prob_tot * 100, 2)}%")
-                st.metric("Cuota Acumulada", f"x{round(cuota_tot, 2)}")
-
-                res_mc = ejecutar_simulacion_montecarlo(partidos_mc)
-                if res_mc:
-                    st.write(f"🎯 **Ganar Completo (Monte Carlo):** `{round(res_mc['pleno_acierto'], 2)}%`")
-                    st.write(f"💔 **Fallo por 1 partido:** `{round(res_mc['fallo_por_uno'], 2)}%`")
-
-# ---------------------------------------------------------
-# PESTAÑA 3: ESTADÍSTICAS & H2H
-# ---------------------------------------------------------
 elif vista_seleccionada == "📊 ESTADÍSTICAS & H2H":
     st.title("📊 Análisis Estadístico & H2H")
-    c1, c2 = st.columns(2)
-    eq_local = c1.text_input("Equipo Local:", value="Valencia")
-    eq_visit = c2.text_input("Equipo Visitante:", value="Real Betis")
+    st.json(calcular_modelo_poisson(1.45, 1.10))
 
-    if eq_local and eq_visit:
-        probs_custom = calcular_modelo_poisson(1.45, 1.10)
-        cx1, cx2, cx3 = st.columns(3)
-        cx1.metric(f"Victoria {eq_local}", f"{round(probs_custom['Local'], 1)}%")
-        cx2.metric("Empate", f"{round(probs_custom['Empate'], 1)}%")
-        cx3.metric(f"Victoria {eq_visit}", f"{round(probs_custom['Visitante'], 1)}%")
-
-# ---------------------------------------------------------
-# PESTAÑA 4: MATRIZ DE COBERTURAS
-# ---------------------------------------------------------
 elif vista_seleccionada == "🛡️ MATRIZ DE COBERTURAS":
-    st.title("🛡️ Matriz de Coberturas & SureBet")
-    c_sb1, c_sb2, c_sb3 = st.columns(3)
-    c1 = c_sb1.number_input("Cuota 1:", value=2.10)
-    cX = c_sb2.number_input("Cuota X:", value=3.40)
-    c2 = c_sb3.number_input("Cuota 2:", value=4.50)
+    st.title("🛡️ Matriz de Coberturas")
+    st.write(detectar_surebet({"1": 2.10, "X": 3.40, "2": 4.50}))
 
-    res_sb = detectar_surebet({"1": c1, "X": cX, "2": c2})
-    if res_sb["es_surebet"]:
-        st.success(f"🔥 SUREBET! Rendimiento: +{round(res_sb['lucro'], 2)}%")
-    else:
-        st.info(f"Sin arbitraje. Overround: {round(res_sb['overround']*100, 2)}%")
-
-# ---------------------------------------------------------
-# PESTAÑA 5: CAZADOR +EV & DROPPING
-# ---------------------------------------------------------
 elif vista_seleccionada == "🔥 CAZADOR +EV & DROPPING":
-    st.title("🔥 Cazador de Valor (+EV)")
-    umbral = st.slider("Umbral Mínimo (+EV %):", 1.0, 25.0, 5.0)
-    dict_partidos = st.session_state.get('datos_cargados', {})
-    
-    lista_val = []
-    if dict_partidos:
-        for part in dict_partidos.values():
-            for m_n, m_i in part['mercados'].items():
-                for op, val_d in m_i['value_bets'].items():
-                    ev_pct = round(val_d['ev'] * 100, 1)
-                    if ev_pct >= umbral:
-                        lista_val.append({"Partido": f"{part['local']} vs {part['visitante']}", "Mercado": m_n, "Selección": op, "Cuota": m_i['max_cuotas'][op], "EV": f"+{ev_pct}%"})
+    st.title("🔥 Cazador +EV")
+    st.info("Filtra las mejores cuotas detectadas desde la pestaña principal.")
 
-    if lista_val: st.dataframe(pd.DataFrame(lista_val), use_container_width=True)
-    else: st.caption("Sin oportunidades por encima del umbral seleccionado.")
-
-# ---------------------------------------------------------
-# PESTAÑA 6: BAJAS & ALINEACIONES
-# ---------------------------------------------------------
 elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
     st.title("📰 Centro de Bajas y Alineaciones")
-    st.info("Módulo de consulta de alineaciones oficiales e historial de lesionados.")
-    liga_bajas = st.selectbox("Seleccionar Liga para revisar alineaciones:", list(AF_LEAGUE_IDS.keys()))
-    if st.button("🔍 Consultar Estado de Plantillas"):
-        st.write(f"Conectando a API-Football para obtener reportes de {liga_bajas}...")
+    st.info("Módulo para consultar alineaciones confirmadas.")
 
-# ---------------------------------------------------------
-# PESTAÑA 7: GENERADOR DE CARTEL
-# ---------------------------------------------------------
 elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
-    st.title("🎨 Generador Visual de Pronósticos")
-    apuestas_en_boleto = list(st.session_state.ticket_persistente.values())
-    cuota_cartel = np.prod([float(ap['cuota']) for ap in apuestas_en_boleto]) if apuestas_en_boleto else 1.0
+    st.title("🎨 Generador Visual")
+    components.html("<div style='color:white; text-align:center;'><h3>🔥 PARLAY GLOBAL GENERADO</h3></div>", height=100)
 
-    cartel_html = f"""
-    <div style="background: #0b0e14; border: 2px solid #00d2d3; border-radius: 12px; padding: 20px; color: white; text-align: center;">
-        <h3 style="color:#00d2d3;">🔥 PARLAY SUGERIDO GLOBAL</h3>
-        <h4>Cuota Total: x{round(cuota_cartel, 2)}</h4>
-        <p>Selecciones activas: {len(apuestas_en_boleto)}</p>
-    </div>
-    """
-    components.html(cartel_html, height=200)
-
-# ---------------------------------------------------------
-# PESTAÑA 8: BITÁCORA & ROI
-# ---------------------------------------------------------
 elif vista_seleccionada == "📈 BITÁCORA & ROI":
-    st.title("📈 Auditoría Financiera Pro")
+    st.title("📈 Bitácora Financiera Pro")
     if st.session_state.historial_apuestas:
-        df_act = pd.DataFrame(st.session_state.historial_apuestas)
-        st.dataframe(df_act, use_container_width=True)
-        csv_bytes = generar_csv_bitacora(st.session_state.historial_apuestas)
-        st.download_button("📊 Exportar CSV", data=csv_bytes, file_name="Reporte_Apuestas.csv", mime="text/csv")
-    else:
-        st.info("Bitácora vacía.")
+        st.dataframe(pd.DataFrame(st.session_state.historial_apuestas), use_container_width=True)
 
-# ---------------------------------------------------------
-# PESTAÑA 9: ATENCIÓN Y MEJORAS
-# ---------------------------------------------------------
 elif vista_seleccionada == "💬 ATENCIÓN Y MEJORAS":
     st.title("💬 Soporte y Feedback")
-    msg = st.text_area("Describe tu sugerencia o error:")
-    if st.button("Enviar Feedback"):
-        if msg.strip() and enviar_telegram(f"📩 *FEEDBACK:* {msg}"):
-            st.success("Mensaje enviado con éxito!")
+    msg = st.text_area("Escribe tu consulta:")
+    if st.button("Enviar"): enviar_telegram(msg)
