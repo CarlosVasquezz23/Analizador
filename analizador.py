@@ -38,7 +38,7 @@ DEFAULT_TG_TOKEN = st.secrets.get("TG_TOKEN", "")
 DEFAULT_TG_CHAT_ID = st.secrets.get("TG_CHAT_ID", "")
 
 # =========================================================
-# 2. CAPA DE PERSISTENCIA Y SERVICIOS EN MEMORIA BFFERED
+# 2. CAPA DE PERSISTENCIA Y SERVICIOS EN MEMORIA BUFFERED
 # =========================================================
 class BitacoraManager:
     @staticmethod
@@ -643,9 +643,8 @@ def escanear_liga_worker(liga_nombre, sport_keys_list, mercados_sels, limite_h):
         m_key = diccionario_mercados.get(market_sel, "h2h")
         for skey in sport_keys_list:
             data, err = consultar_api_odds(skey, m_key)
-            if data:
+            if data and isinstance(data, list) and len(data) > 0:
                 resultados_liga.append((market_sel, data))
-                break
     return (liga_nombre, resultados_liga)
 
 def calcular_doble_oportunidad_sintetica(raw_h2h_data):
@@ -892,8 +891,8 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             consolidador = {}
             st.session_state.ha_consultado = True
             
-            with st.status("🔄 Escaneando mercados de forma concurrente...", expanded=True) as status_consulta:
-                # Peticiones en paralelo con ThreadPoolExecutor
+            with st.status("🔄 Escaneando mercados...", expanded=True) as status_consulta:
+                # 1. Peticiones en paralelo para The Odds API
                 with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                     futures = [
                         executor.submit(escanear_liga_worker, liga, todas_las_ligas.get(liga, []), mercados_sels, limite_h)
@@ -907,32 +906,34 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                 raw_data = calcular_doble_oportunidad_sintetica(raw_data)
                             procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga_nombre, consolidador)
 
+                # 2. Peticiones secuenciales para API Football (evitar rate limiting)
                 for liga_af in ligas_af_sels:
                     af_id = AF_LEAGUE_IDS.get(liga_af)
                     status_consulta.update(label=f"📡 Conectando API Football: {liga_af}...")
                     if af_id and AF_API_KEY:
                         raw_af_odds = consultar_af_con_fallback_fixtures(af_id, liga_af)
-                        datos_norm = []
-                        for item in raw_af_odds:
-                            fix, teams, bookies_af = item.get("fixture", {}), item.get("teams", {}), item.get("bookmakers", [])
-                            bookmakers_converted = []
-                            for b in bookies_af:
-                                b_markets = []
-                                for m in b.get("bets", []):
-                                    m_name = m.get("name")
-                                    key_m = "h2h" if m_name == "Match Winner" else ("totals" if m_name == "Goals Over/Under" else ("btts" if m_name == "Both Teams Score" else "double_chance"))
-                                    outcomes = [{"name": o.get("value"), "price": float(o.get("odd"))} for o in m.get("values", [])]
-                                    b_markets.append({"key": key_m, "outcomes": outcomes})
-                                bookmakers_converted.append({"key": str(b.get("id")), "title": b.get("name"), "markets": b_markets})
-                            datos_norm.append({
-                                "id": f"af_{fix.get('id')}",
-                                "home_team": teams.get("home", {}).get("name", "Local"),
-                                "away_team": teams.get("away", {}).get("name", "Visitante"),
-                                "commence_time": fix.get("date", datetime.now(timezone.utc).isoformat()),
-                                "bookmakers": bookmakers_converted
-                            })
-                        for m_sel in mercados_sels:
-                            procesar_e_inyectar_mercado(datos_norm, m_sel, limite_h, liga_af, consolidador)
+                        if raw_af_odds:
+                            datos_norm = []
+                            for item in raw_af_odds:
+                                fix, teams, bookies_af = item.get("fixture", {}), item.get("teams", {}), item.get("bookmakers", [])
+                                bookmakers_converted = []
+                                for b in bookies_af:
+                                    b_markets = []
+                                    for m in b.get("bets", []):
+                                        m_name = m.get("name")
+                                        key_m = "h2h" if m_name == "Match Winner" else ("totals" if m_name == "Goals Over/Under" else ("btts" if m_name == "Both Teams Score" else "double_chance"))
+                                        outcomes = [{"name": o.get("value"), "price": float(o.get("odd"))} for o in m.get("values", [])]
+                                        b_markets.append({"key": key_m, "outcomes": outcomes})
+                                    bookmakers_converted.append({"key": str(b.get("id")), "title": b.get("name"), "markets": b_markets})
+                                datos_norm.append({
+                                    "id": f"af_{fix.get('id')}",
+                                    "home_team": teams.get("home", {}).get("name", "Local"),
+                                    "away_team": teams.get("away", {}).get("name", "Visitante"),
+                                    "commence_time": fix.get("date", datetime.now(timezone.utc).isoformat()),
+                                    "bookmakers": bookmakers_converted
+                                })
+                            for m_sel in mercados_sels:
+                                procesar_e_inyectar_mercado(datos_norm, m_sel, limite_h, liga_af, consolidador)
 
                 status_consulta.update(label=f"✅ Escaneo completo: {len(consolidador)} partidos procesados.", state="complete")
 
@@ -941,6 +942,7 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             st.session_state.version_ticket += 1
             st.session_state.ultimo_escaneo_ts = time.time()
             st.toast(f"✅ {len(consolidador)} partidos cargados.", icon="🎯")
+            st.rerun()
 
     dict_partidos = st.session_state.datos_cargados
     if dict_partidos:
