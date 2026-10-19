@@ -29,8 +29,6 @@ DB_FILE = "bitacora_backup.json"
 CONFIG_FILE = "user_config.json"
 
 API_KEY = st.secrets.get("ODDS_API_KEY", "")
-HL_API_KEY = st.secrets.get("HL_API_KEY", "")
-HL_BASE_URL = "https://soccer.highlightly.net"
 AF_API_KEY = st.secrets.get("AF_API_KEY", "")
 AF_BASE_URL = "https://v3.football.api-sports.io"
 
@@ -38,7 +36,7 @@ DEFAULT_TG_TOKEN = st.secrets.get("TG_TOKEN", "")
 DEFAULT_TG_CHAT_ID = st.secrets.get("TG_CHAT_ID", "")
 
 # =========================================================
-# 2. CAPA DE PERSISTENCIA Y SERVICIOS EN MEMORIA BUFFERED
+# 2. CAPA DE PERSISTENCIA Y SERVICIOS EN MEMORIA
 # =========================================================
 class BitacoraManager:
     @staticmethod
@@ -149,7 +147,6 @@ def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1
     
     p_l = poisson_pmf_vec(k_range, lambda_l)
     p_v = poisson_pmf_vec(k_range, lambda_v)
-    
     matriz_prob = np.outer(p_l, p_v)
 
     if usar_dixon_coles:
@@ -160,8 +157,7 @@ def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1
         matriz_prob[1, 1] *= (1.0 - rho)
 
     soma = np.sum(matriz_prob)
-    if soma > 0:
-        matriz_prob /= soma
+    if soma > 0: matriz_prob /= soma
 
     prob_local = float(np.sum(np.tril(matriz_prob, -1)))
     prob_empate = float(np.sum(np.diag(matriz_prob)))
@@ -172,16 +168,12 @@ def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1
     prob_over25 = float(np.sum(matriz_prob[grid_i + grid_j > 2.5]))
 
     return {
-        "Local": prob_local * 100,
-        "Empate": prob_empate * 100,
-        "Visitante": prob_visita * 100,
+        "Local": prob_local * 100, "Empate": prob_empate * 100, "Visitante": prob_visita * 100,
         "1X (Local o Empate)": (prob_local + prob_empate) * 100,
         "X2 (Visitante o Empate)": (prob_visita + prob_empate) * 100,
         "12 (Local o Visitante)": (prob_local + prob_visita) * 100,
-        "Sí": prob_btts * 100,
-        "No": (1 - prob_btts) * 100,
-        "Más de 2.5": prob_over25 * 100,
-        "Menos de 2.5": (1 - prob_over25) * 100
+        "Sí": prob_btts * 100, "No": (1 - prob_btts) * 100,
+        "Más de 2.5": prob_over25 * 100, "Menos de 2.5": (1 - prob_over25) * 100
     }
 
 def calcular_poisson_live(minuto: int, goles_loc: int, goles_vis: int, lambda_l_base: float = 1.45, lambda_v_base: float = 1.10) -> Dict[str, float]:
@@ -196,8 +188,7 @@ def calcular_poisson_live(minuto: int, goles_loc: int, goles_vis: int, lambda_l_
     
     matriz_prob = np.outer(p_l, p_v)
     soma = np.sum(matriz_prob)
-    if soma > 0:
-        matriz_prob /= soma
+    if soma > 0: matriz_prob /= soma
 
     grid_i, grid_j = np.indices((max_goles_rem, max_goles_rem))
     tot_loc = goles_loc + grid_i
@@ -211,20 +202,16 @@ def calcular_poisson_live(minuto: int, goles_loc: int, goles_vis: int, lambda_l_
     prob_btts_live = float(np.sum(matriz_prob[(tot_loc > 0) & (tot_vis > 0)]))
 
     return {
-        "Local": prob_local_win * 100,
-        "Empate": prob_empate_win * 100,
-        "Visitante": prob_visita_win * 100,
+        "Local": prob_local_win * 100, "Empate": prob_empate_win * 100, "Visitante": prob_visita_win * 100,
         "1X (Local o Empate)": (prob_local_win + prob_empate_win) * 100,
         "X2 (Visitante o Empate)": (prob_visita_win + prob_empate_win) * 100,
         "12 (Local o Visitante)": (prob_local_win + prob_visita_win) * 100,
-        "Sí": prob_btts_live * 100,
-        "No": (1.0 - prob_btts_live) * 100,
-        "Más de 2.5": prob_over25_live * 100,
-        "Menos de 2.5": (1.0 - prob_over25_live) * 100
+        "Sí": prob_btts_live * 100, "No": (1.0 - prob_btts_live) * 100,
+        "Más de 2.5": prob_over25_live * 100, "Menos de 2.5": (1.0 - prob_over25_live) * 100
     }
 
 # =========================================================
-# 4. VALIDADOR Y MONTE CARLO
+# 4. MONTE CARLO Y COBERTURAS
 # =========================================================
 def detectar_surebet(cuotas_max_dict: Dict[str, float]) -> Dict[str, Any]:
     if not cuotas_max_dict or len(cuotas_max_dict) < 2:
@@ -280,21 +267,17 @@ def detectar_correlaciones(apuestas: List[Dict[str, Any]]) -> List[str]:
         if len(selecciones) > 1:
             mercados = [s['mercado'] for s in selecciones]
             opciones = [s['seleccion'] for s in selecciones]
-
             if mercados.count("1X2 (Ganador)") > 1:
                 alertas.append(f"⚠️ **{ev}**: Selección contradictoria en 1X2 ({', '.join(opciones)}).")
-
             if "1X2 (Ganador)" in mercados and "Doble Oportunidad" in mercados:
                 for s in selecciones:
                     if s['seleccion'] == "Local" and any(x in ["X2 (Visitante o Empate)"] for x in opciones):
                         alertas.append(f"⚠️ **{ev}**: Conflicto entre Local y X2.")
                     elif s['seleccion'] == "Visitante" and any(x in ["1X (Local o Empate)"] for x in opciones):
                         alertas.append(f"⚠️ **{ev}**: Conflicto entre Visitante y 1X.")
-
             if "Goles Más/Menos 2.5" in mercados and "Ambos Anotan (BTTS)" in mercados:
                 if "Menos de 2.5" in opciones and "Sí" in opciones:
                     alertas.append(f"⚠️ **{ev}**: Conflicto negativo (Menos de 2.5 y Ambos Anotan Sí).")
-
     return alertas
 
 def detectar_conflictos_horarios(apuestas: List[Dict[str, Any]]) -> List[str]:
@@ -403,24 +386,17 @@ user_config = ConfigManager.cargar()
 
 if 'tema_visual' not in st.session_state: st.session_state.tema_visual = user_config.get('tema_visual', 'Oscuro')
 if 'historial_apuestas' not in st.session_state: st.session_state.historial_apuestas = BitacoraManager.cargar()
-if 'version_ticket' not in st.session_state: st.session_state.version_ticket = 0
 if 'datos_cargados' not in st.session_state: st.session_state.datos_cargados = {}
 if 'datos_cargados_previos' not in st.session_state: st.session_state.datos_cargados_previos = {}
-if 'historico_cuotas_live' not in st.session_state: st.session_state.historico_cuotas_live = {}
 if 'ha_consultado' not in st.session_state: st.session_state.ha_consultado = False
-if 'claves_auto' not in st.session_state: st.session_state.claves_auto = set()
 if 'creditos_restantes' not in st.session_state: st.session_state.creditos_restantes = "No consultado"
 if 'creditos_restantes_af' not in st.session_state: st.session_state.creditos_restantes_af = "No consultado"
-if 'overrides_live' not in st.session_state: st.session_state.overrides_live = {}
 if 'notif_push_activas' not in st.session_state: st.session_state.notif_push_activas = True
 if 'ticket_persistente' not in st.session_state: st.session_state.ticket_persistente = {}
-if 'ultimo_escaneo_ts' not in st.session_state: st.session_state.ultimo_escaneo_ts = None
 if 'casas_preferidas' not in st.session_state: st.session_state.casas_preferidas = user_config.get('casas_preferidas', [])
 if 'bankroll_total' not in st.session_state: st.session_state.bankroll_total = user_config.get('bankroll_total', 200.0)
 if 'tg_token' not in st.session_state: st.session_state.tg_token = DEFAULT_TG_TOKEN
 if 'tg_chat_id' not in st.session_state: st.session_state.tg_chat_id = DEFAULT_TG_CHAT_ID
-if 'debug_api_errors' not in st.session_state: st.session_state.debug_api_errors = []
-if 'debug_mode' not in st.session_state: st.session_state.debug_mode = False
 
 def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_val, prob_val, clave_k):
     if st.session_state.get(clave_k, False):
@@ -522,18 +498,11 @@ st.markdown(f"""
         font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--rg-accent);
         background: rgba(0,210,211,0.08); border-radius: 6px; padding: 1px 6px; font-size: 12px;
     }}
-
-    .kpi-card {{
-        border-radius: 12px; padding: 16px; border: 1px solid var(--rg-border);
-        background: var(--rg-card); height: 100%;
-    }}
-    .kpi-label {{ font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: var(--rg-text-soft); margin-bottom: 6px; }}
-    .kpi-value {{ font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700; color: var(--rg-text); }}
     </style>
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 7. CLIENTES API
+# 7. CLIENTES API Y DICCIONARIOS
 # =========================================================
 AF_LEAGUE_IDS = {
     "🇦🇷 Liga Profesional (Argentina)": 128, "🇧🇷 Brasileirão Serie A (Brasil)": 71,
@@ -541,30 +510,26 @@ AF_LEAGUE_IDS = {
     "🇪🇨 LigaPro (Ecuador)": 242, "🇲🇽 Liga MX (México)": 262,
     "🇵🇾 División Profesional (Paraguay)": 252, "🇵🇪 Liga 1 (Perú)": 281,
     "🇺🇾 Primera División (Uruguay)": 268, "🇺🇸 MLS (Estados Unidos)": 253,
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League (Inglaterra)": 39, "🇪🇸 LaLiga (España)": 140,
-    "🇮🇹 Serie A (Italia)": 135, "🇩🇪 Bundesliga (Alemania)": 78,
-    "🇫🇷 Ligue 1 (Francia)": 61, "🇵🇹 Primeira Liga (Portugal)": 94,
-    "🇳🇱 Eredivisie (Países Bajos)": 88, "🏆 Champions League": 2,
-    "🏆 Europa League": 3, "🏆 Copa Libertadores": 13, "🏆 Copa Sudamericana": 11
+    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League": 39, "🇪🇸 LaLiga": 140, "🇮🇹 Serie A": 135,
+    "🇩🇪 Bundesliga": 78, "🇫🇷 Ligue 1": 61, "🇵🇹 Primeira Liga": 94,
+    "🇳🇱 Eredivisie": 88, "🏆 Champions League": 2, "🏆 Europa League": 3
 }
 
 todas_las_ligas = {
-    "🇺🇸 USA MLS": ["soccer_usa_mls"], "🇲🇽 Mexico Liga MX": ["soccer_mexico_liga_mx"],
-    "🇦🇷 Argentina Primera Division": ["soccer_argentina_primera_division"],
-    "🇧🇷 Brasil Brasileirao": ["soccer_brazil_campeonato"],
     "🏆 EU Champions League": ["soccer_uefa_champions_league"],
     "🏆 EU Europa League": ["soccer_uefa_europa_league"],
     "🏆 EU Conference League": ["soccer_uefa_europa_conference_league"],
+    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League": ["soccer_epl"],
+    "🇪🇸 La Liga": ["soccer_spain_la_liga"],
+    "🇮🇹 Serie A": ["soccer_italy_serie_a"],
+    "🇩🇪 Bundesliga": ["soccer_germany_bundesliga"],
+    "🇫🇷 Ligue 1": ["soccer_france_ligue_one"],
+    "🇺🇸 USA MLS": ["soccer_usa_mls"],
+    "🇲🇽 Mexico Liga MX": ["soccer_mexico_liga_mx"],
+    "🇦🇷 Argentina Primera Division": ["soccer_argentina_primera_division"],
+    "🇧🇷 Brasil Brasileirao": ["soccer_brazil_campeonato"],
     "🏆 Copa Libertadores": ["soccer_conmebol_copa_libertadores"],
-    "🏆 Copa Sudamericana": ["soccer_conmebol_copa_sudamericana"],
-    "🇪🇸 Spain La Liga": ["soccer_spain_la_liga"], "🇪🇸 Spain La Liga 2": ["soccer_spain_segunda_division"],
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England Premier League": ["soccer_epl"], "🏴󠁧󠁢󠁥󠁮󠁧󠁿 England Championship": ["soccer_efl_champ"],
-    "🇮🇹 Italy Serie A": ["soccer_italy_serie_a"], "🇮🇹 Italy Serie B": ["soccer_italy_serie_b"],
-    "🇩🇪 Germany Bundesliga": ["soccer_germany_bundesliga"], "🇩🇪 Germany Bundesliga 2": ["soccer_germany_bundesliga2"],
-    "🇫🇷 France Ligue 1": ["soccer_france_ligue_one"], "🇫🇷 France Ligue 2": ["soccer_france_ligue_two"],
-    "🇵🇹 Portugal Primeira Liga": ["soccer_portugal_primeira_liga"],
-    "🇳🇱 Netherlands Eredivisie": ["soccer_netherlands_eredivisie"],
-    "🇹🇷 Turkey Super Lig": ["soccer_turkey_super_league"], "🇦🇺 Australia A-League": ["soccer_australia_aleague"]
+    "🏆 Copa Sudamericana": ["soccer_conmebol_copa_sudamericana"]
 }
 
 diccionario_mercados = {
@@ -587,15 +552,15 @@ def actualizar_creditos(headers):
 @st.cache_data(ttl=60)
 def consultar_api_odds(sport_key, market_key):
     if not API_KEY or not sport_key:
-        return [], "Falta clave o sport_key"
+        return [], "Falta clave API de Odds"
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu,us&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url, timeout=10)
         actualizar_creditos(response.headers)
         if response.status_code == 200:
             res_json = response.json()
-            return (res_json, None) if isinstance(res_json, list) else ([], f"Respuesta inesperada: {res_json}")
-        return [], f"HTTP {response.status_code}: {response.text[:200]}"
+            return (res_json, None) if isinstance(res_json, list) else ([], f"Respuesta inesperada")
+        return [], f"HTTP {response.status_code}"
     except Exception as e:
         return [], f"Excepción: {e}"
 
@@ -604,38 +569,16 @@ def consultar_af_con_fallback_fixtures(af_id, nombre_liga):
     url_odds = f"{AF_BASE_URL}/odds"
     season_actual = datetime.now().year
     try:
-        r = requests.get(url_odds, headers=af_headers(), params={"league": af_id, "season": season_actual}, timeout=10)
+        r = requests.get(url_odds, headers=af_headers(), params={"league": af_id, "season": season_actual}, timeout=8)
         _actualizar_creditos_af(r.headers)
         if r.status_code == 200:
-            raw_data = r.json().get("response", [])
-            if raw_data: return raw_data
+            return r.json().get("response", [])
     except Exception:
         pass
-
-    url_fixtures = f"{AF_BASE_URL}/fixtures"
-    try:
-        rf = requests.get(url_fixtures, headers=af_headers(), params={"league": af_id, "next": 10}, timeout=10)
-        _actualizar_creditos_af(rf.headers)
-        fixtures_encontrados = rf.json().get("response", []) if rf.status_code == 200 else []
-    except Exception:
-        return []
-
-    resultados_reconstruidos = []
-    for fix in fixtures_encontrados:
-        f_id = fix.get("fixture", {}).get("id")
-        if not f_id: continue
-        try:
-            r_fix_odds = requests.get(url_odds, headers=af_headers(), params={"fixture": f_id}, timeout=8)
-            _actualizar_creditos_af(r_fix_odds.headers)
-            if r_fix_odds.status_code == 200:
-                resp_f = r_fix_odds.json().get("response", [])
-                if resp_f: resultados_reconstruidos.extend(resp_f)
-        except Exception:
-            pass
-    return resultados_reconstruidos
+    return []
 
 # =========================================================
-# 8. PARALELIZACIÓN ASÍNCRONA DE ESCANEO
+# 8. PARALELIZACIÓN Y PROCESAMIENTO
 # =========================================================
 def escanear_liga_worker(liga_nombre, sport_keys_list, mercados_sels, limite_h):
     resultados_liga = []
@@ -695,15 +638,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         marcador_local = partido.get('scores', {}).get('home', 0) if es_en_vivo else None
         marcador_visita = partido.get('scores', {}).get('away', 0) if es_en_vivo else None
         
-        minuto_estimado = 30
-        if es_en_vivo and horas < 0:
-            minutos_transcurridos = int(abs(horas) * 60)
-            minuto_estimado = max(1, minutos_transcurridos) if minutos_transcurridos <= 45 else (45 if minutos_transcurridos <= 60 else min(89, minutos_transcurridos - 15))
-
-        min_raw = partido.get('minute', minuto_estimado) if es_en_vivo else None
-        try: minuto_num = int(str(min_raw).replace("'", "").replace("+", ""))
-        except Exception: minuto_num = minuto_estimado
-
+        minuto_num = 30
         if limite_horas < 900000 and not es_en_vivo and (horas < -48.0 or horas > (limite_horas + 48)): continue
 
         fecha_local = fecha_utc - timedelta(hours=5)
@@ -715,46 +650,36 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             bookies_filtrados = [b for b in bookmakers if any(cp.lower() in b['title'].lower() for cp in casas_pref)]
             if bookies_filtrados: bookmakers = bookies_filtrados
 
-        cuotas_globales, betano_cuotas = {}, {}
+        cuotas_globales = {}
         for b in bookmakers:
-            b_key = b['key'].lower()
             dict_b_markets = {m['key']: m['outcomes'] for m in b.get('markets', [])}
 
             if mercado == "Doble Oportunidad" and "double_chance" in dict_b_markets:
                 for o in dict_b_markets["double_chance"]:
                     o_name = "1X (Local o Empate)" if o['name'] in ["home_draw", "home or draw", "1X", f"{home} or draw"] else ("X2 (Visitante o Empate)" if o['name'] in ["away_draw", "away or draw", "X2", f"{away} or draw"] else "12 (Local o Visitante)")
                     cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-                    if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
 
             elif mercado == "Ambos Anotan (BTTS)" and "btts" in dict_b_markets:
                 for o in dict_b_markets["btts"]:
                     o_name = "Sí" if o['name'].lower() in ["yes", "sí", "si"] else "No"
                     cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-                    if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
 
             elif "Goles" in mercado and "totals" in dict_b_markets:
                 for o in dict_b_markets["totals"]:
                     if o.get('point', 2.5) == 2.5:
                         o_name = "Más de 2.5" if o['name'].lower() in ["over", "más", "mas"] else "Menos de 2.5"
                         cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-                        if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
 
             elif mercado == "1X2 (Ganador)" and "h2h" in dict_b_markets:
                 for o in dict_b_markets["h2h"]:
                     o_name = "Local" if o['name'] == home else ("Visitante" if o['name'] == away else "Empate")
                     cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-                    if b_key == "betano": betano_cuotas[o_name] = float(o['price'])
 
         max_cuotas, max_bookies, value_bets, variaciones_dict = {}, {}, {}, {}
         cuotas_promedio_dict = {op: sum(t[0] for t in tuplas)/len(tuplas) for op, tuplas in cuotas_globales.items() if tuplas}
         overround = sum([1 / cp for cp in cuotas_promedio_dict.values()]) if cuotas_promedio_dict else 1.0
 
-        override_data = st.session_state.overrides_live.get(partido_id, {})
-        minuto_final_calc = override_data.get('minuto', minuto_num)
-        goles_loc_final = override_data.get('goles_loc', marcador_local or 0)
-        goles_vis_final = override_data.get('goles_vis', marcador_visita or 0)
-
-        probs_poisson = calcular_poisson_live(minuto_final_calc, goles_loc_final, goles_vis_final) if es_en_vivo else calcular_modelo_poisson(1.45, 1.10, usar_dixon_coles=True)
+        probs_poisson = calcular_poisson_live(minuto_num, marcador_local or 0, marcador_visita or 0) if es_en_vivo else calcular_modelo_poisson(1.45, 1.10)
 
         for opcion, tuplas in cuotas_globales.items():
             precios = [t[0] for t in tuplas]
@@ -784,14 +709,13 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
                     "fecha_ts": fecha_utc.timestamp(),
                     "local": home, "visitante": away,
                     "es_en_vivo": es_en_vivo,
-                    "marcador_local": goles_loc_final, "marcador_visita": goles_vis_final,
-                    "minuto_en_vivo": f"{minuto_final_calc}'", "minuto_num": minuto_final_calc,
+                    "marcador_local": marcador_local or 0, "marcador_visita": marcador_visita or 0,
+                    "minuto_en_vivo": f"{minuto_num}'", "minuto_num": minuto_num,
                     "mercados": {}
                 }
             diccionario_consolidador[partido_id]["mercados"][mercado] = {
                 "max_cuotas": max_cuotas, "max_bookies": max_bookies,
-                "betano_cuotas": betano_cuotas, "value_bets": value_bets,
-                "variaciones": variaciones_dict, "todas_cuotas": cuotas_globales,
+                "value_bets": value_bets, "variaciones": variaciones_dict,
                 "surebet": info_surebet
             }
 
@@ -829,7 +753,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     with st.expander("⚽ Selección de Torneos", expanded=True):
-        if 'ligas_sels_widget' not in st.session_state: st.session_state.ligas_sels_widget = []
+        if 'ligas_sels_widget' not in st.session_state: st.session_state.ligas_sels_widget = ["🏆 EU Champions League"]
         c1, c2 = st.columns(2)
         if c1.button("✅ Todas", use_container_width=True):
             st.session_state.ligas_sels_widget = list(todas_las_ligas.keys())
@@ -839,8 +763,8 @@ with st.sidebar:
             st.rerun()
 
         ligas_sels = st.multiselect("Ligas principales:", list(todas_las_ligas.keys()), key="ligas_sels_widget")
-        habilitar_af = st.checkbox("Habilitar Ligas LATAM", value=True)
-        ligas_af_sels = st.multiselect("Ligas extra:", list(AF_LEAGUE_IDS.keys()), default=["🇪🇨 LigaPro (Ecuador)"]) if habilitar_af else []
+        habilitar_af = st.checkbox("Habilitar Ligas LATAM (Football API)", value=False)
+        ligas_af_sels = st.multiselect("Ligas extra:", list(AF_LEAGUE_IDS.keys())) if habilitar_af else []
 
     with st.expander("🏬 Casas y Mercados", expanded=True):
         casas_preferidas = st.multiselect(
@@ -851,7 +775,7 @@ with st.sidebar:
             on_change=lambda: ConfigManager.guardar('casas_preferidas', st.session_state.casas_preferidas_widget)
         )
         mercados_sels = st.multiselect("Mercados:", list(diccionario_mercados.keys()), default=["1X2 (Ganador)"])
-        sin_limite_fecha = st.checkbox("🌐 Traer todo sin filtro", value=True)
+        sin_limite_fecha = st.checkbox("🌐 Traer todo sin filtro de días", value=True)
         limite_h = 999999 if sin_limite_fecha else 168
 
     with st.expander("🧮 Banca & Criterio Kelly"):
@@ -891,56 +815,54 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
             consolidador = {}
             st.session_state.ha_consultado = True
             
-            with st.status("🔄 Escaneando mercados...", expanded=True) as status_consulta:
-                # 1. Peticiones en paralelo para The Odds API
-                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = [
-                        executor.submit(escanear_liga_worker, liga, todas_las_ligas.get(liga, []), mercados_sels, limite_h)
-                        for liga in ligas_sels
-                    ]
-                    for future in concurrent.futures.as_completed(futures):
-                        liga_nombre, resultados = future.result()
-                        status_consulta.update(label=f"📊 Procesando: {liga_nombre}")
-                        for m_sel, raw_data in resultados:
-                            if m_sel == "Doble Oportunidad" and not raw_data:
-                                raw_data = calcular_doble_oportunidad_sintetica(raw_data)
-                            procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga_nombre, consolidador)
+            with st.status("🔄 Escaneando partidos...", expanded=True) as status_consulta:
+                if ligas_sels:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                        futures = [
+                            executor.submit(escanear_liga_worker, liga, todas_las_ligas.get(liga, []), mercados_sels, limite_h)
+                            for liga in ligas_sels
+                        ]
+                        for future in concurrent.futures.as_completed(futures):
+                            liga_nombre, resultados = future.result()
+                            status_consulta.update(label=f"📊 Procesando: {liga_nombre}")
+                            for m_sel, raw_data in resultados:
+                                if m_sel == "Doble Oportunidad" and not raw_data:
+                                    raw_data = calcular_doble_oportunidad_sintetica(raw_data)
+                                procesar_e_inyectar_mercado(raw_data, m_sel, limite_h, liga_nombre, consolidador)
 
-                # 2. Peticiones secuenciales para API Football (evitar rate limiting)
-                for liga_af in ligas_af_sels:
-                    af_id = AF_LEAGUE_IDS.get(liga_af)
-                    status_consulta.update(label=f"📡 Conectando API Football: {liga_af}...")
-                    if af_id and AF_API_KEY:
-                        raw_af_odds = consultar_af_con_fallback_fixtures(af_id, liga_af)
-                        if raw_af_odds:
-                            datos_norm = []
-                            for item in raw_af_odds:
-                                fix, teams, bookies_af = item.get("fixture", {}), item.get("teams", {}), item.get("bookmakers", [])
-                                bookmakers_converted = []
-                                for b in bookies_af:
-                                    b_markets = []
-                                    for m in b.get("bets", []):
-                                        m_name = m.get("name")
-                                        key_m = "h2h" if m_name == "Match Winner" else ("totals" if m_name == "Goals Over/Under" else ("btts" if m_name == "Both Teams Score" else "double_chance"))
-                                        outcomes = [{"name": o.get("value"), "price": float(o.get("odd"))} for o in m.get("values", [])]
-                                        b_markets.append({"key": key_m, "outcomes": outcomes})
-                                    bookmakers_converted.append({"key": str(b.get("id")), "title": b.get("name"), "markets": b_markets})
-                                datos_norm.append({
-                                    "id": f"af_{fix.get('id')}",
-                                    "home_team": teams.get("home", {}).get("name", "Local"),
-                                    "away_team": teams.get("away", {}).get("name", "Visitante"),
-                                    "commence_time": fix.get("date", datetime.now(timezone.utc).isoformat()),
-                                    "bookmakers": bookmakers_converted
-                                })
-                            for m_sel in mercados_sels:
-                                procesar_e_inyectar_mercado(datos_norm, m_sel, limite_h, liga_af, consolidador)
+                if ligas_af_sels and AF_API_KEY:
+                    for liga_af in ligas_af_sels:
+                        af_id = AF_LEAGUE_IDS.get(liga_af)
+                        status_consulta.update(label=f"📡 Conectando API Football: {liga_af}...")
+                        if af_id:
+                            raw_af_odds = consultar_af_con_fallback_fixtures(af_id, liga_af)
+                            if raw_af_odds:
+                                datos_norm = []
+                                for item in raw_af_odds:
+                                    fix, teams, bookies_af = item.get("fixture", {}), item.get("teams", {}), item.get("bookmakers", [])
+                                    bookmakers_converted = []
+                                    for b in bookies_af:
+                                        b_markets = []
+                                        for m in b.get("bets", []):
+                                            m_name = m.get("name")
+                                            key_m = "h2h" if m_name == "Match Winner" else ("totals" if m_name == "Goals Over/Under" else "btts")
+                                            outcomes = [{"name": o.get("value"), "price": float(o.get("odd"))} for o in m.get("values", [])]
+                                            b_markets.append({"key": key_m, "outcomes": outcomes})
+                                        bookmakers_converted.append({"key": str(b.get("id")), "title": b.get("name"), "markets": b_markets})
+                                    datos_norm.append({
+                                        "id": f"af_{fix.get('id')}",
+                                        "home_team": teams.get("home", {}).get("name", "Local"),
+                                        "away_team": teams.get("away", {}).get("name", "Visitante"),
+                                        "commence_time": fix.get("date", datetime.now(timezone.utc).isoformat()),
+                                        "bookmakers": bookmakers_converted
+                                    })
+                                for m_sel in mercados_sels:
+                                    procesar_e_inyectar_mercado(datos_norm, m_sel, limite_h, liga_af, consolidador)
 
                 status_consulta.update(label=f"✅ Escaneo completo: {len(consolidador)} partidos procesados.", state="complete")
 
             st.session_state.datos_cargados_previos = st.session_state.datos_cargados
             st.session_state.datos_cargados = consolidador
-            st.session_state.version_ticket += 1
-            st.session_state.ultimo_escaneo_ts = time.time()
             st.toast(f"✅ {len(consolidador)} partidos cargados.", icon="🎯")
             st.rerun()
 
@@ -996,7 +918,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                                                 st.caption(f"🏠 {m_info['max_bookies'][opcion]} | Impl: {round(val['prob_real'],1)}%")
 
         with col_der:
-            # Fragmento para actualización rápida del boleto sin recargar toda la app
             @st.fragment
             def render_boleto_fragment():
                 st.subheader("🎟️ Configuración de Parlay")
@@ -1051,7 +972,7 @@ elif vista_seleccionada == "🧮 CALCULADORA & OCR":
         with st.container(border=True):
             margen_casa = st.slider("Margen estimado casa (%):", 1.0, 15.0, 5.0, 0.5)
             if modo_ingreso == "🚀 Pegado Rápido":
-                texto_pegado = st.text_area("Pega tu boleto:", value="Independiente del Valle 1.62\nFK Bodo/Glimt 1.55", height=120)
+                texto_pegado = st.text_area("Pega tu boleto:", value="Real Madrid 1.50\nArsenal 1.80", height=120)
                 if texto_pegado:
                     for linea in texto_pegado.strip().split('\n'):
                         cuotas = re.findall(r'\b\d+\.\d+\b', linea.replace(',', '.'))
@@ -1105,7 +1026,6 @@ elif vista_seleccionada == "🛡️ MATRIZ DE COBERTURAS":
     c1 = c_sb1.number_input("Cuota 1:", value=2.10)
     cX = c_sb2.number_input("Cuota X:", value=3.40)
     c2 = c_sb3.number_input("Cuota 2:", value=4.50)
-    monto_sb = st.number_input("Inversión Total ($):", value=100.0)
 
     res_sb = detectar_surebet({"1": c1, "X": cX, "2": c2})
     if res_sb["es_surebet"]:
@@ -1138,7 +1058,10 @@ elif vista_seleccionada == "🔥 CAZADOR +EV & DROPPING":
 # ---------------------------------------------------------
 elif vista_seleccionada == "📰 BAJAS & ALINEACIONES":
     st.title("📰 Centro de Bajas y Alineaciones")
-    st.info("Módulo integrado con API-Football para consulta de alineaciones oficiales.")
+    st.info("Módulo de consulta de alineaciones oficiales e historial de lesionados.")
+    liga_bajas = st.selectbox("Seleccionar Liga para revisar alineaciones:", list(AF_LEAGUE_IDS.keys()))
+    if st.button("🔍 Consultar Estado de Plantillas"):
+        st.write(f"Conectando a API-Football para obtener reportes de {liga_bajas}...")
 
 # ---------------------------------------------------------
 # PESTAÑA 7: GENERADOR DE CARTEL
@@ -1150,7 +1073,7 @@ elif vista_seleccionada == "🎨 GENERADOR DE CARTEL":
 
     cartel_html = f"""
     <div style="background: #0b0e14; border: 2px solid #00d2d3; border-radius: 12px; padding: 20px; color: white; text-align: center;">
-        <h3 style="color:#00d2d3;">🔥 PARLAY SUGERIDO</h3>
+        <h3 style="color:#00d2d3;">🔥 PARLAY SUGERIDO GLOBAL</h3>
         <h4>Cuota Total: x{round(cuota_cartel, 2)}</h4>
         <p>Selecciones activas: {len(apuestas_en_boleto)}</p>
     </div>
