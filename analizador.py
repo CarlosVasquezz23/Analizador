@@ -4,14 +4,11 @@ import pandas as pd
 import numpy as np
 import math
 from datetime import datetime, timedelta, timezone
-import urllib.parse
 import json
 import os
 import re
 import itertools
-import time
-from typing import Dict, List, Any, Optional
-from PIL import Image
+from typing import Dict, List, Any
 import streamlit.components.v1 as components
 import concurrent.futures
 
@@ -64,12 +61,6 @@ class BitacoraManager:
         except Exception as e:
             st.sidebar.error(f"Error al guardar persistencia: {e}")
 
-    @staticmethod
-    def limpiar() -> None:
-        if os.path.exists(DB_FILE):
-            os.remove(DB_FILE)
-        st.session_state['historial_apuestas'] = []
-
 class ConfigManager:
     @staticmethod
     def cargar() -> Dict[str, Any]:
@@ -110,26 +101,12 @@ def enviar_telegram(mensaje: str) -> bool:
 def poisson_pmf_vec(k_array: np.ndarray, mu: float) -> np.ndarray:
     return (np.power(mu, k_array) * np.exp(-mu)) / np.array([math.factorial(k) for k in k_array])
 
-def calcular_impacto_bajas(lambda_base: float, peso_bajas: float) -> float:
-    return lambda_base * max(0.3, 1.0 - (peso_bajas / 100.0))
-
-def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1.10, usar_dixon_coles: bool = True, bajas_local_pct: float = 0.0, bajas_visita_pct: float = 0.0) -> Dict[str, float]:
-    lambda_l = calcular_impacto_bajas(lambda_local, bajas_local_pct)
-    lambda_v = calcular_impacto_bajas(lambda_visita, bajas_visita_pct)
-
+def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1.10) -> Dict[str, float]:
     max_goles = 6
     k_range = np.arange(max_goles)
-    
-    p_l = poisson_pmf_vec(k_range, lambda_l)
-    p_v = poisson_pmf_vec(k_range, lambda_v)
+    p_l = poisson_pmf_vec(k_range, lambda_local)
+    p_v = poisson_pmf_vec(k_range, lambda_visita)
     matriz_prob = np.outer(p_l, p_v)
-
-    if usar_dixon_coles:
-        rho = -0.13
-        matriz_prob[0, 0] *= (1.0 - lambda_l * lambda_v * rho)
-        matriz_prob[1, 0] *= (1.0 + lambda_v * rho)
-        matriz_prob[0, 1] *= (1.0 + lambda_l * rho)
-        matriz_prob[1, 1] *= (1.0 - rho)
 
     soma = np.sum(matriz_prob)
     if soma > 0: matriz_prob /= soma
@@ -151,43 +128,6 @@ def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1
         "Más de 2.5": prob_over25 * 100, "Menos de 2.5": (1 - prob_over25) * 100
     }
 
-def calcular_poisson_live(minuto: int, goles_loc: int, goles_vis: int, lambda_l_base: float = 1.45, lambda_v_base: float = 1.10) -> Dict[str, float]:
-    tiempo_restante_pct = max(0.01, (90 - min(89, minuto)) / 90.0)
-    lambda_l_rem = lambda_l_base * tiempo_restante_pct
-    lambda_v_rem = lambda_v_base * tiempo_restante_pct
-
-    max_goles_rem = 6
-    k_range = np.arange(max_goles_rem)
-    p_l = poisson_pmf_vec(k_range, lambda_l_rem)
-    p_v = poisson_pmf_vec(k_range, lambda_v_rem)
-    
-    matriz_prob = np.outer(p_l, p_v)
-    soma = np.sum(matriz_prob)
-    if soma > 0: matriz_prob /= soma
-
-    grid_i, grid_j = np.indices((max_goles_rem, max_goles_rem))
-    tot_loc = goles_loc + grid_i
-    tot_vis = goles_vis + grid_j
-
-    prob_local_win = float(np.sum(matriz_prob[tot_loc > tot_vis]))
-    prob_empate_win = float(np.sum(matriz_prob[tot_loc == tot_vis]))
-    prob_visita_win = float(np.sum(matriz_prob[tot_loc < tot_vis]))
-    
-    prob_over25_live = float(np.sum(matriz_prob[(goles_loc + goles_vis + grid_i + grid_j) > 2.5]))
-    prob_btts_live = float(np.sum(matriz_prob[(tot_loc > 0) & (tot_vis > 0)]))
-
-    return {
-        "Local": prob_local_win * 100, "Empate": prob_empate_win * 100, "Visitante": prob_visita_win * 100,
-        "1X (Local o Empate)": (prob_local_win + prob_empate_win) * 100,
-        "X2 (Visitante o Empate)": (prob_visita_win + prob_empate_win) * 100,
-        "12 (Local o Visitante)": (prob_local_win + prob_visita_win) * 100,
-        "Sí": prob_btts_live * 100, "No": (1.0 - prob_btts_live) * 100,
-        "Más de 2.5": prob_over25_live * 100, "Menos de 2.5": (1.0 - prob_over25_live) * 100
-    }
-
-# =========================================================
-# 4. MONTE CARLO Y VALIDACIONES
-# =========================================================
 def detectar_surebet(cuotas_max_dict: Dict[str, float]) -> Dict[str, Any]:
     if not cuotas_max_dict or len(cuotas_max_dict) < 2:
         return {"es_surebet": False, "overround": 1.0, "lucro": 0.0}
@@ -202,40 +142,13 @@ def calcular_sharpe_parlay(cuota_total: float, prob_combinada: float) -> float:
     desviacion = math.sqrt(varianza) if varianza > 0 else 1.0
     return ev / desviacion
 
-def detectar_correlaciones(apuestas: List[Dict[str, Any]]) -> List[str]:
-    alertas = []
-    eventos_map = {}
-    for ap in apuestas:
-        ev = ap['evento']
-        eventos_map.setdefault(ev, []).append(ap)
-
-    for ev, selecciones in eventos_map.items():
-        if len(selecciones) > 1:
-            mercados = [s['mercado'] for s in selecciones]
-            opciones = [s['seleccion'] for s in selecciones]
-            if mercados.count("1X2 (Ganador)") > 1:
-                alertas.append(f"⚠️ **{ev}**: Selección contradictoria en 1X2.")
-    return alertas
-
-def detectar_conflictos_horarios(apuestas: List[Dict[str, Any]]) -> List[str]:
-    alertas_horario = []
-    fechas = [(ap['evento'], ap['fecha_ts']) for ap in apuestas if ap.get('fecha_ts')]
-    if len(fechas) > 1:
-        for (ev1, ts1), (ev2, ts2) in itertools.combinations(fechas, 2):
-            diff_min = abs(ts1 - ts2) / 60.0
-            if diff_min < 110:
-                alertas_horario.append(f"⏰ **Conflicto**: *{ev1}* y *{ev2}* se solapan.")
-    return alertas_horario
-
 def ejecutar_simulacion_montecarlo(partidos: List[Dict[str, Any]], num_simulaciones: int = 10000) -> Dict[str, Any]:
     if not partidos: return {}
     probs = [p['prob_real'] / 100.0 for p in partidos]
     num_eventos = len(probs)
-    
     matriz_rand = np.random.rand(num_simulaciones, num_eventos)
     matriz_aciertos = matriz_rand < probs
     aciertos_por_sim = np.sum(matriz_aciertos, axis=1)
-    
     return {
         "pleno_acierto": float(np.sum(aciertos_por_sim == num_eventos) / num_simulaciones * 100.0),
         "fallo_por_uno": float(np.sum(aciertos_por_sim == (num_eventos - 1)) / num_simulaciones * 100.0)
@@ -264,11 +177,8 @@ def generar_resumen_ejecutivo_ai(dict_partidos: Dict[str, Any]) -> str:
     resumen += f"📈 **{total_valuebets} apuestas +EV**. Concentración de valor en **{top_liga}** ({val_top_count} +EV)." if total_valuebets > 0 else "Cuotas ajustadas por casas."
     return resumen
 
-def generar_csv_bitacora(historial: List[Dict[str, Any]]) -> bytes:
-    return pd.DataFrame(historial).to_csv(index=False).encode('utf-8')
-
 # =========================================================
-# 5. ESTADOS DE SESIÓN
+# 4. ESTADOS DE SESIÓN Y ESTILOS
 # =========================================================
 user_config = ConfigManager.cargar()
 
@@ -277,8 +187,6 @@ if 'historial_apuestas' not in st.session_state: st.session_state.historial_apue
 if 'datos_cargados' not in st.session_state: st.session_state.datos_cargados = {}
 if 'datos_cargados_previos' not in st.session_state: st.session_state.datos_cargados_previos = {}
 if 'ha_consultado' not in st.session_state: st.session_state.ha_consultado = False
-if 'creditos_restantes' not in st.session_state: st.session_state.creditos_restantes = "No consultado"
-if 'creditos_restantes_af' not in st.session_state: st.session_state.creditos_restantes_af = "No consultado"
 if 'ticket_persistente' not in st.session_state: st.session_state.ticket_persistente = {}
 if 'casas_preferidas' not in st.session_state: st.session_state.casas_preferidas = user_config.get('casas_preferidas', [])
 if 'bankroll_total' not in st.session_state: st.session_state.bankroll_total = user_config.get('bankroll_total', 200.0)
@@ -300,9 +208,6 @@ def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_v
         st.session_state.ticket_persistente.pop(clave_k, None)
         st.toast(f"❌ Eliminado: {opcion_nombre}", icon="🗑️")
 
-# =========================================================
-# 6. ESTILOS CSS
-# =========================================================
 modo_claro = (st.session_state.tema_visual == "Claro")
 bg_val = "#f8fafc" if modo_claro else "#0b0e14"
 card_val = "#ffffff" if modo_claro else "#12161f"
@@ -314,84 +219,31 @@ text_soft_val = "#64748b" if modo_claro else "#8a94a6"
 st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
-
     :root {{
-        --rg-bg: {bg_val};
-        --rg-card: {card_val};
-        --rg-card-alt: {card_alt_val};
-        --rg-border: {border_val};
-        --rg-text: {text_val};
-        --rg-accent: #00d2d3;
-        --rg-text-soft: {text_soft_val};
+        --rg-bg: {bg_val}; --rg-card: {card_val}; --rg-card-alt: {card_alt_val};
+        --rg-border: {border_val}; --rg-text: {text_val}; --rg-accent: #00d2d3; --rg-text-soft: {text_soft_val};
     }}
-
     html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; color: var(--rg-text); }}
-
-    .block-container {{
-        padding-top: 2rem !important;
-        padding-bottom: 2rem !important;
-        max-width: 98% !important;
-    }}
-
-    h1 {{
-        font-weight: 800 !important;
-        font-size: clamp(1.5rem, 2.2vw, 2.1rem) !important;
-        background: linear-gradient(90deg, var(--rg-text) 0%, #00d2d3 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }}
-
-    .ai-summary-box {{
-        background: linear-gradient(90deg, rgba(124, 92, 255, 0.12) 0%, rgba(0, 210, 211, 0.12) 100%);
-        border: 1px solid rgba(0, 210, 211, 0.35);
-        border-radius: 12px;
-        padding: 12px 18px;
-        margin-bottom: 18px;
-        font-size: 13.5px;
-    }}
-
-    .empty-state-card {{
-        background: linear-gradient(135deg, var(--rg-card) 0%, var(--rg-card-alt) 100%);
-        border: 1px solid var(--rg-border);
-        border-radius: 16px;
-        padding: 24px;
-    }}
-
+    .block-container {{ padding-top: 2rem !important; padding-bottom: 2rem !important; max-width: 98% !important; }}
+    h1 {{ font-weight: 800 !important; font-size: clamp(1.5rem, 2.2vw, 2.1rem) !important; background: linear-gradient(90deg, var(--rg-text) 0%, #00d2d3 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
+    .ai-summary-box {{ background: linear-gradient(90deg, rgba(124, 92, 255, 0.12) 0%, rgba(0, 210, 211, 0.12) 100%); border: 1px solid rgba(0, 210, 211, 0.35); border-radius: 12px; padding: 12px 18px; margin-bottom: 18px; font-size: 13.5px; }}
+    .empty-state-card {{ background: linear-gradient(135deg, var(--rg-card) 0%, var(--rg-card-alt) 100%); border: 1px solid var(--rg-border); border-radius: 16px; padding: 24px; }}
     .match-header {{ font-size: 16px; font-weight: 700; color: var(--rg-text); }}
-    .liga-chip {{
-        display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
-        color: var(--rg-accent); background: rgba(0,210,211,0.10);
-        border: 1px solid rgba(0,210,211,0.35); border-radius: 999px; padding: 2px 8px;
-    }}
-    .kickoff-chip {{
-        display: inline-block; font-size: 11px; font-weight: 600; color: var(--rg-text-soft);
-        background: var(--rg-card-alt); border: 1px solid var(--rg-border); border-radius: 999px; padding: 2px 8px;
-    }}
-
-    .creditos-caja-pro {{
-        background: var(--rg-card-alt); padding: 8px 12px; border-radius: 8px;
-        border: 1px solid var(--rg-border); margin-bottom: 8px; display: flex;
-        justify-content: space-between; align-items: center;
-    }}
-
-    .ticket-titulo {{
-        font-weight: 800; font-size: 14px; text-transform: uppercase;
-        color: var(--rg-accent); text-align: center; margin-bottom: 6px;
-    }}
+    .liga-chip {{ display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--rg-accent); background: rgba(0,210,211,0.10); border: 1px solid rgba(0,210,211,0.35); border-radius: 999px; padding: 2px 8px; }}
+    .kickoff-chip {{ display: inline-block; font-size: 11px; font-weight: 600; color: var(--rg-text-soft); background: var(--rg-card-alt); border: 1px solid var(--rg-border); border-radius: 999px; padding: 2px 8px; }}
+    .creditos-caja-pro {{ background: var(--rg-card-alt); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--rg-border); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }}
+    .ticket-titulo {{ font-weight: 800; font-size: 14px; text-transform: uppercase; color: var(--rg-accent); text-align: center; margin-bottom: 6px; }}
     .ticket-item {{ border-bottom: 1px dashed var(--rg-border); padding: 6px 0; color: var(--rg-text); }}
-    .ticket-cuota-tag {{
-        font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--rg-accent);
-        background: rgba(0,210,211,0.08); border-radius: 6px; padding: 1px 6px; font-size: 12px;
-    }}
+    .ticket-cuota-tag {{ font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--rg-accent); background: rgba(0,210,211,0.08); border-radius: 6px; padding: 1px 6px; font-size: 12px; }}
     </style>
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 7. MAPEO UNIFICADO DE LIGAS (GLOBAL)
+# 5. MAPEO UNIFICADO DE LIGAS (CORREGIDO PARA CHAMPIONS LEAGUE)
 # =========================================================
 CATALOGO_LIGAS_UNIFICADO = {
     "🏆 EU Champions League": {
-        "odds_api": ["soccer_uefa_champions_league"],
+        "odds_api": ["soccer_uefa_champs_league", "soccer_uefa_champions_league"],
         "af_id": 2,
         "allsports_id": 3,
         "sportapi_id": 7
@@ -468,29 +320,11 @@ CATALOGO_LIGAS_UNIFICADO = {
         "allsports_id": 122,
         "sportapi_id": 512
     },
-    "🇨🇴 Primera A (Colombia)": {
-        "odds_api": [],
-        "af_id": 239,
-        "allsports_id": 111,
-        "sportapi_id": 510
-    },
-    "🇨🇱 Primera División (Chile)": {
-        "odds_api": [],
-        "af_id": 265,
-        "allsports_id": 102,
-        "sportapi_id": 508
-    },
     "🏆 Copa Libertadores": {
         "odds_api": ["soccer_conmebol_copa_libertadores"],
         "af_id": 13,
         "allsports_id": 11,
         "sportapi_id": 380
-    },
-    "🏆 Copa Sudamericana": {
-        "odds_api": ["soccer_conmebol_copa_sudamericana"],
-        "af_id": 11,
-        "allsports_id": 12,
-        "sportapi_id": 381
     }
 }
 
@@ -500,19 +334,9 @@ diccionario_mercados = {
 }
 
 # =========================================================
-# 8. CLIENTES API MULTI-PROVEEDOR
+# 6. CLIENTES API MULTI-PROVEEDOR
 # =========================================================
 def af_headers(): return {"x-apisports-key": AF_API_KEY}
-
-def _actualizar_creditos_af(response_headers):
-    restante = response_headers.get('x-ratelimit-requests-remaining')
-    limite = response_headers.get('x-ratelimit-requests-limit')
-    if restante is not None:
-        st.session_state.creditos_restantes_af = f"{restante}/{limite}" if limite else restante
-
-def actualizar_creditos(headers):
-    if 'x-requests-remaining' in headers:
-        st.session_state.creditos_restantes = headers['x-requests-remaining']
 
 @st.cache_data(ttl=60)
 def consultar_api_odds(sport_key, market_key):
@@ -520,7 +344,6 @@ def consultar_api_odds(sport_key, market_key):
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu,us&markets={market_key}&oddsFormat=decimal"
     try:
         response = requests.get(url, timeout=10)
-        actualizar_creditos(response.headers)
         if response.status_code == 200:
             res_json = response.json()
             return (res_json, None) if isinstance(res_json, list) else ([], "Err")
@@ -534,7 +357,6 @@ def consultar_af_con_fallback_fixtures(af_id):
     season_actual = datetime.now().year
     try:
         r = requests.get(url_odds, headers=af_headers(), params={"league": af_id, "season": season_actual}, timeout=8)
-        _actualizar_creditos_af(r.headers)
         if r.status_code == 200:
             return r.json().get("response", [])
     except Exception:
@@ -564,7 +386,7 @@ def consultar_sportapi_odds(sportapi_id=None):
     return []
 
 # =========================================================
-# 9. PROCESAMIENTO Y DEDUPLICACIÓN
+# 7. PROCESAMIENTO Y DEDUPLICACIÓN
 # =========================================================
 def escanear_liga_worker(liga_nombre, config_liga, mercados_sels, limite_h):
     resultados_normalizados = []
@@ -666,36 +488,6 @@ def escanear_liga_worker(liga_nombre, config_liga, mercados_sels, limite_h):
 
     return (liga_nombre, resultados_normalizados)
 
-def calcular_doble_oportunidad_sintetica(raw_h2h_data):
-    if not raw_h2h_data or not isinstance(raw_h2h_data, list): return []
-    datos_sinteticos = []
-    for partido in raw_h2h_data:
-        p_copy = json.loads(json.dumps(partido))
-        bookies_sinteticos = []
-        for b in p_copy.get('bookmakers', []):
-            h2h_market = next((m for m in b.get('markets', []) if m['key'] == 'h2h'), None)
-            if not h2h_market: continue
-            c_local = next((o['price'] for o in h2h_market['outcomes'] if o['name'] == p_copy['home_team']), None)
-            c_visita = next((o['price'] for o in h2h_market['outcomes'] if o['name'] == p_copy['away_team']), None)
-            c_empate = next((o['price'] for o in h2h_market['outcomes'] if o['name'] == 'Draw'), None)
-
-            if c_local and c_visita and c_empate:
-                dc_1x = round(1.0 / ((1.0 / c_local) + (1.0 / c_empate)), 2)
-                dc_x2 = round(1.0 / ((1.0 / c_visita) + (1.0 / c_empate)), 2)
-                dc_12 = round(1.0 / ((1.0 / c_local) + (1.0 / c_visita)), 2)
-                b['markets'] = [{
-                    'key': 'double_chance',
-                    'outcomes': [
-                        {'name': 'home_draw', 'price': dc_1x},
-                        {'name': 'away_draw', 'price': dc_x2},
-                        {'name': 'home_away', 'price': dc_12}
-                    ]
-                }]
-                bookies_sinteticos.append(b)
-        p_copy['bookmakers'] = bookies_sinteticos
-        datos_sinteticos.append(p_copy)
-    return datos_sinteticos
-
 def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
     ahora_utc = datetime.now(timezone.utc)
     if not datos or not isinstance(datos, list): return
@@ -707,15 +499,13 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         try:
             fecha_utc = datetime.fromisoformat(partido['commence_time'].replace('Z', '+00:00'))
         except (ValueError, KeyError):
-            continue
+            fecha_utc = ahora_utc
 
         horas = (fecha_utc - ahora_utc).total_seconds() / 3600.0
-        es_en_vivo = partido.get('in_play', False) or (horas <= 0 and horas >= -2.2)
+        es_en_vivo = partido.get('in_play', False)
         marcador_local = partido.get('scores', {}).get('home', 0) if es_en_vivo else None
         marcador_visita = partido.get('scores', {}).get('away', 0) if es_en_vivo else None
         minuto_num = 30
-
-        if limite_horas < 900000 and not es_en_vivo and (horas < -48.0 or horas > (limite_horas + 48)): continue
 
         fecha_local = fecha_utc - timedelta(hours=5)
         bookmakers = partido.get('bookmakers', [])
@@ -755,7 +545,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
         cuotas_promedio_dict = {op: sum(t[0] for t in tuplas)/len(tuplas) for op, tuplas in cuotas_globales.items() if tuplas}
         overround = sum([1 / cp for cp in cuotas_promedio_dict.values()]) if cuotas_promedio_dict else 1.0
 
-        probs_poisson = calcular_poisson_live(minuto_num, marcador_local or 0, marcador_visita or 0) if es_en_vivo else calcular_modelo_poisson(1.45, 1.10)
+        probs_poisson = calcular_modelo_poisson(1.45, 1.10)
 
         for opcion, tuplas in cuotas_globales.items():
             precios = [t[0] for t in tuplas]
@@ -796,7 +586,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             }
 
 # =========================================================
-# 10. SIDEBAR ORGANIZADO (ÚNICO SELECCIONADOR)
+# 8. SIDEBAR
 # =========================================================
 with st.sidebar:
     st.header("⚙️ Control Global")
@@ -809,7 +599,7 @@ with st.sidebar:
         horizontal=True
     )
 
-    st.markdown(f"""
+    st.markdown("""
         <div class="creditos-caja-pro">
             <div>
                 <small style="color:var(--rg-text-soft); font-weight:700;">Motor Multicapa API</small><br>
@@ -858,7 +648,7 @@ with st.sidebar:
     consultar = st.button("🔍 Escanear Mercado Now", type="primary", use_container_width=True)
 
 # =========================================================
-# 11. VISTAS Y NAVEGACIÓN
+# 9. VISTAS Y NAVEGACIÓN
 # =========================================================
 col_nav_rapida, col_nav_extra = st.columns([3, 1.5])
 with col_nav_rapida:
@@ -868,9 +658,6 @@ with col_nav_extra:
 
 vista_seleccionada = opcion_extra if opcion_extra != "-- Seleccionar otro módulo --" else tab_activa_rapida
 
-# ---------------------------------------------------------
-# PESTAÑA 1: RADAR AUTOMÁTICO
-# ---------------------------------------------------------
 if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
     st.title("⚽ Radar Avanzado Multi-Mercado Global")
     st.caption("Escaneo en tiempo real · Modelo Dixon-Coles / Poisson Live · Arbitraje y +EV")
@@ -957,9 +744,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
                 st.subheader("🎟️ Configuración de Parlay")
                 apuestas_seleccionadas = list(st.session_state.ticket_persistente.values())
                 if apuestas_seleccionadas:
-                    for al in detectar_correlaciones(apuestas_seleccionadas): st.error(al)
-                    for al_h in detectar_conflictos_horarios(apuestas_seleccionadas): st.warning(al_h)
-
                     cuota_acum, prob_comb = 1.0, 1.0
                     with st.container(border=True):
                         st.markdown("<div class='ticket-titulo'>🎟️ Boleto Parlay</div>", unsafe_allow_html=True)
@@ -992,9 +776,6 @@ if vista_seleccionada == "🚀 RADAR MULTI-MERCADO":
 
             render_boleto_fragment()
 
-# ---------------------------------------------------------
-# OTRAS PESTAÑAS
-# ---------------------------------------------------------
 elif vista_seleccionada == "🧮 CALCULADORA & OCR":
     st.title("🧮 Analizador & Monte Carlo")
     texto_pegado = st.text_area("Pega tu boleto de apuestas:", value="Real Madrid 1.50\nArsenal 1.80", height=120)
