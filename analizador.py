@@ -13,7 +13,7 @@ import streamlit.components.v1 as components
 import concurrent.futures
 
 # =========================================================
-# 1. CONFIGURACIÓN DE PÁGINA (FORZANDO BARRA LATERAL VISIBLE)
+# 1. CONFIGURACIÓN DE PÁGINA
 # =========================================================
 st.set_page_config(
     page_title="Global Sports Analytics - Pro Platform",
@@ -174,7 +174,7 @@ def generar_resumen_ejecutivo_ai(dict_partidos: Dict[str, Any]) -> str:
     return res
 
 # =========================================================
-# 4. ESTADOS Y ESTILOS CSS (FORZANDO VISIBILIDAD MÓVIL)
+# 4. ESTADOS Y ESTILOS CSS (CORRIGIENDO VISIBILIDAD DE EQUIPOS)
 # =========================================================
 user_config = ConfigManager.cargar()
 
@@ -204,8 +204,8 @@ bg_val = "#f8fafc" if modo_claro else "#0b0f19"
 card_val = "#ffffff" if modo_claro else "#111827"
 card_alt_val = "#f1f5f9" if modo_claro else "#1f2937"
 border_val = "#e2e8f0" if modo_claro else "#374151"
-text_val = "#0f172a" if modo_claro else "#f3f4f6"
-text_soft_val = "#64748b" if modo_claro else "#9ca3af"
+text_val = "#0f172a" if modo_claro else "#ffffff"  # Forzado a blanco puro en oscuro para máxima visibilidad
+text_soft_val = "#64748b" if modo_claro else "#94a3b8"
 accent_val = "#10b981"
 
 st.markdown(f"""
@@ -275,12 +275,14 @@ st.markdown(f"""
         text-align: center;
     }}
 
+    /* CLASE CORREGIDA PARA QUE LOS NOMBRES DE LOS EQUIPOS SE VEAN CLAROS Y DESTACADOS */
     .match-header {{
-        font-size: 14px;
-        font-weight: 600;
-        color: {text_val};
-        margin-top: 4px;
-        margin-bottom: 6px;
+        font-size: 16px !important;
+        font-weight: 700 !important;
+        color: {text_val} !important;
+        margin-top: 6px !important;
+        margin-bottom: 8px !important;
+        letter-spacing: -0.2px;
     }}
 
     .liga-chip {{
@@ -621,7 +623,6 @@ with col_nav_extra:
 mapa_vistas = {"Radar": "Radar Multi-Mercado", "Verificador": "Verificador & Monte Carlo", "H2H": "Análisis Estadístico H2H"}
 vista_seleccionada = opcion_extra if opcion_extra != "-- Más módulos --" else mapa_vistas.get(tab_activa_rapida, "Radar Multi-Mercado")
 
-# Panel de control de emergencia para celulares (si no quieres usar la barra lateral)
 with st.expander("📱 Panel Rápido para Celular (Torneos y Escaneo)", expanded=False):
     ligas_sels_movil = st.multiselect("Selecciona tus ligas:", options=list(CATALOGO_LIGAS_UNIFICADO.keys()), default=["UEFA Champions League", "Premier League"], key="movil_ligas")
     mercados_sels_movil = st.multiselect("Selecciona tus mercados:", options=list(diccionario_mercados.keys()), default=["1X2 (Resultado Final)"], key="movil_mercados")
