@@ -13,7 +13,7 @@ import streamlit.components.v1 as components
 import concurrent.futures
 
 # =========================================================
-# 1. CONFIGURACIÓN DE PÁGINA Y CREDENCIALES
+# 1. CONFIGURACIÓN DE PÁGINA (FORZANDO BARRA LATERAL VISIBLE)
 # =========================================================
 st.set_page_config(
     page_title="Global Sports Analytics - Pro Platform",
@@ -174,7 +174,7 @@ def generar_resumen_ejecutivo_ai(dict_partidos: Dict[str, Any]) -> str:
     return res
 
 # =========================================================
-# 4. ESTADOS Y ESTILOS CSS (OCULTANDO ELEMENTOS FLOTANTES)
+# 4. ESTADOS Y ESTILOS CSS (FORZANDO VISIBILIDAD MÓVIL)
 # =========================================================
 user_config = ConfigManager.cargar()
 
@@ -217,17 +217,11 @@ st.markdown(f"""
     header {{visibility: hidden;}}
     .stDeployButton {{display: none !important;}}
 
-    /* OCULTAR COMPLETAMENTE LOS BOTONES FLOTANTES DE STREAMLIT EN MÓVIL */
     div[data-testid="stToolbar"], 
     div[data-testid="stDecoration"], 
     div[data-testid="stStatusWidget"],
-    footer,
-    #stDecoration,
-    .viewerBadge_container__1QSob {{
+    footer {{
         display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
     }}
 
     html, body, [class*="css"] {{
@@ -579,7 +573,7 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             }
 
 # =========================================================
-# 7. SIDEBAR PROFESIONAL
+# 7. SIDEBAR Y PANEL DE RESPALDO EN PANTALLA PRINCIPAL
 # =========================================================
 with st.sidebar:
     st.markdown("### Configuración")
@@ -616,7 +610,7 @@ with st.sidebar:
     consultar = st.button("Escanear Mercado", type="primary", use_container_width=True)
 
 # =========================================================
-# 8. NAVEGACIÓN PRINCIPAL ADAPTADA A MÓVIL
+# 8. NAVEGACIÓN Y PANEL DE CONFIGURACIÓN RÁPIDA (MÓVIL)
 # =========================================================
 col_nav_rapida, col_nav_extra = st.columns([2.5, 2])
 with col_nav_rapida:
@@ -626,6 +620,26 @@ with col_nav_extra:
 
 mapa_vistas = {"Radar": "Radar Multi-Mercado", "Verificador": "Verificador & Monte Carlo", "H2H": "Análisis Estadístico H2H"}
 vista_seleccionada = opcion_extra if opcion_extra != "-- Más módulos --" else mapa_vistas.get(tab_activa_rapida, "Radar Multi-Mercado")
+
+# Panel de control de emergencia para celulares (si no quieres usar la barra lateral)
+with st.expander("📱 Panel Rápido para Celular (Torneos y Escaneo)", expanded=False):
+    ligas_sels_movil = st.multiselect("Selecciona tus ligas:", options=list(CATALOGO_LIGAS_UNIFICADO.keys()), default=["UEFA Champions League", "Premier League"], key="movil_ligas")
+    mercados_sels_movil = st.multiselect("Selecciona tus mercados:", options=list(diccionario_mercados.keys()), default=["1X2 (Resultado Final)"], key="movil_mercados")
+    if st.button("🚀 Escanear con Panel Móvil", type="primary", use_container_width=True):
+        st.cache_data.clear()
+        consolidador = {}
+        st.session_state.ha_consultado = True
+        with st.status("Escaneando eventos...", expanded=True) as status_consulta:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+                futures = [executor.submit(escanear_liga_worker, liga_nom, CATALOGO_LIGAS_UNIFICADO[liga_nom], mercados_sels_movil, 999999) for liga_nom in ligas_sels_movil]
+                for future in concurrent.futures.as_completed(futures):
+                    liga_nombre, pares = future.result()
+                    status_consulta.update(label=f"Procesando: {liga_nombre}")
+                    for partido_data, m_sel in pares: procesar_e_inyectar_mercado([partido_data], m_sel, 999999, liga_nombre, consolidador)
+            status_consulta.update(label=f"Escaneo listo: {len(consolidador)} eventos.", state="complete")
+        st.session_state.datos_cargados_previos = st.session_state.datos_cargados
+        st.session_state.datos_cargados = consolidador
+        st.rerun()
 
 # ---------------------------------------------------------
 # VISTA 1: RADAR
@@ -660,7 +674,7 @@ if vista_seleccionada == "Radar Multi-Mercado":
         st.markdown("""
             <div class="empty-state-card">
                 <h4 style="margin-bottom:6px; font-size:15px;">Panel Preparado</h4>
-                <p style="color:var(--rg-text-soft); font-size:12px; margin:0;">Selecciona torneos en la barra lateral y presiona <b>Escanear Mercado</b>.</p>
+                <p style="color:var(--rg-text-soft); font-size:12px; margin:0;">Selecciona torneos en el menú lateral o en el <b>Panel Rápido para Celular</b> y presiona escanear.</p>
             </div>
         """, unsafe_allow_html=True)
     elif not dict_partidos:
@@ -709,7 +723,7 @@ if vista_seleccionada == "Radar Multi-Mercado":
                             prob_comb *= (float(ap['prob_real']) / 100.0)
                             st.markdown(f"<div class='ticket-item'><b>{ap['evento']}</b><br>➔ {ap['seleccion']} | <span class='ticket-cuota-tag'>@{ap['cuota']}</span></div>", unsafe_allow_html=True)
 
-                        monto_ticket = st.number_input("Inversión ($):", min_value=1.0, value=float(monto_inversion), step=1.0)
+                        monto_ticket = st.number_input("Inversión ($):", min_value=1.0, value=10.0, step=1.0)
                         ganancia_neta = (cuota_acum * monto_ticket) - monto_ticket
                         sharpe = calcular_sharpe_parlay(cuota_acum, prob_comb)
 
@@ -774,7 +788,7 @@ elif vista_seleccionada == "Verificador & Monte Carlo":
 
             st.markdown("### 🧮 Criterio de Kelly & Riesgo")
             k1, k2 = st.columns(2)
-            k1.metric("Stake Sugerido", f"${round((kelly_pct * 0.25) * bankroll_total, 2)}")
+            k1.metric("Stake Sugerido", f"${round((kelly_pct * 0.25) * 200.0, 2)}")
             k2.metric("Sharpe Ratio", f"{round(sharpe, 2)}")
 
             res_mc = ejecutar_simulacion_montecarlo(partidos_ext)
