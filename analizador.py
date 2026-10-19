@@ -169,12 +169,12 @@ def generar_resumen_ejecutivo_ai(dict_partidos: Dict[str, Any]) -> str:
     val_top_count = liga_con_mas_valor.get(top_liga, 0)
 
     res = f"<b>Análisis de Mercado:</b> {total_partidos} eventos procesados. "
-    res = f"Arbitrajes (SureBets): <b>{total_surebets}</b>. " if total_surebets > 0 else "Sin arbitrajes. "
+    res += f"Arbitrajes (SureBets): <b>{total_surebets}</b>. " if total_surebets > 0 else "Sin arbitrajes. "
     res += f"Oportunidades +EV: <b>{total_valuebets}</b> (Concentración en <b>{top_liga}</b>)." if total_valuebets > 0 else ""
     return res
 
 # =========================================================
-# 4. ESTADOS Y ESTILOS CSS RESPONSIVOS (MÓVIL & PC)
+# 4. ESTADOS Y ESTILOS CSS (OCULTANDO ELEMENTOS FLOTANTES)
 # =========================================================
 user_config = ConfigManager.cargar()
 
@@ -215,12 +215,19 @@ st.markdown(f"""
     #MainMenu {{visibility: hidden;}}
     footer {{visibility: hidden;}}
     header {{visibility: hidden;}}
-    .stDeployButton {{display:none;}}
-    iframe[title="streamlit_app.components.v1.components"] {{display: none;}}
+    .stDeployButton {{display: none !important;}}
 
-    /* Ocultar botones flotantes de Streamlit inferiores */
-    div[data-testid="stToolbar"], div[data-testid="stDecoration"], div[data-testid="stStatusWidget"] {{
+    /* OCULTAR COMPLETAMENTE LOS BOTONES FLOTANTES DE STREAMLIT EN MÓVIL */
+    div[data-testid="stToolbar"], 
+    div[data-testid="stDecoration"], 
+    div[data-testid="stStatusWidget"],
+    footer,
+    #stDecoration,
+    .viewerBadge_container__1QSob {{
         display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
     }}
 
     html, body, [class*="css"] {{
@@ -230,7 +237,7 @@ st.markdown(f"""
     }}
 
     .block-container {{
-        padding-top: 1rem !important;
+        padding-top: 0.8rem !important;
         padding-bottom: 2rem !important;
         max-width: 98% !important;
     }}
@@ -346,15 +353,11 @@ st.markdown(f"""
         margin-top: 12px;
     }}
 
-    /* ADAPTACIÓN MÓVIL ESTRICTA */
     @media (max-width: 768px) {{
         .block-container {{
             padding-left: 0.5rem !important;
             padding-right: 0.5rem !important;
             padding-top: 0.5rem !important;
-        }}
-        h1 {{
-            font-size: 1.3rem !important;
         }}
     }}
     </style>
@@ -621,7 +624,6 @@ with col_nav_rapida:
 with col_nav_extra:
     opcion_extra = st.selectbox("Más herramientas:", ["-- Más módulos --", "Matriz de Cobertura", "Oportunidades +EV", "Alineaciones & Bajas", "Generador Visual", "Bitácora Financiera", "Soporte"], label_visibility="collapsed")
 
-# Mapeo corto para que en móvil no se desborde el radio button
 mapa_vistas = {"Radar": "Radar Multi-Mercado", "Verificador": "Verificador & Monte Carlo", "H2H": "Análisis Estadístico H2H"}
 vista_seleccionada = opcion_extra if opcion_extra != "-- Más módulos --" else mapa_vistas.get(tab_activa_rapida, "Radar Multi-Mercado")
 
@@ -806,7 +808,6 @@ elif vista_seleccionada == "Análisis Estadístico H2H":
     c2.metric("Empate", f"{round(res_p['Empate'], 1)}%")
     c3.metric("Visitante", f"{round(res_p['Visitante'], 1)}%")
 
-# Resto de módulos adicionales simplificados
 elif vista_seleccionada == "Bitácora Financiera":
     st.title("Historial")
     if st.session_state.historial_apuestas: st.dataframe(pd.DataFrame(st.session_state.historial_apuestas), use_container_width=True)
