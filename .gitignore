@@ -1,0 +1,6 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.streamlit/secrets.toml
+bitacora_backup.json
+user_config.json
