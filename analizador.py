@@ -16,7 +16,10 @@ from zoneinfo import ZoneInfo
 import plotly.express as px
 from analytics import EXPECTED, valid_odds, normalize_outcome, surebet, parse_ticket, api_football_markets
 from api_client import get_json
-from pro_ui import apply_theme, header, dashboard, opportunity_table
+from pro_ui import apply_theme, header, dashboard, opportunity_table, quick_navigation, themed_chart
+from workspace_logic import filter_events
+from ticket_ui import render_ticket
+from finance_ui import render_finance
 from football_details import render as render_football_details
 
 
@@ -184,9 +187,13 @@ if 'bankroll_total' not in st.session_state: st.session_state.bankroll_total = u
 
 def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_val, prob_val, clave_k):
     if st.session_state.get(clave_k, False):
+        if len(st.session_state.ticket_persistente) >= 20 and clave_k not in st.session_state.ticket_persistente:
+            st.session_state[clave_k] = False
+            st.toast("El boleto admite hasta 20 selecciones. Quita una para añadir otra.")
+            return
         st.session_state.ticket_persistente[clave_k] = {
             "evento": f"{partido_obj['local']} vs {partido_obj['visitante']}",
-            "liga": partido_obj['liga_origen'], "mercado": mercado_nombre,
+            "event_id": partido_obj['id'], "liga": partido_obj['liga_origen'], "mercado": mercado_nombre,
             "seleccion": opcion_nombre, "cuota": cuota_val, "casa": casa_val,
             "prob_real": prob_val, "fecha_ts": partido_obj.get('fecha_ts', None)
         }
@@ -429,13 +436,14 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
 # 7. SIDEBAR Y PANEL DE RESPALDO EN PANTALLA PRINCIPAL
 # =========================================================
 with st.sidebar:
+    st.markdown('<div class="brand"><span>◈</span> Analizador<div class="brand-sub">TU ESPACIO DEPORTIVO</div></div>',unsafe_allow_html=True)
     st.markdown("### Filtros de escaneo")
     st.radio("Apariencia:", options=["Oscuro", "Claro"], index=0 if st.session_state.tema_visual == "Oscuro" else 1, key="tema_visual_widget", on_change=lambda: ConfigManager.guardar('tema_visual', st.session_state.tema_visual_widget), horizontal=True)
 
     configured_count = sum(bool(key) for key in (API_KEY, AF_API_KEY, ALLSPORTS_KEY, SPORTAPI_KEY))
     st.markdown(f"""
         <div class="creditos-caja-pro">
-            <small style="color:var(--rg-text-soft);">Motor Multicloud API</small><br>
+            <small style="color:var(--rg-text-soft);">Fuentes de datos</small><br>
             <span style="font-weight:600; font-size:12px;">Credenciales configuradas: {configured_count}/4</span>
         </div>
     """, unsafe_allow_html=True)
@@ -452,10 +460,10 @@ with st.sidebar:
         ligas_sels = st.multiselect("Torneos:", options=list(CATALOGO_LIGAS_UNIFICADO.keys()), key="ligas_sels_widget")
 
     with st.expander("Filtros de Mercado", expanded=True):
-        casas_preferidas = st.multiselect("Bookmakers:", ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"], default=[x for x in st.session_state.casas_preferidas if x in ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"]], key="casas_preferidas_widget", on_change=lambda: ConfigManager.guardar('casas_preferidas', st.session_state.casas_preferidas_widget))
+        casas_preferidas = st.multiselect("Casas de apuestas:", ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"], default=[x for x in st.session_state.casas_preferidas if x in ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"]], key="casas_preferidas_widget", on_change=lambda: ConfigManager.guardar('casas_preferidas', st.session_state.casas_preferidas_widget))
         mercados_sels = st.multiselect("Mercados:", list(diccionario_mercados.keys()), default=["1X2 (Resultado Final)"])
-        sin_limite_fecha = st.checkbox("Incluir eventos futuros", value=True)
-        limite_h = 999999 if sin_limite_fecha else 168
+        horizonte = st.selectbox("Horizonte de consulta", ["Próximas 24 horas", "Próximas 72 horas", "Próximos 7 días", "Todos los disponibles"],index=2)
+        limite_h = {"Próximas 24 horas":24,"Próximas 72 horas":72,"Próximos 7 días":168,"Todos los disponibles":999999}[horizonte]
 
     with st.expander("Gestión de Banca"):
         bankroll_total = st.number_input("Banca Total ($):", min_value=10.0, value=float(st.session_state.bankroll_total), step=10.0, key="bankroll_widget", on_change=lambda: ConfigManager.guardar('bankroll_total', st.session_state.bankroll_widget))
@@ -466,7 +474,11 @@ with st.sidebar:
 # One navigation control and one scan pipeline, shared by all screens.
 VIEWS = ["Dashboard", "Radar Multi-Mercado", "Verificador & Monte Carlo", "Análisis Estadístico H2H",
          "Matriz de Cobertura", "Oportunidades +EV", "Alineaciones & Bajas", "Generador Visual", "Bitácora Financiera", "Soporte"]
-vista_seleccionada = st.selectbox("Ir a sección", VIEWS, key="navigation")
+quick_navigation()
+VIEW_LABELS = {"Dashboard":"Vista general", "Radar Multi-Mercado":"Radar de eventos", "Verificador & Monte Carlo":"Verificar un boleto", "Análisis Estadístico H2H":"Modelo de goles", "Matriz de Cobertura":"Cobertura de mercados", "Oportunidades +EV":"Oportunidades +EV", "Alineaciones & Bajas":"Alineaciones y bajas", "Generador Visual":"Mi boleto", "Bitácora Financiera":"Bitácora financiera", "Soporte":"Ayuda y conexiones"}
+vista_seleccionada = st.selectbox("Ir a sección", VIEWS, key="navigation",format_func=lambda view:VIEW_LABELS[view])
+if st.session_state.get('ultima_consulta'):
+    st.caption("Último escaneo con resultados: " + st.session_state.ultima_consulta + " · Ecuador (UTC−5)")
 
 if consultar:
     if not ligas_sels or not mercados_sels:
@@ -477,6 +489,8 @@ if consultar:
         consolidador, failed, diagnostics = {}, [], []
         st.session_state.ha_consultado = True
         with st.status("Consultando proveedores…", expanded=True) as status_consulta:
+            progress = st.progress(0,text="Preparando consultas…")
+            completed = 0
             with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
                 futures = {executor.submit(escanear_liga_worker, name, CATALOGO_LIGAS_UNIFICADO[name], mercados_sels, limite_h): name for name in ligas_sels}
                 for future in concurrent.futures.as_completed(futures):
@@ -490,12 +504,23 @@ if consultar:
                                 diagnostics.append(f"{name} · Evento con formato inválido omitido")
                     except Exception:
                         failed.append(futures[future])
+                    completed += 1
+                    progress.progress(completed / len(futures),text=f"{completed} de {len(futures)} competiciones procesadas")
             status_consulta.update(label=f"Escaneo terminado · {len(consolidador)} eventos", state="complete")
         st.session_state.scan_errors = failed
         st.session_state.api_diagnostics = diagnostics
-        st.session_state.datos_cargados_previos = st.session_state.datos_cargados
-        st.session_state.datos_cargados = consolidador
-        st.session_state.ultima_consulta = datetime.now(ZoneInfo("America/Guayaquil")).strftime("%d/%m/%Y %H:%M")
+        if not consolidador and (failed or diagnostics) and st.session_state.datos_cargados:
+            st.warning("La consulta no devolvió resultados válidos. Se conservan los eventos del escaneo anterior; no corresponden a una actualización nueva.")
+        else:
+            st.session_state.datos_cargados_previos = st.session_state.datos_cargados
+            st.session_state.datos_cargados = consolidador
+            st.session_state.ultima_consulta = datetime.now(ZoneInfo("America/Guayaquil")).strftime("%d/%m/%Y %H:%M")
+            for selection in st.session_state.ticket_persistente.values():
+                market = consolidador.get(selection.get('event_id'), {}).get('mercados', {}).get(selection['mercado'], {})
+                choice = selection['seleccion']
+                selection['stale'] = choice not in market.get('max_cuotas', {})
+                if not selection['stale']:
+                    selection.update(cuota=market['max_cuotas'][choice], casa=market['max_bookies'][choice], prob_real=market['value_bets'][choice]['prob_real'])
 
 if st.session_state.get('api_diagnostics'):
     with st.expander("Avisos de proveedores"):
@@ -516,91 +541,47 @@ if vista_seleccionada == "Dashboard":
 # ---------------------------------------------------------
 elif vista_seleccionada == "Radar Multi-Mercado":
     st.title("Radar de eventos")
-    st.caption("Cuotas disponibles al momento del último escaneo")
-
-    dict_partidos = st.session_state.datos_cargados
-    if dict_partidos:
-        texto_ai = generar_resumen_ejecutivo_ai(dict_partidos)
-        if texto_ai: st.markdown(f"<div class='ai-summary-box'>{texto_ai}</div>", unsafe_allow_html=True)
-
-    if not st.session_state.ha_consultado:
-        st.markdown("""
-            <div class="empty-state-card">
-                <h4 style="margin-bottom:6px; font-size:15px;">Panel Preparado</h4>
-                <p style="color:var(--rg-text-soft); font-size:12px; margin:0;">Selecciona torneos en el menú lateral (☰ en celular) y presiona escanear.</p>
-            </div>
-        """, unsafe_allow_html=True)
-    elif not dict_partidos:
-        st.info("No se encontraron partidos con los filtros aplicados.")
+    st.caption("Encuentra un partido, compara sus mercados y añade selecciones a tu boleto.")
+    events = st.session_state.datos_cargados
+    if not events:
+        st.info("El Radar está listo. Elige tus competiciones en el menú lateral y pulsa Escanear Mercado.")
+        render_ticket(BitacoraManager.guardar)
     else:
-        col_izq, col_der = st.columns([6, 4])
-        with col_izq:
-            st.subheader(f"Eventos ({len(dict_partidos)})")
-            search = st.text_input("Buscar equipo", placeholder="Nombre del equipo…")
-            if search:
-                dict_partidos = {k:p for k,p in dict_partidos.items() if search.casefold() in (p['local']+' '+p['visitante']).casefold()}
-            ligas_con_datos = sorted({p['liga_origen'] for p in dict_partidos.values()})
-            if ligas_con_datos:
-                pestanas_ligas = st.tabs(ligas_con_datos)
-                for p_idx, liga_p in enumerate(ligas_con_datos):
-                    with pestanas_ligas[p_idx]:
-                        for part in [p for p in dict_partidos.values() if p['liga_origen'] == liga_p]:
-                            with st.container(border=True):
-                                st.markdown(f"<span class='liga-chip'>{escape(str(part['liga_origen']))}</span><span class='kickoff-chip'>{escape(str(part['fecha_str']))}</span>", unsafe_allow_html=True)
-                                st.markdown(f"<div class='match-header'>{escape(str(part['local']))} vs {escape(str(part['visitante']))}</div>", unsafe_allow_html=True)
-                                sub_tabs = st.tabs(list(part['mercados'].keys()))
-                                for m_idx, text_m in enumerate(part['mercados'].keys()):
-                                    with sub_tabs[m_idx]:
-                                        m_info = part['mercados'][text_m]
-                                        todas_opciones = list(m_info['max_cuotas'].keys())
-                                        if "1X2" in text_m:
-                                            todas_opciones = [op for op in ["Local", "Empate", "Visitante"] if op in m_info['max_cuotas']]
-                                        sub_cols = st.columns(len(todas_opciones))
-                                        for idx, opcion in enumerate(todas_opciones):
-                                            cuota_m = m_info['max_cuotas'][opcion]
-                                            with sub_cols[idx]:
-                                                val = m_info['value_bets'][opcion]
-                                                lbl_val = " 🔥" if val['es_value'] else ""
-                                                clave_base = f"ap_{part['id']}_{text_m}_{opcion}"
-                                                st.checkbox(f"{opcion} ({cuota_m}){lbl_val}", value=clave_base in st.session_state.ticket_persistente, key=clave_base, on_change=toggle_apuesta, args=(part, text_m, opcion, cuota_m, m_info['max_bookies'][opcion], val['prob_real'], clave_base))
-                                                st.caption(f"{m_info['max_bookies'][opcion]} | " + (f"Consenso: {val['prob_real']:.1f}%" if val['prob_real'] else "Consenso no disponible"))
-
-        with col_der:
-            def render_boleto_fragment():
-                st.subheader("Boleto")
-                apuestas_seleccionadas = list(st.session_state.ticket_persistente.values())
-                if apuestas_seleccionadas:
-                    cuota_acum, prob_comb = 1.0, 1.0
+        left,right = st.columns([2.1,1],gap="large")
+        with left:
+            search = st.text_input("Buscar equipo",placeholder="Ej.: Arsenal, Barcelona…",key="radar_search")
+            a,b = st.columns(2)
+            league = a.selectbox("Competición",["Todas",*sorted({p['liga_origen'] for p in events.values()})],key="radar_league")
+            order = b.selectbox("Ordenar por",["Más próximos","Mayor valor"],key="radar_order")
+            only_value = st.checkbox("Mostrar solo eventos con +EV",key="radar_value")
+            filtered = filter_events(events,search,league,order,only_value)
+            st.caption(f"{len(filtered)} de {len(events)} eventos · Mostrando hasta 12 por página")
+            if not filtered:
+                st.info("No hay coincidencias. Prueba otro equipo, competición o desactiva el filtro +EV.")
+            else:
+                page = st.selectbox("Página",range(1,(len(filtered)+11)//12+1),key="radar_page")
+                for part in filtered[(page-1)*12:page*12]:
                     with st.container(border=True):
-                        st.markdown("<div class='ticket-titulo'>Combinado Seleccionado</div>", unsafe_allow_html=True)
-                        for ap in apuestas_seleccionadas:
-                            cuota_acum *= float(ap['cuota'])
-                            prob_comb *= (float(ap['prob_real']) / 100.0)
-                            st.markdown(f"<div class='ticket-item'><b>{escape(str(ap['evento']))}</b><br>➔ {escape(str(ap['seleccion']))} | <span class='ticket-cuota-tag'>@{ap['cuota']}</span></div>", unsafe_allow_html=True)
-
-                        monto_ticket = st.number_input("Inversión ($):", min_value=1.0, value=10.0, step=1.0)
-                        ganancia_neta = (cuota_acum * monto_ticket) - monto_ticket
-                        if len({ap['evento'] for ap in apuestas_seleccionadas}) < len(apuestas_seleccionadas):
-                            st.warning("Hay selecciones del mismo evento: la independencia no se cumple y la estimación combinada puede no ser válida.")
-                        if any(not ap['prob_real'] for ap in apuestas_seleccionadas):
-                            st.info("No hay consenso completo para todas las selecciones; el Sharpe no está disponible.")
-                        sharpe = calcular_sharpe_parlay(cuota_acum, prob_comb)
-
-                        st.metric("Cuota Total", f"@{round(cuota_acum, 2)}")
-                        st.metric("Retorno Potencial", f"${round(ganancia_neta, 2)}")
-                        st.metric("Sharpe", f"{round(sharpe, 3)}" if prob_comb > 0 else "—")
-
-                        if st.button("Guardar Historial", type="primary", use_container_width=True):
-                            st.session_state.historial_apuestas.append({
-                                "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "Detalles": f"{len(apuestas_seleccionadas)} selecciones",
-                                "Liga": apuestas_seleccionadas[0]['liga'], "Market": "Combinada", "Cuota": cuota_acum,
-                                "Inversión": monto_ticket, "Estado": "Pendiente", "Ganancia Potencial": ganancia_neta
-                            })
-                            BitacoraManager.guardar(st.session_state.historial_apuestas)
-                            st.toast("Guardado con éxito")
-                else:
-                    st.info("Selecciona casillas en los partidos.")
-            render_boleto_fragment()
+                        st.markdown(f"<span class='liga-chip'>{escape(part['liga_origen'])}</span><span class='kickoff-chip'>{escape(part['fecha_str'])}</span>",unsafe_allow_html=True)
+                        initials = lambda team: escape(''.join(word[0] for word in team.split()[:2]).upper())
+                        st.markdown(f"<div class='match-header'><span class='team-mark'>{initials(part['local'])}</span>{escape(part['local'])}<span class='versus'>vs</span>{escape(part['visitante'])}<span class='team-mark'>{initials(part['visitante'])}</span></div>",unsafe_allow_html=True)
+                        market_name = st.selectbox("Mercado",list(part['mercados']),key="market_"+part['id'])
+                        market = part['mercados'][market_name]
+                        choices = list(market['max_cuotas'])
+                        if "1X2" in market_name:
+                            choices = [choice for choice in ['Local','Empate','Visitante'] if choice in choices]
+                        for column,choice in zip(st.columns(len(choices)),choices):
+                            with column:
+                                quote = market['max_cuotas'][choice]
+                                value = market['value_bets'][choice]
+                                key = f"ap_{part['id']}_{market_name}_{choice}"
+                                st.checkbox(f"{choice} ({quote:g})",value=key in st.session_state.ticket_persistente,key=key,
+                                    on_change=toggle_apuesta,args=(part,market_name,choice,quote,market['max_bookies'][choice],value['prob_real'],key))
+                                st.caption(market['max_bookies'][choice])
+                                if value['es_value']: st.caption(f"+EV · {value['ev']*100:.1f}% estimado")
+                                st.caption(f"Consenso {value['prob_real']:.1f}%" if value['prob_real'] else "Consenso no disponible")
+        with right:
+            render_ticket(BitacoraManager.guardar)
 
 # ---------------------------------------------------------
 # VISTA 2: VERIFICADOR
@@ -623,7 +604,12 @@ elif vista_seleccionada == "Verificador & Monte Carlo":
                 if image.width * image.height > 16000000:
                     st.error("La imagen supera el límite de 16 megapíxeles.")
                 else:
-                    st.session_state.ocr_text = pytesseract.image_to_string(image, lang="spa+eng", timeout=15)
+                    available = pytesseract.get_languages(config='')
+                    languages = '+'.join(lang for lang in ('spa','eng') if lang in available)
+                    if not languages:
+                        st.error("Instala el idioma español o inglés de Tesseract para leer el boleto.")
+                    else:
+                        st.session_state.ocr_text = pytesseract.image_to_string(image, lang=languages, timeout=15)
             except Exception:
                 st.error("No se pudo leer la imagen. Revisa que Tesseract esté instalado o pega el texto manualmente.")
         texto_ocr = st.text_area("Texto extraído (revisa y corrige las cuotas)", value=st.session_state.get('ocr_text', ''))
@@ -681,7 +667,7 @@ elif vista_seleccionada == "Verificador & Monte Carlo":
 # VISTA 3: H2H
 # ---------------------------------------------------------
 elif vista_seleccionada == "Análisis Estadístico H2H":
-    st.title("Modelo de Poisson")
+    st.title("Modelo de goles")
     l_loc = st.slider("Goles Local (λ):", 0.5, 3.5, 1.45, 0.05)
     l_vis = st.slider("Goles Visitante (λ):", 0.5, 3.5, 1.10, 0.05)
     res_p = calcular_modelo_poisson(l_loc, l_vis)
@@ -691,33 +677,11 @@ elif vista_seleccionada == "Análisis Estadístico H2H":
     c3.metric("Visitante", f"{round(res_p['Visitante'], 1)}%")
     st.caption("Escenario Poisson con medias introducidas manualmente; no consulta enfrentamientos históricos.")
     frame = pd.DataFrame({'Resultado':['Local','Empate','Visitante'], 'Probabilidad':[res_p[k] for k in ['Local','Empate','Visitante']]})
-    st.plotly_chart(px.bar(frame, x='Resultado', y='Probabilidad', color='Resultado', title='Probabilidades del escenario'), use_container_width=True)
+    themed_chart(px.bar(frame, x='Resultado', y='Probabilidad', color='Resultado', title='Probabilidades del escenario',color_discrete_sequence=['#21cfa4','#f3bc62','#63a9f5']),key='poisson_chart')
 
 
 elif vista_seleccionada == "Bitácora Financiera":
-    st.title("Bitácora financiera")
-    st.caption("El historial se conserva durante esta sesión. Exporta un respaldo antes de cerrar: el disco de Community Cloud no es almacenamiento permanente.")
-    history = st.session_state.historial_apuestas
-    if history:
-        st.dataframe(pd.DataFrame(history), hide_index=True, use_container_width=True)
-        st.download_button("Exportar historial JSON", json.dumps(history, ensure_ascii=False, indent=2), "bitacora_backup.json", "application/json")
-        st.download_button("Descargar CSV", pd.DataFrame(history).to_csv(index=False), "historial.csv", "text/csv")
-    else:
-        st.info("Aún no has guardado boletos.")
-    backup = st.file_uploader("Restaurar respaldo JSON", type=['json'])
-    if backup and st.button("Importar respaldo"):
-        try:
-            imported = json.load(backup)
-            required = {'Fecha','Detalles','Liga','Market','Cuota','Inversión','Estado','Ganancia Potencial'}
-            if not isinstance(imported, list) or len(imported) > 10000 or any(not isinstance(x,dict) or not required <= x.keys() for x in imported):
-                raise ValueError()
-            for item in imported:
-                if valid_odds(item['Cuota']) is None or not math.isfinite(float(item['Inversión'])) or float(item['Inversión']) <= 0:
-                    raise ValueError()
-            BitacoraManager.guardar(imported)
-            st.rerun()
-        except (ValueError, TypeError, KeyError):
-            st.error("Respaldo inválido. Usa un JSON exportado desde la bitácora.")
+    render_finance(BitacoraManager.guardar)
 
 elif vista_seleccionada == "Oportunidades +EV":
     st.title("Oportunidades +EV")
@@ -731,11 +695,12 @@ elif vista_seleccionada == "Matriz de Cobertura":
     if coverage:
         frame = pd.crosstab(pd.DataFrame(coverage).Liga, pd.DataFrame(coverage).Mercado)
         st.dataframe(frame, use_container_width=True)
-        st.plotly_chart(px.imshow(frame, text_auto=True, color_continuous_scale='Teal', aspect='auto'), use_container_width=True)
+        themed_chart(px.imshow(frame,text_auto=True,color_continuous_scale='Teal',aspect='auto',title='Eventos por mercado y competición'),key='coverage_matrix')
     else: st.info("Escanea torneos para conocer la cobertura real.")
 
 elif vista_seleccionada == "Generador Visual":
-    st.title("Resumen del boleto")
+    st.title("Mi boleto")
+    render_ticket(BitacoraManager.guardar)
     ticket = list(st.session_state.ticket_persistente.values())
     if ticket:
         frame = pd.DataFrame(ticket)[['evento','mercado','seleccion','cuota','casa']]
@@ -757,3 +722,6 @@ elif vista_seleccionada == "Soporte":
     st.subheader("Estado de configuración")
     st.dataframe(pd.DataFrame([{'Proveedor':name, 'Estado':'Clave configurada' if key else 'Sin clave'} for name,key in [('The Odds API',API_KEY),('API-Football',AF_API_KEY),('AllSports',ALLSPORTS_KEY),('SportAPI',SPORTAPI_KEY)]]), hide_index=True, use_container_width=True)
     st.caption("Una clave configurada no confirma conectividad, suscripción ni disponibilidad de cuotas. Las fuentes pueden devolver datos vacíos. API-Football consulta hasta tres páginas por liga para limitar consumo.")
+
+st.divider()
+st.caption("Analizador · Datos para comparar, contexto para decidir. Exporta tu bitácora para conservarla fuera de esta sesión.")

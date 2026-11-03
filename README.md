@@ -29,7 +29,12 @@ La aplicación arranca sin secretos y explica qué falta configurar. Telegram so
 
 ## Cambios
 
-- Dashboard con métricas de cobertura, gráficos Plotly, comparador y descarga CSV.
+- Dashboard con identidad visual propia, métricas de cobertura, eventos destacados, gráficos Plotly que respetan el tema, comparador con búsqueda/filtros y descarga CSV.
+- Accesos rápidos Resumen/Radar/Mi boleto, guía inicial de tres pasos y diseño móvil con métricas en dos columnas.
+- Radar con búsqueda, filtro de competición, orden por fecha o valor, filtro +EV y paginación de 12 eventos. Se renderiza un mercado por evento en lugar de crear todas las pestañas a la vez.
+- Boleto editable desde Radar o Mi boleto: quitar/vaciar selecciones, retorno bruto y neto diferenciados, historial con detalle de selecciones, prevención de duplicados y descarga JSON. Máximo de 20 selecciones; evita analizar combinadas con magnitudes fuera de rango.
+- Al reescanear se actualizan las cuotas del boleto y se impide guardar selecciones sin disponibilidad. Si la consulta falla y no hay resultados válidos, se conservan los anteriores con un aviso.
+- Bitácora con edición explícita del resultado, balance realizado, ROI, inversión pendiente, filtros y curva de resultados registrados. Los pendientes y anulados no se incluyen en el ROI realizado.
 - Navegación única, búsqueda de equipos, interfaz con modo claro/oscuro y reglas adaptables para móvil. El menú ☰ permanece accesible.
 - Radar, boleto, modelo Poisson, Monte Carlo, Kelly, bitácora y proveedores existentes conservados; módulos vacíos sustituidos por vistas útiles de cobertura, oportunidades y resumen descargable.
 - Consulta explícita de próximos eventos, alineaciones y lesiones vía API-Football.
@@ -49,7 +54,7 @@ La aplicación arranca sin secretos y explica qué falta configurar. Telegram so
 
 **Proveedores:** se conservan los identificadores de ligas y esquemas de AllSports/SportAPI de la versión original. Su disponibilidad, suscripción y correspondencia deben verificarse con las credenciales reales. Los eventos de proveedores diferentes conservan sus identificadores; no se hace unión aproximada de equipos que pueda mezclar partidos. Una clave configurada no significa conexión verificada. Las cuotas pueden estar cacheadas hasta tres minutos; no se afirma sincronización en vivo.
 
-**Validación:** ver `VALIDACION.md`. No se han usado claves de producción ni enviado mensajes a Telegram. La revisión visual real en escritorio/móvil y los contratos de los cuatro proveedores quedan pendientes antes de fusionar.
+**Validación:** ver `VALIDACION.md`. No se han usado claves de producción ni enviado mensajes a Telegram. La revisión visual real en escritorio/móvil y los contratos de los cuatro proveedores quedan pendientes de validación con el propietario.
 
 ## Referencias de API
 
@@ -59,4 +64,4 @@ La aplicación arranca sin secretos y explica qué falta configurar. Telegram so
 
 ## Incorporación y reversión
 
-Revisar la pull request y los límites anteriores. Probar la rama localmente con credenciales de pruebas antes de autorizar la fusión a `main`. No cambiar la rama conectada a la aplicación publicada sin aprobación. Si la aplicación sigue `main`, la fusión puede actualizar Streamlit automáticamente: la aprobación de fusión debe contemplar ese despliegue. Para revertir, usar un revert del commit de fusión en GitHub; no reescribir el historial de producción.
+Los cambios se incorporan mediante pull request, pruebas aprobadas y autorización del propietario. Esta actualización fue autorizada en la conversación para actualizar el código. No se cambian los Secrets ni la rama configurada en Streamlit. Si la aplicación sigue `main`, la fusión puede actualizar Streamlit automáticamente. La integración con credenciales reales debe comprobarse desde la aplicación del propietario. Para revertir, usar un revert del commit de fusión en GitHub; no reescribir el historial de producción.

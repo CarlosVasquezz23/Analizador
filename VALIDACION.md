@@ -1,25 +1,28 @@
-# Validación de la rama de desarrollo
+# Validación de la actualización UI/UX
 
-Base revisada: `CarlosVasquezz23/Analizador`, `main`, commit `d23b61deccef89c91579ab4fed40b19f856d8814`.
+Repositorio: `CarlosVasquezz23/Analizador`. Cambios preparados en `dev/dashboard-deportivo` y pull request #1. La actualización del código fue autorizada por el propietario en la conversación; la incorporación a `main` se realiza solo después de aprobar las pruebas de la nueva revisión.
 
 ## Resultados locales
 
-- `python -m pytest -q`: **27 pruebas aprobadas**.
-- `python -m compileall -q analizador.py analytics.py api_client.py pro_ui.py football_details.py`: aprobado.
+- `python -m pytest -q`: **40 pruebas aprobadas**.
+- `python -m compileall -q analizador.py pro_ui.py ticket_ui.py finance_ui.py workspace_logic.py`: aprobado.
 - `git diff --check`: aprobado.
 - `python -m pip check`: sin dependencias incompatibles.
-- Instalación desde `requirements.txt`: completada. Entorno: Python 3.12, Streamlit 1.66.1, Plotly 6.9.0, NumPy 2.3.5, pandas 2.2.3.
+- Entorno: Python 3.12, Streamlit 1.66.1, Plotly 6.9.0, NumPy 2.3.5, pandas 2.2.3.
 
-Las pruebas cubren navegación por las diez pantallas sin claves, tema visual, escaneo sin configuración, dashboard con eventos de prueba, selección y guardado de boletos, bitácoras aisladas por sesión, verificador con cuotas inválidas, normalización de mercados, filtros de fechas/casas, probabilidades Poisson, Monte Carlo reproducible, arbitraje completo y rechazo de doble oportunidad como arbitraje. También verifican timeouts HTTP sin filtración de credenciales, tratamiento de 429 y conservación de resultados válidos cuando otro proveedor responde con un esquema incorrecto.
+## Cobertura
 
-Los eventos usados en pruebas son sintéticos y no se introducen como resultados de la aplicación.
+Navegación por diez pantallas sin claves, cambios de tema, escaneo sin configuración, dashboard con eventos sintéticos, selección/guardado de boletos, aislamiento de sesiones, verificador, filtros de fecha y casas, normalización de mercados, Poisson, Monte Carlo, arbitraje completo, tratamiento de doble oportunidad y errores HTTP sin filtrar credenciales.
 
-## Pendiente antes de aprobar la incorporación
+La segunda revisión agrega pruebas de accesos rápidos conservando el boleto, eliminación de selecciones, bloqueo de guardados duplicados y de cuotas no disponibles, filtros/ordenación del radar, retornos bruto y neto, detección de selecciones correlacionadas, liquidación del historial, cálculo de ROI e importación de respaldos antiguos/invalidación de datos incorrectos.
 
-- Verificar contratos y resultados reales con credenciales de los cuatro proveedores. No hay secretos de producción en este entorno. Los adaptadores de AllSports y SportAPI y sus IDs provienen de la base original y necesitan confirmación.
-- Validar OCR con capturas reales y Tesseract instalado. AppTest no valida la precisión del reconocimiento de imágenes.
-- Revisar el aspecto en navegador de escritorio y móvil. El servidor Streamlit arrancó, pero no se pudieron obtener capturas: la descarga de Chromium para Playwright falló con un archivo truncado. La adaptación CSS está implementada; no se presenta como validación visual completada.
-- Verificar entrega a Telegram únicamente con un chat de pruebas autorizado.
-- Aprobar el cambio de persistencia: la bitácora y las preferencias son por sesión; se debe descargar el respaldo JSON antes de cerrar. No se agregó una base de datos ni se garantiza almacenamiento permanente.
+Los eventos sintéticos solo se usan en pruebas; no hay demostraciones presentadas como resultados reales dentro de la aplicación.
 
-No se fusionó la rama, no se activó auto-merge y no se publicó en Streamlit. La aprobación debe ocurrir antes de fusionar: Community Cloud puede desplegar automáticamente cuando cambia su rama conectada.
+## Límites de esta validación
+
+- El servidor Streamlit arranca. Chrome se descargó, pero el entorno impide abrir el socket necesario para iniciarlo (`Operation not permitted`). No se completó QA visual en navegador PC/móvil. Se implementaron reglas responsive y se verificó funcionalidad con AppTest, sin afirmar inspección visual completa.
+- No hay credenciales de los cuatro proveedores en este entorno. Se conservan esquemas e IDs originales de AllSports/SportAPI y necesitan confirmación con el plan contratado.
+- No se enviaron mensajes a Telegram. El OCR usa los idiomas español/inglés disponibles en Tesseract; no se ha medido su precisión con capturas reales del propietario.
+- Bitácora y preferencias son por sesión. La exportación JSON es necesaria para conservar una copia; no se agregó una base de datos ni se promete almacenamiento permanente.
+
+No se cambian Secrets, ajustes de hosting ni conexiones de Streamlit. Community Cloud puede redesplegar automáticamente cuando se incorpora el código a su rama conectada. El estado de publicación debe confirmarse en la aplicación del propietario.

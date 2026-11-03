@@ -63,3 +63,36 @@ def test_financial_session_isolation(app):
     app.session_state['historial_apuestas'] = [{'Detalles':'Privado'}]
     other = AppTest.from_file(Path(__file__).resolve().parents[1] / 'analizador.py').run()
     assert other.session_state['historial_apuestas'] == []
+
+
+def test_ticket_removal_and_clear_are_consistent(app):
+    app.session_state['ticket_persistente'] = {'selection1':{'evento':'A vs B','liga':'Liga','mercado':'1X2','seleccion':'Local','cuota':2.,'casa':'Casa','prob_real':50}}
+    app.selectbox(key='navigation').select('Generador Visual').run()
+    assert not app.exception
+    next(b for b in app.button if b.label=='Quitar selección').click().run()
+    assert not app.session_state['ticket_persistente']
+    assert not app.exception
+
+
+def test_quick_navigation_preserves_ticket(app):
+    app.session_state['ticket_persistente'] = {'selection1':{'evento':'A vs B','liga':'Liga','mercado':'1X2','seleccion':'Local','cuota':2.,'casa':'Casa','prob_real':50}}
+    app.button(key='quick_Generador Visual').click().run()
+    assert app.session_state['navigation'] == 'Generador Visual'
+    assert len(app.session_state['ticket_persistente']) == 1
+    assert not app.exception
+
+
+def test_duplicate_ticket_cannot_be_saved_twice(app):
+    app.session_state['ticket_persistente'] = {'selection1':{'evento':'A vs B','liga':'Liga','mercado':'1X2','seleccion':'Local','cuota':2.,'casa':'Casa','prob_real':50}}
+    app.selectbox(key='navigation').select('Generador Visual').run()
+    next(b for b in app.button if b.label=='Guardar Historial').click().run()
+    assert next(b for b in app.button if b.label=='Guardar Historial').disabled
+    assert len(app.session_state['historial_apuestas']) == 1
+    assert not app.exception
+
+
+def test_stale_quote_cannot_be_saved(app):
+    app.session_state['ticket_persistente'] = {'selection1':{'evento':'A vs B','liga':'Liga','mercado':'1X2','seleccion':'Local','cuota':2.,'casa':'Casa','prob_real':50,'stale':True}}
+    app.selectbox(key='navigation').select('Generador Visual').run()
+    assert next(b for b in app.button if b.label=='Guardar Historial').disabled
+    assert not app.exception
