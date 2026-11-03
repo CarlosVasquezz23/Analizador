@@ -11,12 +11,30 @@ import itertools
 from typing import Dict, List, Any
 import streamlit.components.v1 as components
 import concurrent.futures
+from html import escape
+from zoneinfo import ZoneInfo
+import plotly.express as px
+from analytics import EXPECTED, valid_odds, normalize_outcome, surebet, parse_ticket, api_football_markets
+from api_client import get_json
+from pro_ui import apply_theme, header, dashboard, opportunity_table, quick_navigation, themed_chart
+from workspace_logic import filter_events
+from ticket_ui import render_ticket
+from finance_ui import render_finance
+from football_details import render as render_football_details
+
+
+def secret(name):
+    try:
+        return str(st.secrets.get(name, ""))
+    except (FileNotFoundError, st.errors.StreamlitSecretNotFoundError):
+        return os.environ.get(name, "")
+
 
 # =========================================================
 # 1. CONFIGURACIÓN DE PÁGINA
 # =========================================================
 st.set_page_config(
-    page_title="Global Sports Analytics - Pro Platform",
+    page_title="Analizador | Sports Workspace",
     page_icon="⚽",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -25,18 +43,18 @@ st.set_page_config(
 DB_FILE = "bitacora_backup.json"
 CONFIG_FILE = "user_config.json"
 
-API_KEY = st.secrets.get("ODDS_API_KEY", "")
-AF_API_KEY = st.secrets.get("AF_API_KEY", "")
+API_KEY = secret("ODDS_API_KEY")
+AF_API_KEY = secret("AF_API_KEY")
 AF_BASE_URL = "https://v3.football.api-sports.io"
 
-ALLSPORTS_KEY = st.secrets.get("ALLSPORTS_API_KEY", "")
+ALLSPORTS_KEY = secret("ALLSPORTS_API_KEY")
 ALLSPORTS_BASE_URL = "https://allsportsapi.com/api/football/"
 
-SPORTAPI_KEY = st.secrets.get("SPORTAPI_KEY", "")
+SPORTAPI_KEY = secret("SPORTAPI_KEY")
 SPORTAPI_BASE_URL = "https://api.sportapi.ai/v1/football/"
 
-DEFAULT_TG_TOKEN = st.secrets.get("TG_TOKEN", "")
-DEFAULT_TG_CHAT_ID = st.secrets.get("TG_CHAT_ID", "")
+DEFAULT_TG_TOKEN = secret("TG_TOKEN")
+DEFAULT_TG_CHAT_ID = secret("TG_CHAT_ID")
 
 # =========================================================
 # 2. PERSISTENCIA
@@ -44,43 +62,21 @@ DEFAULT_TG_CHAT_ID = st.secrets.get("TG_CHAT_ID", "")
 class BitacoraManager:
     @staticmethod
     def cargar() -> List[Dict[str, Any]]:
-        if os.path.exists(DB_FILE):
-            try:
-                with open(DB_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                return []
-        return []
+        return st.session_state.get('historial_apuestas', [])
 
     @staticmethod
     def guardar(historial: List[Dict[str, Any]]) -> None:
-        try:
-            with open(DB_FILE, "w", encoding="utf-8") as f:
-                json.dump(historial, f, ensure_ascii=False, indent=4)
-        except Exception:
-            pass
+        st.session_state.historial_apuestas = historial
 
 class ConfigManager:
     @staticmethod
     def cargar() -> Dict[str, Any]:
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                return {}
-        return {}
+        return st.session_state.get('user_config_cache', {})
 
     @staticmethod
     def guardar(key: str, val: Any) -> None:
-        if 'user_config_cache' not in st.session_state:
-            st.session_state.user_config_cache = ConfigManager.cargar()
-        st.session_state.user_config_cache[key] = val
-        try:
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(st.session_state.user_config_cache, f, ensure_ascii=False, indent=4)
-        except Exception:
-            pass
+        st.session_state.setdefault('user_config_cache', {})[key] = val
+        st.session_state[key] = val
 
 def enviar_telegram(mensaje: str) -> bool:
     token = st.session_state.get('tg_token', DEFAULT_TG_TOKEN)
@@ -88,7 +84,7 @@ def enviar_telegram(mensaje: str) -> bool:
     if not token or not chat_id: return False
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
-        r = requests.post(url, data={"chat_id": chat_id, "text": mensaje, "parse_mode": "Markdown"}, timeout=8)
+        r = requests.post(url, data={"chat_id": chat_id, "text": mensaje}, timeout=8)
         return r.status_code == 200
     except Exception:
         return False
@@ -100,7 +96,9 @@ def poisson_pmf_vec(k_array: np.ndarray, mu: float) -> np.ndarray:
     return (np.power(mu, k_array) * np.exp(-mu)) / np.array([math.factorial(k) for k in k_array])
 
 def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1.10) -> Dict[str, float]:
-    max_goles = 6
+    if not all(math.isfinite(x) and 0 <= x <= 20 for x in (lambda_local, lambda_visita)):
+        raise ValueError("Las medias de goles deben estar entre 0 y 20")
+    max_goles = max(20, int(max(lambda_local, lambda_visita) + 10 * math.sqrt(max(lambda_local, lambda_visita))))
     k_range = np.arange(max_goles)
     p_l = poisson_pmf_vec(k_range, lambda_local)
     p_v = poisson_pmf_vec(k_range, lambda_visita)
@@ -125,24 +123,24 @@ def calcular_modelo_poisson(lambda_local: float = 1.45, lambda_visita: float = 1
     }
 
 def detectar_surebet(cuotas_max_dict: Dict[str, float]) -> Dict[str, Any]:
-    if not cuotas_max_dict or len(cuotas_max_dict) < 2:
-        return {"es_surebet": False, "overround": 1.0, "lucro": 0.0}
-    overround = sum(1.0 / float(c) for c in cuotas_max_dict.values() if float(c) > 0)
-    es_surebet = overround < 1.0
-    lucro = ((1.0 / overround) - 1.0) * 100.0 if es_surebet else 0.0
-    return {"es_surebet": es_surebet, "overround": overround, "lucro": lucro}
+    return surebet(cuotas_max_dict)
+
 
 def calcular_sharpe_parlay(cuota_total: float, prob_combinada: float) -> float:
     ev = (cuota_total * prob_combinada) - 1.0
-    varianza = (prob_combinada * ((cuota_total - 1.0) ** 2)) + ((1.0 - prob_combinada) * 1.0)
+    varianza = cuota_total ** 2 * prob_combinada * (1 - prob_combinada)
     desviacion = math.sqrt(varianza) if varianza > 0 else 1.0
     return ev / desviacion
 
 def ejecutar_simulacion_montecarlo(partidos: List[Dict[str, Any]], num_simulaciones: int = 10000) -> Dict[str, Any]:
     if not partidos: return {}
+    if not 1 <= num_simulaciones <= 1000000:
+        raise ValueError("Número de simulaciones fuera de rango")
     probs = [p['prob_real'] / 100.0 for p in partidos]
+    if any(not math.isfinite(p) or not 0 <= p <= 1 for p in probs):
+        raise ValueError("Probabilidad fuera de rango")
     num_eventos = len(probs)
-    matriz_rand = np.random.rand(num_simulaciones, num_eventos)
+    matriz_rand = np.random.default_rng(42).random((num_simulaciones, num_eventos))
     matriz_aciertos = matriz_rand < probs
     aciertos_por_sim = np.sum(matriz_aciertos, axis=1)
     return {
@@ -157,7 +155,7 @@ def generar_resumen_ejecutivo_ai(dict_partidos: Dict[str, Any]) -> str:
     liga_con_mas_valor = {}
 
     for p in dict_partidos.values():
-        liga = p['liga_origen']
+        liga = escape(p['liga_origen'])
         for m_info in p['mercados'].values():
             if m_info.get('surebet', {}).get('es_surebet', False): total_surebets += 1
             for val_item in m_info.get('value_bets', {}).values():
@@ -189,9 +187,13 @@ if 'bankroll_total' not in st.session_state: st.session_state.bankroll_total = u
 
 def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_val, prob_val, clave_k):
     if st.session_state.get(clave_k, False):
+        if len(st.session_state.ticket_persistente) >= 20 and clave_k not in st.session_state.ticket_persistente:
+            st.session_state[clave_k] = False
+            st.toast("El boleto admite hasta 20 selecciones. Quita una para añadir otra.")
+            return
         st.session_state.ticket_persistente[clave_k] = {
             "evento": f"{partido_obj['local']} vs {partido_obj['visitante']}",
-            "liga": partido_obj['liga_origen'], "mercado": mercado_nombre,
+            "event_id": partido_obj['id'], "liga": partido_obj['liga_origen'], "mercado": mercado_nombre,
             "seleccion": opcion_nombre, "cuota": cuota_val, "casa": casa_val,
             "prob_real": prob_val, "fecha_ts": partido_obj.get('fecha_ts', None)
         }
@@ -199,165 +201,8 @@ def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_v
     else:
         st.session_state.ticket_persistente.pop(clave_k, None)
 
-modo_claro = (st.session_state.tema_visual == "Claro")
-bg_val = "#f8fafc" if modo_claro else "#0b0f19"
-card_val = "#ffffff" if modo_claro else "#111827"
-card_alt_val = "#f1f5f9" if modo_claro else "#1f2937"
-border_val = "#e2e8f0" if modo_claro else "#374151"
-text_val = "#0f172a" if modo_claro else "#ffffff"  # Forzado a blanco puro en oscuro para máxima visibilidad
-text_soft_val = "#64748b" if modo_claro else "#94a3b8"
-accent_val = "#10b981"
-
-st.markdown(f"""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-    #MainMenu {{visibility: hidden;}}
-    footer {{visibility: hidden;}}
-    header {{visibility: hidden;}}
-    .stDeployButton {{display: none !important;}}
-
-    div[data-testid="stToolbar"], 
-    div[data-testid="stDecoration"], 
-    div[data-testid="stStatusWidget"],
-    footer {{
-        display: none !important;
-    }}
-
-    html, body, [class*="css"] {{
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        color: {text_val};
-        background-color: {bg_val};
-    }}
-
-    .block-container {{
-        padding-top: 0.8rem !important;
-        padding-bottom: 2rem !important;
-        max-width: 98% !important;
-    }}
-
-    div[data-baseweb="radio"] input:checked + div {{
-        background-color: {accent_val} !important;
-    }}
-    
-    .stTabs [data-baseweb="tab-highlight"] {{
-        background-color: {accent_val} !important;
-    }}
-    
-    .stTabs [data-baseweb="tab"][aria-selected="true"] {{
-        color: {accent_val} !important;
-    }}
-
-    button[kind="primary"] {{
-        background-color: {accent_val} !important;
-        border-color: {accent_val} !important;
-        color: #ffffff !important;
-        font-weight: 600 !important;
-        border-radius: 6px !important;
-    }}
-
-    .ai-summary-box {{
-        background: {card_val};
-        border: 1px solid {border_val};
-        border-left: 4px solid {accent_val};
-        border-radius: 8px;
-        padding: 12px 16px;
-        margin-bottom: 15px;
-        font-size: 13px;
-        color: {text_val};
-    }}
-
-    .empty-state-card {{
-        background: {card_val};
-        border: 1px solid {border_val};
-        border-radius: 8px;
-        padding: 20px;
-        text-align: center;
-    }}
-
-    /* CLASE CORREGIDA PARA QUE LOS NOMBRES DE LOS EQUIPOS SE VEAN CLAROS Y DESTACADOS */
-    .match-header {{
-        font-size: 16px !important;
-        font-weight: 700 !important;
-        color: {text_val} !important;
-        margin-top: 6px !important;
-        margin-bottom: 8px !important;
-        letter-spacing: -0.2px;
-    }}
-
-    .liga-chip {{
-        display: inline-block;
-        font-size: 10px;
-        font-weight: 600;
-        color: {accent_val};
-        background: rgba(16, 185, 129, 0.1);
-        border: 1px solid rgba(16, 185, 129, 0.3);
-        border-radius: 4px;
-        padding: 2px 6px;
-    }}
-
-    .kickoff-chip {{
-        display: inline-block;
-        font-size: 10px;
-        font-weight: 500;
-        color: {text_soft_val};
-        background: {card_alt_val};
-        border: 1px solid {border_val};
-        border-radius: 4px;
-        padding: 2px 6px;
-        margin-left: 4px;
-    }}
-
-    .creditos-caja-pro {{
-        background: {card_alt_val};
-        padding: 10px 14px;
-        border-radius: 6px;
-        border: 1px solid {border_val};
-        margin-bottom: 12px;
-    }}
-
-    .ticket-titulo {{
-        font-weight: 700;
-        font-size: 12px;
-        letter-spacing: 0.5px;
-        text-transform: uppercase;
-        color: {accent_val};
-        text-align: center;
-        margin-bottom: 8px;
-    }}
-
-    .ticket-item {{
-        border-bottom: 1px solid {border_val};
-        padding: 6px 0;
-        font-size: 12px;
-    }}
-
-    .ticket-cuota-tag {{
-        font-weight: 600;
-        color: {accent_val};
-        background: rgba(16, 185, 129, 0.12);
-        border-radius: 4px;
-        padding: 1px 4px;
-        font-size: 11px;
-    }}
-
-    .veredicto-box {{
-        background: {card_alt_val};
-        border: 1px solid {border_val};
-        border-radius: 8px;
-        padding: 14px;
-        margin-top: 12px;
-    }}
-
-    @media (max-width: 768px) {{
-        .block-container {{
-            padding-left: 0.5rem !important;
-            padding-right: 0.5rem !important;
-            padding-top: 0.5rem !important;
-        }}
-    }}
-    </style>
-""", unsafe_allow_html=True)
+apply_theme(st.session_state.tema_visual == "Claro")
+header()
 
 # =========================================================
 # 5. MAPEO DE LIGAS
@@ -391,159 +236,163 @@ diccionario_mercados = {
 # =========================================================
 def af_headers(): return {"x-apisports-key": AF_API_KEY}
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=90, max_entries=256, show_spinner=False)
 def consultar_api_odds(sport_key, market_key):
     if not API_KEY or not sport_key: return [], "Sin API"
-    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={API_KEY}&regions=eu,us&markets={market_key}&oddsFormat=decimal"
-    try:
-        r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            res = r.json()
-            return (res, None) if isinstance(res, list) else ([], "Err")
-        return [], f"HTTP {r.status_code}"
-    except Exception as e:
-        return [], f"Excepción: {e}"
+    # Featured odds endpoint only supports h2h/totals here. Other markets require
+    # per-event endpoints and are obtained from the alternative providers.
+    if market_key not in {"h2h", "totals"}: return [], "Mercado no disponible en endpoint general"
+    data, error = get_json(f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/",
+                           params={"apiKey": API_KEY, "regions": "eu,us", "markets": market_key, "oddsFormat": "decimal"})
+    return (data, None) if isinstance(data, list) else ([], error or "Formato inesperado")
 
+@st.cache_data(ttl=180, max_entries=128, show_spinner=False)
 def consultar_af_con_fallback_fixtures(af_id):
-    if not af_id or not AF_API_KEY: return []
-    try:
-        r = requests.get(f"{AF_BASE_URL}/odds", headers=af_headers(), params={"league": af_id, "season": datetime.now().year}, timeout=8)
-        if r.status_code == 200: return r.json().get("response", [])
-    except Exception:
-        pass
-    return []
+    if not af_id or not AF_API_KEY: return [], "Sin clave o liga"
+    # Resolve the active season instead of assuming the calendar year.
+    leagues, error = get_json(f"{AF_BASE_URL}/leagues", headers=af_headers(), params={"id": af_id, "current": "true"})
+    response = leagues.get("response", []) if isinstance(leagues, dict) else []
+    seasons = response[0].get("seasons", []) if response else []
+    current = next((season.get("year") for season in seasons if season.get("current")), None)
+    if current is None: return [], error or "Temporada no disponible"
+    data, error = get_json(f"{AF_BASE_URL}/odds", headers=af_headers(), params={"league": af_id, "season": current})
+    if not isinstance(data, dict) or data.get("errors"): return [], error or "Proveedor devolvió un error"
+    results = data.get("response", [])
+    # Bound pagination to avoid exhausting free API quotas.
+    for page in range(2, min(int(data.get("paging", {}).get("total", 1)), 3) + 1):
+        extra, _ = get_json(f"{AF_BASE_URL}/odds", headers=af_headers(), params={"league": af_id, "season": current, "page": page})
+        if isinstance(extra, dict): results.extend(extra.get("response", []))
+    return (results, None) if isinstance(results, list) else ([], "Formato inesperado")
 
+@st.cache_data(ttl=180, max_entries=128, show_spinner=False)
 def consultar_allsports_odds(league_id=None):
-    if not ALLSPORTS_KEY or not league_id: return []
-    try:
-        r = requests.get(f"{ALLSPORTS_BASE_URL}?met=Odds&APIkey={ALLSPORTS_KEY}&leagueId={league_id}", timeout=8)
-        if r.status_code == 200 and r.json().get("success") == 1: return r.json().get("result", {})
-    except Exception:
-        pass
-    return {}
+    if not ALLSPORTS_KEY or not league_id: return {}, "Sin clave o liga"
+    data, error = get_json(ALLSPORTS_BASE_URL, params={"met": "Odds", "APIkey": ALLSPORTS_KEY, "leagueId": league_id})
+    return (data.get("result", {}), None) if isinstance(data, dict) and data.get("success") == 1 else ({}, error or "Proveedor sin respuesta válida")
 
+@st.cache_data(ttl=180, max_entries=128, show_spinner=False)
 def consultar_sportapi_odds(sportapi_id=None):
-    if not SPORTAPI_KEY or not sportapi_id: return []
-    try:
-        r = requests.get(f"{SPORTAPI_BASE_URL}odds?apikey={SPORTAPI_KEY}&tournament_id={sportapi_id}", timeout=8)
-        if r.status_code == 200: return r.json().get("data", [])
-    except Exception:
-        pass
-    return []
+    if not SPORTAPI_KEY or not sportapi_id: return [], "Sin clave o liga"
+    data, error = get_json(f"{SPORTAPI_BASE_URL}odds", params={"apikey": SPORTAPI_KEY, "tournament_id": sportapi_id})
+    result = data.get("data", []) if isinstance(data, dict) else []
+    return (result, error) if isinstance(result, list) else ([], error or "Formato inesperado")
 
 def escanear_liga_worker(liga_nombre, config_liga, mercados_sels, limite_h):
-    resultados_normalizados = []
+    resultados_normalizados, diagnostics = [], []
     for skey in config_liga.get("odds_api", []):
         for market_sel in mercados_sels:
-            data, _ = consultar_api_odds(skey, diccionario_mercados.get(market_sel, "h2h"))
+            data, error = consultar_api_odds(skey, diccionario_mercados.get(market_sel, "h2h"))
+            if error: diagnostics.append(f"The Odds API · {market_sel}: {error}")
             if data and isinstance(data, list):
                 for p in data: resultados_normalizados.append((p, market_sel))
 
-    af_id = config_liga.get("af_id")
-    if af_id and AF_API_KEY:
-        for item in consultar_af_con_fallback_fixtures(af_id):
-            fix, teams, bookies_af = item.get("fixture", {}), item.get("teams", {}), item.get("bookmakers", [])
-            bookmakers_converted = []
-            for b in bookies_af:
-                b_markets = []
-                for m in b.get("bets", []):
-                    m_name = m.get("name")
-                    key_m = "h2h" if m_name == "Match Winner" else ("totals" if m_name == "Goals Over/Under" else "btts")
-                    outcomes = [{"name": o.get("value"), "price": float(o.get("odd"))} for o in m.get("values", [])]
-                    b_markets.append({"key": key_m, "outcomes": outcomes})
-                bookmakers_converted.append({"key": str(b.get("id")), "title": b.get("name"), "markets": b_markets})
+    try:
+        af_id = config_liga.get("af_id")
+        if af_id and AF_API_KEY:
+            af_data, error = consultar_af_con_fallback_fixtures(af_id)
+            if error: diagnostics.append(f"API-Football: {error}")
+            for item in af_data:
+                fix, teams, bookies_af = item.get("fixture", {}), item.get("teams", {}), item.get("bookmakers", [])
+                bookmakers_converted = []
+                for b in bookies_af:
+                    b_markets = api_football_markets(b.get("bets", []), teams.get("home", {}).get("name", "Local"), teams.get("away", {}).get("name", "Visitante"))
+                    bookmakers_converted.append({"key": str(b.get("id")), "title": b.get("name"), "markets": b_markets})
 
-            partido_norm = {
-                "id": f"af_{fix.get('id')}", "home_team": teams.get("home", {}).get("name", "Local"),
-                "away_team": teams.get("away", {}).get("name", "Visitante"),
-                "commence_time": fix.get("date", datetime.now(timezone.utc).isoformat()), "bookmakers": bookmakers_converted
-            }
-            for m_sel in mercados_sels: resultados_normalizados.append((partido_norm, m_sel))
-
-    as_id = config_liga.get("allsports_id")
-    if as_id and ALLSPORTS_KEY:
-        res_as = consultar_allsports_odds(as_id)
-        if isinstance(res_as, dict):
-            for m_id, odds_list in res_as.items():
-                if not odds_list: continue
-                match_info = odds_list[0]
-                bookmakers_converted, dict_bookies = [], {}
-                for entry in odds_list: dict_bookies.setdefault(entry.get("bookmaker_name", "AllSports"), []).append(entry)
-                for b_name, b_entries in dict_bookies.items():
-                    outcomes_h2h = []
-                    for e in b_entries:
-                        m_type = e.get("type", "")
-                        odd_val = float(e.get("odd", 1.0))
-                        if m_type in ["1", "Home"]: outcomes_h2h.append({"name": match_info.get("event_home_team", "Local"), "price": odd_val})
-                        elif m_type in ["X", "Draw"]: outcomes_h2h.append({"name": "Draw", "price": odd_val})
-                        elif m_type in ["2", "Away"]: outcomes_h2h.append({"name": match_info.get("event_away_team", "Visitante"), "price": odd_val})
-                    if outcomes_h2h: bookmakers_converted.append({"key": b_name, "title": b_name, "markets": [{"key": "h2h", "outcomes": outcomes_h2h}]})
-                partido_as = {
-                    "id": f"as_{m_id}", "home_team": match_info.get("event_home_team", "Local"),
-                    "away_team": match_info.get("event_away_team", "Visitante"),
-                    "commence_time": match_info.get("event_date", datetime.now(timezone.utc).isoformat()), "bookmakers": bookmakers_converted
+                partido_norm = {
+                    "id": f"af_{fix.get('id')}", "home_team": teams.get("home", {}).get("name", "Local"),
+                    "away_team": teams.get("away", {}).get("name", "Visitante"),
+                    "commence_time": fix.get("date", datetime.now(timezone.utc).isoformat()), "bookmakers": bookmakers_converted
                 }
-                for m_sel in mercados_sels: resultados_normalizados.append((partido_as, m_sel))
+                for m_sel in mercados_sels: resultados_normalizados.append((partido_norm, m_sel))
+    except (TypeError, ValueError, KeyError, AttributeError):
+        diagnostics.append("API-Football: formato de respuesta inesperado")
 
-    sp_id = config_liga.get("sportapi_id")
-    if sp_id and SPORTAPI_KEY:
-        for item in consultar_sportapi_odds(sp_id):
-            bookmakers_converted = []
-            for b in item.get("bookmakers", []):
-                outcomes_h2h = [{"name": o.get("label"), "price": float(o.get("value", 1.0))} for o in b.get("odds", [])]
-                if outcomes_h2h: bookmakers_converted.append({"key": b.get("name"), "title": b.get("name"), "markets": [{"key": "h2h", "outcomes": outcomes_h2h}]})
-            partido_sp = {
-                "id": f"sp_{item.get('id', '0')}", "home_team": item.get("home_team", "Local"),
-                "away_team": item.get("away_team", "Visitante"),
-                "commence_time": item.get("start_time", datetime.now(timezone.utc).isoformat()), "bookmakers": bookmakers_converted
-            }
-            for m_sel in mercados_sels: resultados_normalizados.append((partido_sp, m_sel))
+    try:
+        as_id = config_liga.get("allsports_id")
+        if as_id and ALLSPORTS_KEY:
+            res_as, error = consultar_allsports_odds(as_id)
+            if error: diagnostics.append(f"AllSports: {error}")
+            if isinstance(res_as, dict):
+                for m_id, odds_list in res_as.items():
+                    if not odds_list or not isinstance(odds_list, list): continue
+                    match_info = odds_list[0]
+                    bookmakers_converted, dict_bookies = [], {}
+                    for entry in odds_list: dict_bookies.setdefault(entry.get("bookmaker_name", "AllSports"), []).append(entry)
+                    for b_name, b_entries in dict_bookies.items():
+                        outcomes_h2h = []
+                        for e in b_entries:
+                            m_type = e.get("type", "")
+                            odd_val = valid_odds(e.get("odd"))
+                            if odd_val is None: continue
+                            if m_type in ["1", "Home"]: outcomes_h2h.append({"name": match_info.get("event_home_team", "Local"), "price": odd_val})
+                            elif m_type in ["X", "Draw"]: outcomes_h2h.append({"name": "Draw", "price": odd_val})
+                            elif m_type in ["2", "Away"]: outcomes_h2h.append({"name": match_info.get("event_away_team", "Visitante"), "price": odd_val})
+                        if outcomes_h2h: bookmakers_converted.append({"key": b_name, "title": b_name, "markets": [{"key": "h2h", "outcomes": outcomes_h2h}]})
+                    partido_as = {
+                        "id": f"as_{m_id}", "home_team": match_info.get("event_home_team", "Local"),
+                        "away_team": match_info.get("event_away_team", "Visitante"),
+                        "commence_time": match_info.get("event_date", datetime.now(timezone.utc).isoformat()), "bookmakers": bookmakers_converted
+                    }
+                    for m_sel in mercados_sels: resultados_normalizados.append((partido_as, m_sel))
+    except (TypeError, ValueError, KeyError, AttributeError):
+        diagnostics.append("AllSports: formato de respuesta inesperado")
 
-    return (liga_nombre, resultados_normalizados)
+    try:
+        sp_id = config_liga.get("sportapi_id")
+        if sp_id and SPORTAPI_KEY:
+            sp_data, error = consultar_sportapi_odds(sp_id)
+            if error: diagnostics.append(f"SportAPI: {error}")
+            for item in sp_data:
+                bookmakers_converted = []
+                for b in item.get("bookmakers", []):
+                    outcomes_h2h = [{"name": o.get("label"), "price": valid_odds(o.get("value"))} for o in b.get("odds", [])]
+                    if outcomes_h2h: bookmakers_converted.append({"key": b.get("name"), "title": b.get("name"), "markets": [{"key": "h2h", "outcomes": outcomes_h2h}]})
+                partido_sp = {
+                    "id": f"sp_{item.get('id', '0')}", "home_team": item.get("home_team", "Local"),
+                    "away_team": item.get("away_team", "Visitante"),
+                    "commence_time": item.get("start_time", datetime.now(timezone.utc).isoformat()), "bookmakers": bookmakers_converted
+                }
+                for m_sel in mercados_sels: resultados_normalizados.append((partido_sp, m_sel))
+    except (TypeError, ValueError, KeyError, AttributeError):
+        diagnostics.append("SportAPI: formato de respuesta inesperado")
+
+    return (liga_nombre, resultados_normalizados, diagnostics)
 
 def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, diccionario_consolidador):
     ahora_utc = datetime.now(timezone.utc)
     if not datos or not isinstance(datos, list): return
-    datos_previos = st.session_state.get('datos_cargados_previos', {})
 
     for partido in datos:
         partido_id = partido['id']
         home, away = partido['home_team'], partido['away_team']
         try:
             fecha_utc = datetime.fromisoformat(partido['commence_time'].replace('Z', '+00:00'))
-        except (ValueError, KeyError):
-            fecha_utc = ahora_utc
+        except (ValueError, KeyError, TypeError):
+            continue
+        if fecha_utc.tzinfo is None:
+            fecha_utc = fecha_utc.replace(tzinfo=timezone.utc)
+        if fecha_utc > ahora_utc + timedelta(hours=limite_horas): continue
+        if fecha_utc < ahora_utc - timedelta(hours=3): continue
 
         es_en_vivo = partido.get('in_play', False)
-        fecha_local = fecha_utc - timedelta(hours=5)
+        fecha_local = fecha_utc.astimezone(ZoneInfo("America/Guayaquil"))
         bookmakers = partido.get('bookmakers', [])
         if not bookmakers: continue
 
         casas_pref = st.session_state.get('casas_preferidas', [])
         if casas_pref:
             bookies_filtrados = [b for b in bookmakers if any(cp.lower() in b['title'].lower() for cp in casas_pref)]
-            if bookies_filtrados: bookmakers = bookies_filtrados
+            bookmakers = bookies_filtrados
 
         cuotas_globales = {}
         for b in bookmakers:
             dict_b_markets = {m['key']: m['outcomes'] for m in b.get('markets', [])}
-            if mercado == "Doble Oportunidad" and "double_chance" in dict_b_markets:
-                for o in dict_b_markets["double_chance"]:
-                    o_name = "1X (Local o Empate)" if o['name'] in ["home_draw", "home or draw", "1X"] else ("X2 (Visitante o Empate)" if o['name'] in ["away_draw", "away or draw", "X2"] else "12 (Local o Visitante)")
-                    cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-            elif mercado == "Ambos Anotan (BTTS)" and "btts" in dict_b_markets:
-                for o in dict_b_markets["btts"]:
-                    o_name = "Sí" if o['name'].lower() in ["yes", "sí", "si"] else "No"
-                    cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-            elif "Total Goles" in mercado and "totals" in dict_b_markets:
-                for o in dict_b_markets["totals"]:
-                    if o.get('point', 2.5) == 2.5:
-                        o_name = "Más de 2.5" if o['name'].lower() in ["over", "más", "mas"] else "Menos de 2.5"
-                        cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
-            elif "1X2" in mercado and "h2h" in dict_b_markets:
-                for o in dict_b_markets["h2h"]:
-                    o_name = "Local" if o['name'] == home else ("Visitante" if o['name'] == away else "Empate")
-                    cuotas_globales.setdefault(o_name, []).append((float(o['price']), b['title']))
+            key = diccionario_mercados.get(mercado)
+            for outcome in dict_b_markets.get(key, []):
+                name = normalize_outcome(key, outcome, home, away)
+                price = valid_odds(outcome.get('price'))
+                if name and price:
+                    cuotas_globales.setdefault(name, []).append((price, b['title']))
 
         max_cuotas, max_bookies, value_bets, variaciones_dict = {}, {}, {}, {}
         cuotas_promedio_dict = {op: sum(t[0] for t in tuplas)/len(tuplas) for op, tuplas in cuotas_globales.items() if tuplas}
@@ -561,7 +410,16 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
             max_bookies[opcion] = bookie_max
             value_bets[opcion] = {"ev": ev, "prob_real": prob_real * 100, "prob_poisson": probs_poisson.get(opcion, prob_real * 100), "es_value": ev > 0.02}
 
-        info_surebet = detectar_surebet(max_cuotas)
+        expected = EXPECTED.get(mercado)
+        # Double-chance selections overlap: inverse-odds sums are not arbitrage.
+        info_surebet = surebet(max_cuotas, expected) if expected else surebet({})
+        if expected and set(max_cuotas) != expected:
+            # Keep incomplete quotes visible but do not assign false value signals.
+            for item in value_bets.values():
+                item.update(ev=0.0, es_value=False, prob_real=0.0)
+        if mercado == "Doble Oportunidad":
+            for opcion, item in value_bets.items():
+                item.update(ev=0.0, es_value=False, prob_real=0.0)
         if max_cuotas:
             if partido_id not in diccionario_consolidador:
                 diccionario_consolidador[partido_id] = {
@@ -578,13 +436,15 @@ def procesar_e_inyectar_mercado(datos, mercado, limite_horas, nombre_liga, dicci
 # 7. SIDEBAR Y PANEL DE RESPALDO EN PANTALLA PRINCIPAL
 # =========================================================
 with st.sidebar:
-    st.markdown("### Configuración")
+    st.markdown('<div class="brand"><span>◈</span> Analizador<div class="brand-sub">TU ESPACIO DEPORTIVO</div></div>',unsafe_allow_html=True)
+    st.markdown("### Filtros de escaneo")
     st.radio("Apariencia:", options=["Oscuro", "Claro"], index=0 if st.session_state.tema_visual == "Oscuro" else 1, key="tema_visual_widget", on_change=lambda: ConfigManager.guardar('tema_visual', st.session_state.tema_visual_widget), horizontal=True)
 
-    st.markdown("""
+    configured_count = sum(bool(key) for key in (API_KEY, AF_API_KEY, ALLSPORTS_KEY, SPORTAPI_KEY))
+    st.markdown(f"""
         <div class="creditos-caja-pro">
-            <small style="color:var(--rg-text-soft);">Motor Multicloud API</small><br>
-            <span style="font-weight:600; font-size:12px;">4 Proveedores Sincronizados</span>
+            <small style="color:var(--rg-text-soft);">Fuentes de datos</small><br>
+            <span style="font-weight:600; font-size:12px;">Credenciales configuradas: {configured_count}/4</span>
         </div>
     """, unsafe_allow_html=True)
 
@@ -600,10 +460,10 @@ with st.sidebar:
         ligas_sels = st.multiselect("Torneos:", options=list(CATALOGO_LIGAS_UNIFICADO.keys()), key="ligas_sels_widget")
 
     with st.expander("Filtros de Mercado", expanded=True):
-        casas_preferidas = st.multiselect("Bookmakers:", ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"], default=st.session_state.casas_preferidas, key="casas_preferidas_widget", on_change=lambda: ConfigManager.guardar('casas_preferidas', st.session_state.casas_preferidas_widget))
+        casas_preferidas = st.multiselect("Casas de apuestas:", ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"], default=[x for x in st.session_state.casas_preferidas if x in ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"]], key="casas_preferidas_widget", on_change=lambda: ConfigManager.guardar('casas_preferidas', st.session_state.casas_preferidas_widget))
         mercados_sels = st.multiselect("Mercados:", list(diccionario_mercados.keys()), default=["1X2 (Resultado Final)"])
-        sin_limite_fecha = st.checkbox("Incluir eventos futuros", value=True)
-        limite_h = 999999 if sin_limite_fecha else 168
+        horizonte = st.selectbox("Horizonte de consulta", ["Próximas 24 horas", "Próximas 72 horas", "Próximos 7 días", "Todos los disponibles"],index=2)
+        limite_h = {"Próximas 24 horas":24,"Próximas 72 horas":72,"Próximos 7 días":168,"Todos los disponibles":999999}[horizonte]
 
     with st.expander("Gestión de Banca"):
         bankroll_total = st.number_input("Banca Total ($):", min_value=10.0, value=float(st.session_state.bankroll_total), step=10.0, key="bankroll_widget", on_change=lambda: ConfigManager.guardar('bankroll_total', st.session_state.bankroll_widget))
@@ -611,138 +471,117 @@ with st.sidebar:
 
     consultar = st.button("Escanear Mercado", type="primary", use_container_width=True)
 
-# =========================================================
-# 8. NAVEGACIÓN Y PANEL DE CONFIGURACIÓN RÁPIDA (MÓVIL)
-# =========================================================
-col_nav_rapida, col_nav_extra = st.columns([2.5, 2])
-with col_nav_rapida:
-    tab_activa_rapida = st.radio("Secciones:", ["Radar", "Verificador", "H2H"], horizontal=True, label_visibility="collapsed")
-with col_nav_extra:
-    opcion_extra = st.selectbox("Más herramientas:", ["-- Más módulos --", "Matriz de Cobertura", "Oportunidades +EV", "Alineaciones & Bajas", "Generador Visual", "Bitácora Financiera", "Soporte"], label_visibility="collapsed")
+# One navigation control and one scan pipeline, shared by all screens.
+VIEWS = ["Dashboard", "Radar Multi-Mercado", "Verificador & Monte Carlo", "Análisis Estadístico H2H",
+         "Matriz de Cobertura", "Oportunidades +EV", "Alineaciones & Bajas", "Generador Visual", "Bitácora Financiera", "Soporte"]
+quick_navigation()
+VIEW_LABELS = {"Dashboard":"Vista general", "Radar Multi-Mercado":"Radar de eventos", "Verificador & Monte Carlo":"Verificar un boleto", "Análisis Estadístico H2H":"Modelo de goles", "Matriz de Cobertura":"Cobertura de mercados", "Oportunidades +EV":"Oportunidades +EV", "Alineaciones & Bajas":"Alineaciones y bajas", "Generador Visual":"Mi boleto", "Bitácora Financiera":"Bitácora financiera", "Soporte":"Ayuda y conexiones"}
+vista_seleccionada = st.selectbox("Ir a sección", VIEWS, key="navigation",format_func=lambda view:VIEW_LABELS[view])
+if st.session_state.get('ultima_consulta'):
+    st.caption("Último escaneo con resultados: " + st.session_state.ultima_consulta + " · Ecuador (UTC−5)")
 
-mapa_vistas = {"Radar": "Radar Multi-Mercado", "Verificador": "Verificador & Monte Carlo", "H2H": "Análisis Estadístico H2H"}
-vista_seleccionada = opcion_extra if opcion_extra != "-- Más módulos --" else mapa_vistas.get(tab_activa_rapida, "Radar Multi-Mercado")
-
-with st.expander("📱 Panel Rápido para Celular (Torneos y Escaneo)", expanded=False):
-    ligas_sels_movil = st.multiselect("Selecciona tus ligas:", options=list(CATALOGO_LIGAS_UNIFICADO.keys()), default=["UEFA Champions League", "Premier League"], key="movil_ligas")
-    mercados_sels_movil = st.multiselect("Selecciona tus mercados:", options=list(diccionario_mercados.keys()), default=["1X2 (Resultado Final)"], key="movil_mercados")
-    if st.button("🚀 Escanear con Panel Móvil", type="primary", use_container_width=True):
-        st.cache_data.clear()
-        consolidador = {}
+if consultar:
+    if not ligas_sels or not mercados_sels:
+        st.warning("Selecciona al menos un torneo y un mercado.")
+    elif not any((API_KEY, AF_API_KEY, ALLSPORTS_KEY, SPORTAPI_KEY)):
+        st.warning("Configura al menos una API en Secrets de Streamlit antes de escanear.")
+    else:
+        consolidador, failed, diagnostics = {}, [], []
         st.session_state.ha_consultado = True
-        with st.status("Escaneando eventos...", expanded=True) as status_consulta:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-                futures = [executor.submit(escanear_liga_worker, liga_nom, CATALOGO_LIGAS_UNIFICADO[liga_nom], mercados_sels_movil, 999999) for liga_nom in ligas_sels_movil]
+        with st.status("Consultando proveedores…", expanded=True) as status_consulta:
+            progress = st.progress(0,text="Preparando consultas…")
+            completed = 0
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {executor.submit(escanear_liga_worker, name, CATALOGO_LIGAS_UNIFICADO[name], mercados_sels, limite_h): name for name in ligas_sels}
                 for future in concurrent.futures.as_completed(futures):
-                    liga_nombre, pares = future.result()
-                    status_consulta.update(label=f"Procesando: {liga_nombre}")
-                    for partido_data, m_sel in pares: procesar_e_inyectar_mercado([partido_data], m_sel, 999999, liga_nombre, consolidador)
-            status_consulta.update(label=f"Escaneo listo: {len(consolidador)} eventos.", state="complete")
-        st.session_state.datos_cargados_previos = st.session_state.datos_cargados
-        st.session_state.datos_cargados = consolidador
-        st.rerun()
+                    try:
+                        name, pairs, notes = future.result()
+                        diagnostics.extend(f"{name} · {note}" for note in notes)
+                        for data, market in pairs:
+                            try:
+                                procesar_e_inyectar_mercado([data], market, limite_h, name, consolidador)
+                            except (TypeError, ValueError, KeyError, AttributeError):
+                                diagnostics.append(f"{name} · Evento con formato inválido omitido")
+                    except Exception:
+                        failed.append(futures[future])
+                    completed += 1
+                    progress.progress(completed / len(futures),text=f"{completed} de {len(futures)} competiciones procesadas")
+            status_consulta.update(label=f"Escaneo terminado · {len(consolidador)} eventos", state="complete")
+        st.session_state.scan_errors = failed
+        st.session_state.api_diagnostics = diagnostics
+        if not consolidador and (failed or diagnostics) and st.session_state.datos_cargados:
+            st.warning("La consulta no devolvió resultados válidos. Se conservan los eventos del escaneo anterior; no corresponden a una actualización nueva.")
+        else:
+            st.session_state.datos_cargados_previos = st.session_state.datos_cargados
+            st.session_state.datos_cargados = consolidador
+            st.session_state.ultima_consulta = datetime.now(ZoneInfo("America/Guayaquil")).strftime("%d/%m/%Y %H:%M")
+            for selection in st.session_state.ticket_persistente.values():
+                market = consolidador.get(selection.get('event_id'), {}).get('mercados', {}).get(selection['mercado'], {})
+                choice = selection['seleccion']
+                selection['stale'] = choice not in market.get('max_cuotas', {})
+                if not selection['stale']:
+                    selection.update(cuota=market['max_cuotas'][choice], casa=market['max_bookies'][choice], prob_real=market['value_bets'][choice]['prob_real'])
+
+if st.session_state.get('api_diagnostics'):
+    with st.expander("Avisos de proveedores"):
+        for note in sorted(set(st.session_state.api_diagnostics)):
+            st.write(note)
+if st.session_state.get('scan_errors'):
+    st.warning("Algunas ligas no pudieron procesarse: " + ", ".join(st.session_state.scan_errors))
+
+if vista_seleccionada == "Dashboard":
+    st.subheader("Vista general")
+    dashboard(st.session_state.datos_cargados)
+    if st.session_state.datos_cargados:
+        st.subheader("Comparador de mercado")
+        opportunity_table(st.session_state.datos_cargados)
 
 # ---------------------------------------------------------
 # VISTA 1: RADAR
 # ---------------------------------------------------------
-if vista_seleccionada == "Radar Multi-Mercado":
-    st.title("Radar de Apuestas")
-    st.caption("Consolidación en tiempo real")
-
-    if consultar:
-        if len(ligas_sels) > 0 and len(mercados_sels) > 0:
-            st.cache_data.clear()
-            consolidador = {}
-            st.session_state.ha_consultado = True
-            with st.status("Escaneando eventos...", expanded=True) as status_consulta:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-                    futures = [executor.submit(escanear_liga_worker, liga_nom, CATALOGO_LIGAS_UNIFICADO[liga_nom], mercados_sels, limite_h) for liga_nom in ligas_sels]
-                    for future in concurrent.futures.as_completed(futures):
-                        liga_nombre, pares = future.result()
-                        status_consulta.update(label=f"Procesando: {liga_nombre}")
-                        for partido_data, m_sel in pares: procesar_e_inyectar_mercado([partido_data], m_sel, limite_h, liga_nombre, consolidador)
-                status_consulta.update(label=f"Escaneo listo: {len(consolidador)} eventos.", state="complete")
-            st.session_state.datos_cargados_previos = st.session_state.datos_cargados
-            st.session_state.datos_cargados = consolidador
-            st.rerun()
-
-    dict_partidos = st.session_state.datos_cargados
-    if dict_partidos:
-        texto_ai = generar_resumen_ejecutivo_ai(dict_partidos)
-        if texto_ai: st.markdown(f"<div class='ai-summary-box'>{texto_ai}</div>", unsafe_allow_html=True)
-
-    if not st.session_state.ha_consultado:
-        st.markdown("""
-            <div class="empty-state-card">
-                <h4 style="margin-bottom:6px; font-size:15px;">Panel Preparado</h4>
-                <p style="color:var(--rg-text-soft); font-size:12px; margin:0;">Selecciona torneos en el menú lateral o en el <b>Panel Rápido para Celular</b> y presiona escanear.</p>
-            </div>
-        """, unsafe_allow_html=True)
-    elif not dict_partidos:
-        st.info("No se encontraron partidos con los filtros aplicados.")
+elif vista_seleccionada == "Radar Multi-Mercado":
+    st.title("Radar de eventos")
+    st.caption("Encuentra un partido, compara sus mercados y añade selecciones a tu boleto.")
+    events = st.session_state.datos_cargados
+    if not events:
+        st.info("El Radar está listo. Elige tus competiciones en el menú lateral y pulsa Escanear Mercado.")
+        render_ticket(BitacoraManager.guardar)
     else:
-        col_izq, col_der = st.columns([6, 4])
-        with col_izq:
-            st.subheader(f"Eventos ({len(dict_partidos)})")
-            ligas_con_datos = list(set([p['liga_origen'] for p in dict_partidos.values()]))
-            if ligas_con_datos:
-                pestanas_ligas = st.tabs(ligas_con_datos)
-                for p_idx, liga_p in enumerate(ligas_con_datos):
-                    with pestanas_ligas[p_idx]:
-                        for part in [p for p in dict_partidos.values() if p['liga_origen'] == liga_p]:
-                            with st.container(border=True):
-                                st.markdown(f"<span class='liga-chip'>{part['liga_origen']}</span><span class='kickoff-chip'>{part['fecha_str']}</span>", unsafe_allow_html=True)
-                                st.markdown(f"<div class='match-header'>{part['local']} vs {part['visitante']}</div>", unsafe_allow_html=True)
-                                sub_tabs = st.tabs(list(part['mercados'].keys()))
-                                for m_idx, text_m in enumerate(part['mercados'].keys()):
-                                    with sub_tabs[m_idx]:
-                                        m_info = part['mercados'][text_m]
-                                        todas_opciones = list(m_info['max_cuotas'].keys())
-                                        if "1X2" in text_m:
-                                            todas_opciones = [op for op in ["Local", "Empate", "Visitante"] if op in m_info['max_cuotas']]
-                                        sub_cols = st.columns(len(todas_opciones))
-                                        for idx, opcion in enumerate(todas_opciones):
-                                            cuota_m = m_info['max_cuotas'][opcion]
-                                            with sub_cols[idx]:
-                                                val = m_info['value_bets'][opcion]
-                                                lbl_val = " 🔥" if val['es_value'] else ""
-                                                clave_base = f"ap_{part['id']}_{text_m}_{opcion}"
-                                                st.checkbox(f"{opcion} ({cuota_m}){lbl_val}", value=clave_base in st.session_state.ticket_persistente, key=clave_base, on_change=toggle_apuesta, args=(part, text_m, opcion, cuota_m, m_info['max_bookies'][opcion], val['prob_real'], clave_base))
-                                                st.caption(f"{m_info['max_bookies'][opcion]} | Impl: {round(val['prob_real'],1)}%")
-
-        with col_der:
-            @st.fragment
-            def render_boleto_fragment():
-                st.subheader("Boleto")
-                apuestas_seleccionadas = list(st.session_state.ticket_persistente.values())
-                if apuestas_seleccionadas:
-                    cuota_acum, prob_comb = 1.0, 1.0
+        left,right = st.columns([2.1,1],gap="large")
+        with left:
+            search = st.text_input("Buscar equipo",placeholder="Ej.: Arsenal, Barcelona…",key="radar_search")
+            a,b = st.columns(2)
+            league = a.selectbox("Competición",["Todas",*sorted({p['liga_origen'] for p in events.values()})],key="radar_league")
+            order = b.selectbox("Ordenar por",["Más próximos","Mayor valor"],key="radar_order")
+            only_value = st.checkbox("Mostrar solo eventos con +EV",key="radar_value")
+            filtered = filter_events(events,search,league,order,only_value)
+            st.caption(f"{len(filtered)} de {len(events)} eventos · Mostrando hasta 12 por página")
+            if not filtered:
+                st.info("No hay coincidencias. Prueba otro equipo, competición o desactiva el filtro +EV.")
+            else:
+                page = st.selectbox("Página",range(1,(len(filtered)+11)//12+1),key="radar_page")
+                for part in filtered[(page-1)*12:page*12]:
                     with st.container(border=True):
-                        st.markdown("<div class='ticket-titulo'>Combinado Seleccionado</div>", unsafe_allow_html=True)
-                        for ap in apuestas_seleccionadas:
-                            cuota_acum *= float(ap['cuota'])
-                            prob_comb *= (float(ap['prob_real']) / 100.0)
-                            st.markdown(f"<div class='ticket-item'><b>{ap['evento']}</b><br>➔ {ap['seleccion']} | <span class='ticket-cuota-tag'>@{ap['cuota']}</span></div>", unsafe_allow_html=True)
-
-                        monto_ticket = st.number_input("Inversión ($):", min_value=1.0, value=10.0, step=1.0)
-                        ganancia_neta = (cuota_acum * monto_ticket) - monto_ticket
-                        sharpe = calcular_sharpe_parlay(cuota_acum, prob_comb)
-
-                        st.metric("Cuota Total", f"@{round(cuota_acum, 2)}")
-                        st.metric("Retorno Potencial", f"${round(ganancia_neta, 2)}")
-                        st.metric("Sharpe", f"{round(sharpe, 3)}")
-
-                        if st.button("Guardar Historial", type="primary", use_container_width=True):
-                            st.session_state.historial_apuestas.append({
-                                "Fecha": datetime.now().strftime("%d/%m/%Y %H:%M"), "Detalles": f"{len(apuestas_seleccionadas)} selecciones",
-                                "Liga": apuestas_seleccionadas[0]['liga'], "Market": "Combinada", "Cuota": cuota_acum,
-                                "Inversión": monto_ticket, "Estado": "Pendiente", "Ganancia Potencial": ganancia_neta
-                            })
-                            BitacoraManager.guardar(st.session_state.historial_apuestas)
-                            st.toast("Guardado con éxito")
-                else:
-                    st.info("Selecciona casillas en los partidos.")
-            render_boleto_fragment()
+                        st.markdown(f"<span class='liga-chip'>{escape(part['liga_origen'])}</span><span class='kickoff-chip'>{escape(part['fecha_str'])}</span>",unsafe_allow_html=True)
+                        initials = lambda team: escape(''.join(word[0] for word in team.split()[:2]).upper())
+                        st.markdown(f"<div class='match-header'><span class='team-mark'>{initials(part['local'])}</span>{escape(part['local'])}<span class='versus'>vs</span>{escape(part['visitante'])}<span class='team-mark'>{initials(part['visitante'])}</span></div>",unsafe_allow_html=True)
+                        market_name = st.selectbox("Mercado",list(part['mercados']),key="market_"+part['id'])
+                        market = part['mercados'][market_name]
+                        choices = list(market['max_cuotas'])
+                        if "1X2" in market_name:
+                            choices = [choice for choice in ['Local','Empate','Visitante'] if choice in choices]
+                        for column,choice in zip(st.columns(len(choices)),choices):
+                            with column:
+                                quote = market['max_cuotas'][choice]
+                                value = market['value_bets'][choice]
+                                key = f"ap_{part['id']}_{market_name}_{choice}"
+                                st.checkbox(f"{choice} ({quote:g})",value=key in st.session_state.ticket_persistente,key=key,
+                                    on_change=toggle_apuesta,args=(part,market_name,choice,quote,market['max_bookies'][choice],value['prob_real'],key))
+                                st.caption(market['max_bookies'][choice])
+                                if value['es_value']: st.caption(f"+EV · {value['ev']*100:.1f}% estimado")
+                                st.caption(f"Consenso {value['prob_real']:.1f}%" if value['prob_real'] else "Consenso no disponible")
+        with right:
+            render_ticket(BitacoraManager.guardar)
 
 # ---------------------------------------------------------
 # VISTA 2: VERIFICADOR
@@ -751,25 +590,39 @@ elif vista_seleccionada == "Verificador & Monte Carlo":
     st.title("Verificador de Boletos")
     st.caption("Análisis cuantitativo de viabilidad, Kelly & Monte Carlo")
 
+    st.caption("Las probabilidades del verificador son una aproximación a partir de las cuotas (ajuste del 5 %). La combinada supone eventos independientes.")
     tab_foto, tab_texto = st.tabs(["📷 Foto", "📝 Texto"])
     texto_para_analizar = ""
 
     with tab_foto:
-        if st.file_uploader("Sube captura del boleto:", type=["jpg", "jpeg", "png"]):
-            texto_para_analizar = "Real Madrid 1.50\nArsenal 1.80\nBayern 1.40"
+        uploaded = st.file_uploader("Sube captura del boleto:", type=["jpg", "jpeg", "png"])
+        if uploaded and st.button("Extraer texto de la imagen"):
+            try:
+                from PIL import Image
+                import pytesseract
+                image = Image.open(uploaded)
+                if image.width * image.height > 16000000:
+                    st.error("La imagen supera el límite de 16 megapíxeles.")
+                else:
+                    available = pytesseract.get_languages(config='')
+                    languages = '+'.join(lang for lang in ('spa','eng') if lang in available)
+                    if not languages:
+                        st.error("Instala el idioma español o inglés de Tesseract para leer el boleto.")
+                    else:
+                        st.session_state.ocr_text = pytesseract.image_to_string(image, lang=languages, timeout=15)
+            except Exception:
+                st.error("No se pudo leer la imagen. Revisa que Tesseract esté instalado o pega el texto manualmente.")
+        texto_ocr = st.text_area("Texto extraído (revisa y corrige las cuotas)", value=st.session_state.get('ocr_text', ''))
+        if st.session_state.get('ocr_text') and not texto_ocr:
+            st.info("Vuelve a abrir esta sección para revisar el texto extraído.")
     with tab_texto:
-        texto_manual = st.text_area("Pega tus selecciones:", value="Real Madrid 1.50\nArsenal 1.80\nBayern 1.40", height=120)
-        if texto_manual: texto_para_analizar = texto_manual
-
+        texto_manual = st.text_area("Pega tus selecciones (equipo y cuota por línea):", placeholder="Real Madrid 1.50", height=120)
+    source = st.radio("Analizar desde", ["Texto manual", "Foto revisada"], horizontal=True)
+    texto_para_analizar = texto_manual if source == "Texto manual" else texto_ocr
     if texto_para_analizar:
-        partidos_ext = []
-        for linea in texto_para_analizar.strip().split('\n'):
-            if not linea.strip(): continue
-            cuotas = re.findall(r'\b\d+\.\d+\b', linea.replace(',', '.'))
-            if cuotas:
-                c_val = float(cuotas[-1])
-                partidos_ext.append({"nombre": "Selección", "cuota": c_val, "prob_real": (1.0 / c_val) * 95.0})
-
+        partidos_ext = parse_ticket(texto_para_analizar)
+        if not partidos_ext:
+            st.info("No se reconocen selecciones válidas. Usa un nombre seguido de una cuota decimal mayor que 1.")
         if partidos_ext:
             cuota_acum, prob_comb = 1.0, 1.0
             for p in partidos_ext:
@@ -789,7 +642,7 @@ elif vista_seleccionada == "Verificador & Monte Carlo":
 
             st.markdown("### 🧮 Criterio de Kelly & Riesgo")
             k1, k2 = st.columns(2)
-            k1.metric("Stake Sugerido", f"${round((kelly_pct * 0.25) * 200.0, 2)}")
+            k1.metric("Stake Sugerido", f"${round((kelly_pct * 0.25) * bankroll_total, 2)}")
             k2.metric("Sharpe Ratio", f"{round(sharpe, 2)}")
 
             res_mc = ejecutar_simulacion_montecarlo(partidos_ext)
@@ -814,7 +667,7 @@ elif vista_seleccionada == "Verificador & Monte Carlo":
 # VISTA 3: H2H
 # ---------------------------------------------------------
 elif vista_seleccionada == "Análisis Estadístico H2H":
-    st.title("Modelo de Poisson")
+    st.title("Modelo de goles")
     l_loc = st.slider("Goles Local (λ):", 0.5, 3.5, 1.45, 0.05)
     l_vis = st.slider("Goles Visitante (λ):", 0.5, 3.5, 1.10, 0.05)
     res_p = calcular_modelo_poisson(l_loc, l_vis)
@@ -822,10 +675,53 @@ elif vista_seleccionada == "Análisis Estadístico H2H":
     c1.metric("Local", f"{round(res_p['Local'], 1)}%")
     c2.metric("Empate", f"{round(res_p['Empate'], 1)}%")
     c3.metric("Visitante", f"{round(res_p['Visitante'], 1)}%")
+    st.caption("Escenario Poisson con medias introducidas manualmente; no consulta enfrentamientos históricos.")
+    frame = pd.DataFrame({'Resultado':['Local','Empate','Visitante'], 'Probabilidad':[res_p[k] for k in ['Local','Empate','Visitante']]})
+    themed_chart(px.bar(frame, x='Resultado', y='Probabilidad', color='Resultado', title='Probabilidades del escenario',color_discrete_sequence=['#21cfa4','#f3bc62','#63a9f5']),key='poisson_chart')
+
 
 elif vista_seleccionada == "Bitácora Financiera":
-    st.title("Historial")
-    if st.session_state.historial_apuestas: st.dataframe(pd.DataFrame(st.session_state.historial_apuestas), use_container_width=True)
-else:
-    st.title(vista_seleccionada)
-    st.info("Módulo activo y configurado correctamente para dispositivos móviles y PC.")
+    render_finance(BitacoraManager.guardar)
+
+elif vista_seleccionada == "Oportunidades +EV":
+    st.title("Oportunidades +EV")
+    st.caption("Diferencia frente al consenso de cuotas. No representa rentabilidad garantizada.")
+    opportunity_table(st.session_state.datos_cargados, positive_only=True)
+
+elif vista_seleccionada == "Matriz de Cobertura":
+    st.title("Matriz de cobertura")
+    st.caption("Mercados con cuotas disponibles por torneo en el último escaneo.")
+    coverage = [{'Liga':p['liga_origen'], 'Mercado':m} for p in st.session_state.datos_cargados.values() for m in p['mercados']]
+    if coverage:
+        frame = pd.crosstab(pd.DataFrame(coverage).Liga, pd.DataFrame(coverage).Mercado)
+        st.dataframe(frame, use_container_width=True)
+        themed_chart(px.imshow(frame,text_auto=True,color_continuous_scale='Teal',aspect='auto',title='Eventos por mercado y competición'),key='coverage_matrix')
+    else: st.info("Escanea torneos para conocer la cobertura real.")
+
+elif vista_seleccionada == "Generador Visual":
+    st.title("Mi boleto")
+    render_ticket(BitacoraManager.guardar)
+    ticket = list(st.session_state.ticket_persistente.values())
+    if ticket:
+        frame = pd.DataFrame(ticket)[['evento','mercado','seleccion','cuota','casa']]
+        st.dataframe(frame, hide_index=True, use_container_width=True)
+        st.download_button("Descargar boleto CSV", frame.to_csv(index=False), "boleto.csv", "text/csv")
+        if st.button("Enviar resumen a Telegram"):
+            message = "Boleto Analizador\n" + "\n".join(f"{p['evento']}: {p['seleccion']} @ {p['cuota']}" for p in ticket)
+            if enviar_telegram(message): st.success("Resumen enviado.")
+            else: st.error("No se pudo enviar. Comprueba TG_TOKEN y TG_CHAT_ID en Secrets.")
+    else: st.info("Añade selecciones desde el Radar para crear un resumen.")
+
+elif vista_seleccionada == "Alineaciones & Bajas":
+    st.title("Alineaciones y bajas")
+    render_football_details(CATALOGO_LIGAS_UNIFICADO, AF_API_KEY)
+
+elif vista_seleccionada == "Soporte":
+    st.title("Centro de ayuda")
+    st.markdown("1. Abre **Filtros de escaneo** en el menú lateral (☰ en celular).\n2. Elige torneos, mercados y casas; pulsa **Escanear Mercado**.\n3. Explora el Dashboard y añade selecciones desde Radar.\n4. Exporta la Bitácora para conservar tus registros.")
+    st.subheader("Estado de configuración")
+    st.dataframe(pd.DataFrame([{'Proveedor':name, 'Estado':'Clave configurada' if key else 'Sin clave'} for name,key in [('The Odds API',API_KEY),('API-Football',AF_API_KEY),('AllSports',ALLSPORTS_KEY),('SportAPI',SPORTAPI_KEY)]]), hide_index=True, use_container_width=True)
+    st.caption("Una clave configurada no confirma conectividad, suscripción ni disponibilidad de cuotas. Las fuentes pueden devolver datos vacíos. API-Football consulta hasta tres páginas por liga para limitar consumo.")
+
+st.divider()
+st.caption("Analizador · Datos para comparar, contexto para decidir. Exporta tu bitácora para conservarla fuera de esta sesión.")
