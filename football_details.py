@@ -49,8 +49,8 @@ def render(catalog, api_key):
         for team in result['lineups']:
             st.write(team.get('team',{}).get('name','Equipo'), '·', team.get('formation') or 'Sin formación')
             players = [{'Jugador':p.get('player',{}).get('name'), 'Dorsal':p.get('player',{}).get('number'), 'Posición':p.get('player',{}).get('pos')} for p in team.get('startXI',[])]
-            st.dataframe(pd.DataFrame(players), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(players), hide_index=True, width="stretch")
         st.subheader('Bajas reportadas')
         if not result['injuries']: st.info('Sin registros de bajas en la respuesta; no confirma disponibilidad de todos los jugadores.')
         else:
-            st.dataframe(pd.DataFrame([{'Equipo':i.get('team',{}).get('name'), 'Jugador':i.get('player',{}).get('name'), 'Tipo':i.get('player',{}).get('type'), 'Motivo':i.get('player',{}).get('reason')} for i in result['injuries']]), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame([{'Equipo':i.get('team',{}).get('name'), 'Jugador':i.get('player',{}).get('name'), 'Tipo':i.get('player',{}).get('type'), 'Motivo':i.get('player',{}).get('reason')} for i in result['injuries']]), hide_index=True, width="stretch")

@@ -28,8 +28,8 @@ def render_ticket(save_history):
         st.caption(f'{len(selected)} SELECCIONES · CUOTAS DEL ÚLTIMO ESCANEO')
         for key,selection in list(st.session_state.ticket_persistente.items()):
             st.markdown(f"<div class='ticket-item'><b>{escape(selection['evento'])}</b><br><span class='ticket-cuota-tag'>{escape(selection['seleccion'])} · @{selection['cuota']:g}</span><br><small>{escape(selection['casa'])}</small></div>",unsafe_allow_html=True)
-            st.button('Quitar selección',key='remove_'+key,on_click=remove_selection,args=(key,),use_container_width=True)
-        st.button('Vaciar boleto',on_click=clear_ticket,use_container_width=True)
+            st.button('Quitar selección',key='remove_'+key,on_click=remove_selection,args=(key,),width="stretch")
+        st.button('Vaciar boleto',on_click=clear_ticket,width="stretch")
         stake = st.number_input('Inversión ($):',min_value=1.,value=float(st.session_state.get('monto_inversion_base',10.)),step=1.,key='ticket_stake')
         try: totals = ticket_totals(selected,stake)
         except ValueError as error:
@@ -56,7 +56,7 @@ def render_ticket(save_history):
         stale = any(s.get('stale') for s in selected)
         if stale: st.warning('Hay selecciones sin cuota en el último escaneo. Quítalas o vuelve a consultar antes de guardar.')
         saved = any(r.get('Ticket ID') == fingerprint for r in st.session_state.historial_apuestas)
-        if st.button('Guardar Historial',type='primary',use_container_width=True,disabled=saved or stale):
+        if st.button('Guardar Historial',type='primary',width="stretch",disabled=saved or stale):
             st.session_state.historial_apuestas.append({
                 'Ticket ID':fingerprint,'Fecha':datetime.now(ZoneInfo('America/Guayaquil')).strftime('%d/%m/%Y %H:%M'),
                 'Detalles':' | '.join(f"{p['evento']}: {p['seleccion']}" for p in selected),
@@ -67,4 +67,4 @@ def render_ticket(save_history):
             st.success('Boleto guardado en tu bitácora.')
             st.rerun()
         if saved: st.caption('Este boleto ya está guardado. Cambia la selección o el importe para registrar otro.')
-        st.download_button('Descargar boleto JSON',json.dumps(selected,ensure_ascii=False,indent=2),'boleto.json','application/json',use_container_width=True)
+        st.download_button('Descargar boleto JSON',json.dumps(selected,ensure_ascii=False,indent=2),'boleto.json','application/json',width="stretch")

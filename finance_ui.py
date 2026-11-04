@@ -21,7 +21,7 @@ def render_finance(save_history):
         table = pd.DataFrame(history).drop(columns=['Selecciones','Ticket ID'],errors='ignore')
         with st.expander('Actualizar resultados',expanded=False):
             st.caption('Cambia Estado y pulsa Guardar resultados. Las ganancias se calculan con la cuota e inversión registradas.')
-            edited = st.data_editor(table,hide_index=True,use_container_width=True,
+            edited = st.data_editor(table,hide_index=True,width="stretch",
                 disabled=[col for col in table.columns if col != 'Estado'],
                 column_config={'Estado':st.column_config.SelectboxColumn(options=STATES,required=True)},key='ledger_editor')
             if st.button('Guardar resultados',type='primary'):
@@ -30,7 +30,7 @@ def render_finance(save_history):
                 save_history(history); st.success('Resultados actualizados.'); st.rerun()
         state = st.selectbox('Mostrar boletos',['Todos',*STATES],key='ledger_filter')
         shown = table if state == 'Todos' else table[table.Estado==state]
-        st.dataframe(shown,hide_index=True,use_container_width=True)
+        st.dataframe(shown,hide_index=True,width="stretch")
         settled = [r for r in history if r['Estado'] in ('Ganada','Perdida')]
         if settled:
             curve = pd.DataFrame([{'Boleto':i+1,'Beneficio neto':settled_profit(r)} for i,r in enumerate(settled)])
@@ -38,8 +38,8 @@ def render_finance(save_history):
             fig = px.line(curve,x='Boleto',y='Balance acumulado',markers=True,title='Evolución del balance registrado',color_discrete_sequence=['#21cfa4'])
             themed_chart(fig,key='ledger_curve')
         a,b = st.columns(2)
-        a.download_button('Exportar historial JSON',json.dumps(history,ensure_ascii=False,indent=2),'bitacora_backup.json','application/json',use_container_width=True)
-        b.download_button('Descargar CSV',table.to_csv(index=False).encode('utf-8-sig'),'historial.csv','text/csv',use_container_width=True)
+        a.download_button('Exportar historial JSON',json.dumps(history,ensure_ascii=False,indent=2),'bitacora_backup.json','application/json',width="stretch")
+        b.download_button('Descargar CSV',table.to_csv(index=False).encode('utf-8-sig'),'historial.csv','text/csv',width="stretch")
     else:
         st.info('Aún no tienes boletos guardados. Crea uno en Radar y pulsa Guardar Historial.')
     with st.expander('Restaurar un respaldo'):
