@@ -69,7 +69,7 @@ def header():
 def quick_navigation():
     with st.container(key='quicknav'):
         for col,label,view in zip(st.columns(3),['Resumen','Radar','Mi boleto'],['Dashboard','Radar Multi-Mercado','Generador Visual']):
-            col.button(label,on_click=go_to,args=(view,),use_container_width=True,key='quick_'+view)
+            col.button(label,on_click=go_to,args=(view,),width="stretch",key='quick_'+view)
 
 
 def themed_chart(fig, key=None):
@@ -81,7 +81,7 @@ def themed_chart(fig, key=None):
                       hoverlabel=dict(font_size=13),legend=dict(orientation='h',y=-.2))
     fig.update_xaxes(gridcolor='#dce5ef' if light else '#233650',zeroline=False)
     fig.update_yaxes(gridcolor='#dce5ef' if light else '#233650',zeroline=False)
-    st.plotly_chart(fig,use_container_width=True,key=key,config={'displaylogo':False,'scrollZoom':False,'modeBarButtonsToRemove':['lasso2d','select2d']})
+    st.plotly_chart(fig,width="stretch",key=key,config={'displaylogo':False,'scrollZoom':False,'modeBarButtonsToRemove':['lasso2d','select2d']})
 
 
 def rows_for(events):
@@ -114,7 +114,7 @@ def dashboard(events):
     for i,event in enumerate(upcoming):
         with cols[i%2]:
             st.markdown(f"<div class='event-preview'><span class='liga-chip'>{escape(event['liga_origen'])}</span><b>{escape(event['local'])} <span class='versus'>vs</span> {escape(event['visitante'])}</b><small>{escape(event['fecha_str'])} · {len(event['mercados'])} mercados disponibles</small></div>",unsafe_allow_html=True)
-    st.button('Explorar todos los eventos',on_click=go_to,args=('Radar Multi-Mercado',),use_container_width=True)
+    st.button('Explorar todos los eventos',on_click=go_to,args=('Radar Multi-Mercado',),width="stretch")
     frame = pd.DataFrame(rows)
     left,right = st.columns([3,2])
     with left:
@@ -140,7 +140,7 @@ def opportunity_table(events,positive_only=False):
         st.info('No hay selecciones que coincidan con estos filtros.');return
     frame = frame.sort_values('EV',ascending=False)
     st.caption(f'{len(frame)} selecciones · Ordenadas por valor estimado')
-    st.dataframe(frame,hide_index=True,use_container_width=True,
+    st.dataframe(frame,hide_index=True,width="stretch",
                  column_config={'Cuota':st.column_config.NumberColumn(format='%.2f'),'EV':st.column_config.NumberColumn('EV (%)',format='%.2f'),
                                 'Probabilidad':st.column_config.ProgressColumn('Consenso (%)',min_value=0,max_value=100,format='%.1f%%')})
     st.download_button('Descargar comparación CSV',frame.to_csv(index=False).encode('utf-8-sig'),'comparacion.csv','text/csv',key=prefix+'_csv')

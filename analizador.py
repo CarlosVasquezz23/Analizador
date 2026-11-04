@@ -451,10 +451,10 @@ with st.sidebar:
     with st.expander("Seleccionar Torneos", expanded=True):
         if 'ligas_sels_widget' not in st.session_state: st.session_state.ligas_sels_widget = ["UEFA Champions League", "Premier League"]
         c1, c2 = st.columns(2)
-        if c1.button("Todas", use_container_width=True):
+        if c1.button("Todas", width="stretch"):
             st.session_state.ligas_sels_widget = list(CATALOGO_LIGAS_UNIFICADO.keys())
             st.rerun()
-        if c2.button("Limpiar", use_container_width=True):
+        if c2.button("Limpiar", width="stretch"):
             st.session_state.ligas_sels_widget = []
             st.rerun()
         ligas_sels = st.multiselect("Torneos:", options=list(CATALOGO_LIGAS_UNIFICADO.keys()), key="ligas_sels_widget")
@@ -469,7 +469,7 @@ with st.sidebar:
         bankroll_total = st.number_input("Banca Total ($):", min_value=10.0, value=float(st.session_state.bankroll_total), step=10.0, key="bankroll_widget", on_change=lambda: ConfigManager.guardar('bankroll_total', st.session_state.bankroll_widget))
         monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0, key="monto_inversion_base")
 
-    consultar = st.button("Escanear Mercado", type="primary", use_container_width=True)
+    consultar = st.button("Escanear Mercado", type="primary", width="stretch")
 
 # One navigation control and one scan pipeline, shared by all screens.
 VIEWS = ["Dashboard", "Radar Multi-Mercado", "Verificador & Monte Carlo", "Análisis Estadístico H2H",
@@ -694,7 +694,7 @@ elif vista_seleccionada == "Matriz de Cobertura":
     coverage = [{'Liga':p['liga_origen'], 'Mercado':m} for p in st.session_state.datos_cargados.values() for m in p['mercados']]
     if coverage:
         frame = pd.crosstab(pd.DataFrame(coverage).Liga, pd.DataFrame(coverage).Mercado)
-        st.dataframe(frame, use_container_width=True)
+        st.dataframe(frame, width="stretch")
         themed_chart(px.imshow(frame,text_auto=True,color_continuous_scale='Teal',aspect='auto',title='Eventos por mercado y competición'),key='coverage_matrix')
     else: st.info("Escanea torneos para conocer la cobertura real.")
 
@@ -704,7 +704,7 @@ elif vista_seleccionada == "Generador Visual":
     ticket = list(st.session_state.ticket_persistente.values())
     if ticket:
         frame = pd.DataFrame(ticket)[['evento','mercado','seleccion','cuota','casa']]
-        st.dataframe(frame, hide_index=True, use_container_width=True)
+        st.dataframe(frame, hide_index=True, width="stretch")
         st.download_button("Descargar boleto CSV", frame.to_csv(index=False), "boleto.csv", "text/csv")
         if st.button("Enviar resumen a Telegram"):
             message = "Boleto Analizador\n" + "\n".join(f"{p['evento']}: {p['seleccion']} @ {p['cuota']}" for p in ticket)
@@ -720,7 +720,7 @@ elif vista_seleccionada == "Soporte":
     st.title("Centro de ayuda")
     st.markdown("1. Abre **Filtros de escaneo** en el menú lateral (☰ en celular).\n2. Elige torneos, mercados y casas; pulsa **Escanear Mercado**.\n3. Explora el Dashboard y añade selecciones desde Radar.\n4. Exporta la Bitácora para conservar tus registros.")
     st.subheader("Estado de configuración")
-    st.dataframe(pd.DataFrame([{'Proveedor':name, 'Estado':'Clave configurada' if key else 'Sin clave'} for name,key in [('The Odds API',API_KEY),('API-Football',AF_API_KEY),('AllSports',ALLSPORTS_KEY),('SportAPI',SPORTAPI_KEY)]]), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame([{'Proveedor':name, 'Estado':'Clave configurada' if key else 'Sin clave'} for name,key in [('The Odds API',API_KEY),('API-Football',AF_API_KEY),('AllSports',ALLSPORTS_KEY),('SportAPI',SPORTAPI_KEY)]]), hide_index=True, width="stretch")
     st.caption("Una clave configurada no confirma conectividad, suscripción ni disponibilidad de cuotas. Las fuentes pueden devolver datos vacíos. API-Football consulta hasta tres páginas por liga para limitar consumo.")
 
 st.divider()
