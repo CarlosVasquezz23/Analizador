@@ -19,6 +19,7 @@ from api_client import get_json
 from pro_ui import apply_theme, header, dashboard, opportunity_table, quick_navigation, themed_chart
 from workspace_logic import filter_events
 from ticket_ui import render_ticket
+from verifier_ui import render_verifier
 from finance_ui import render_finance
 from football_details import render as render_football_details
 
@@ -37,7 +38,7 @@ st.set_page_config(
     page_title="Analizador | Sports Workspace",
     page_icon="⚽",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 DB_FILE = "bitacora_backup.json"
@@ -202,7 +203,6 @@ def toggle_apuesta(partido_obj, mercado_nombre, opcion_nombre, cuota_val, casa_v
         st.session_state.ticket_persistente.pop(clave_k, None)
 
 apply_theme(st.session_state.tema_visual == "Claro")
-header()
 
 # =========================================================
 # 5. MAPEO DE LIGAS
@@ -448,7 +448,7 @@ with st.sidebar:
         </div>
     """, unsafe_allow_html=True)
 
-    with st.expander("Seleccionar Torneos", expanded=True):
+    with st.expander("Competiciones", expanded=True):
         if 'ligas_sels_widget' not in st.session_state: st.session_state.ligas_sels_widget = ["UEFA Champions League", "Premier League"]
         c1, c2 = st.columns(2)
         if c1.button("Todas", width="stretch"):
@@ -459,7 +459,7 @@ with st.sidebar:
             st.rerun()
         ligas_sels = st.multiselect("Torneos:", options=list(CATALOGO_LIGAS_UNIFICADO.keys()), key="ligas_sels_widget")
 
-    with st.expander("Filtros de Mercado", expanded=True):
+    with st.expander("Mercados y casas"):
         casas_preferidas = st.multiselect("Casas de apuestas:", ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"], default=[x for x in st.session_state.casas_preferidas if x in ["Betano", "Bet365", "Ecuabet", "1xBet", "Pinnacle", "Bwin", "Unibet", "William Hill"]], key="casas_preferidas_widget", on_change=lambda: ConfigManager.guardar('casas_preferidas', st.session_state.casas_preferidas_widget))
         mercados_sels = st.multiselect("Mercados:", list(diccionario_mercados.keys()), default=["1X2 (Resultado Final)"])
         horizonte = st.selectbox("Horizonte de consulta", ["Próximas 24 horas", "Próximas 72 horas", "Próximos 7 días", "Todos los disponibles"],index=2)
@@ -469,18 +469,26 @@ with st.sidebar:
         bankroll_total = st.number_input("Banca Total ($):", min_value=10.0, value=float(st.session_state.bankroll_total), step=10.0, key="bankroll_widget", on_change=lambda: ConfigManager.guardar('bankroll_total', st.session_state.bankroll_widget))
         monto_inversion = st.number_input("Inversión Base ($):", min_value=1.0, value=10.0, step=1.0, key="monto_inversion_base")
 
-    consultar = st.button("Escanear Mercado", type="primary", width="stretch")
+    consultar_desde_sidebar = st.button("Escanear mercado", type="primary", width="stretch",
+                                       on_click=lambda: st.session_state.update(navigation="Dashboard"))
 
 # One navigation control and one scan pipeline, shared by all screens.
-VIEWS = ["Dashboard", "Radar Multi-Mercado", "Verificador & Monte Carlo", "Análisis Estadístico H2H",
+VIEWS = ["Verificador & Monte Carlo", "Dashboard", "Radar Multi-Mercado", "Análisis Estadístico H2H",
          "Matriz de Cobertura", "Oportunidades +EV", "Alineaciones & Bajas", "Generador Visual", "Bitácora Financiera", "Soporte"]
+st.session_state.setdefault("navigation", VIEWS[0])
 quick_navigation()
 VIEW_LABELS = {"Dashboard":"Vista general", "Radar Multi-Mercado":"Radar de eventos", "Verificador & Monte Carlo":"Verificar un boleto", "Análisis Estadístico H2H":"Modelo de goles", "Matriz de Cobertura":"Cobertura de mercados", "Oportunidades +EV":"Oportunidades +EV", "Alineaciones & Bajas":"Alineaciones y bajas", "Generador Visual":"Mi boleto", "Bitácora Financiera":"Bitácora financiera", "Soporte":"Ayuda y conexiones"}
 vista_seleccionada = st.selectbox("Ir a sección", VIEWS, key="navigation",format_func=lambda view:VIEW_LABELS[view])
-if st.session_state.get('ultima_consulta'):
+if vista_seleccionada == "Dashboard":
+    header()
+    st.caption("Ajusta las competiciones y los mercados en la barra lateral.")
+    consultar_desde_resumen = st.button("Escanear mercado", type="primary", key="scan_from_dashboard")
+else:
+    consultar_desde_resumen = False
+if vista_seleccionada in {"Dashboard", "Radar Multi-Mercado", "Matriz de Cobertura", "Oportunidades +EV"} and st.session_state.get('ultima_consulta'):
     st.caption("Último escaneo con resultados: " + st.session_state.ultima_consulta + " · Ecuador (UTC−5)")
 
-if consultar:
+if consultar_desde_sidebar or consultar_desde_resumen:
     if not ligas_sels or not mercados_sels:
         st.warning("Selecciona al menos un torneo y un mercado.")
     elif not any((API_KEY, AF_API_KEY, ALLSPORTS_KEY, SPORTAPI_KEY)):
@@ -544,7 +552,7 @@ elif vista_seleccionada == "Radar Multi-Mercado":
     st.caption("Encuentra un partido, compara sus mercados y añade selecciones a tu boleto.")
     events = st.session_state.datos_cargados
     if not events:
-        st.info("El Radar está listo. Elige tus competiciones en el menú lateral y pulsa Escanear Mercado.")
+        st.info("El Radar está listo. Elige tus competiciones en el menú lateral y pulsa Escanear mercado.")
         render_ticket(BitacoraManager.guardar)
     else:
         left,right = st.columns([2.1,1],gap="large")
@@ -587,81 +595,7 @@ elif vista_seleccionada == "Radar Multi-Mercado":
 # VISTA 2: VERIFICADOR
 # ---------------------------------------------------------
 elif vista_seleccionada == "Verificador & Monte Carlo":
-    st.title("Verificador de Boletos")
-    st.caption("Análisis cuantitativo de viabilidad, Kelly & Monte Carlo")
-
-    st.caption("Las probabilidades del verificador son una aproximación a partir de las cuotas (ajuste del 5 %). La combinada supone eventos independientes.")
-    tab_foto, tab_texto = st.tabs(["📷 Foto", "📝 Texto"])
-    texto_para_analizar = ""
-
-    with tab_foto:
-        uploaded = st.file_uploader("Sube captura del boleto:", type=["jpg", "jpeg", "png"])
-        if uploaded and st.button("Extraer texto de la imagen"):
-            try:
-                from PIL import Image
-                import pytesseract
-                image = Image.open(uploaded)
-                if image.width * image.height > 16000000:
-                    st.error("La imagen supera el límite de 16 megapíxeles.")
-                else:
-                    available = pytesseract.get_languages(config='')
-                    languages = '+'.join(lang for lang in ('spa','eng') if lang in available)
-                    if not languages:
-                        st.error("Instala el idioma español o inglés de Tesseract para leer el boleto.")
-                    else:
-                        st.session_state.ocr_text = pytesseract.image_to_string(image, lang=languages, timeout=15)
-            except Exception:
-                st.error("No se pudo leer la imagen. Revisa que Tesseract esté instalado o pega el texto manualmente.")
-        texto_ocr = st.text_area("Texto extraído (revisa y corrige las cuotas)", value=st.session_state.get('ocr_text', ''))
-        if st.session_state.get('ocr_text') and not texto_ocr:
-            st.info("Vuelve a abrir esta sección para revisar el texto extraído.")
-    with tab_texto:
-        texto_manual = st.text_area("Pega tus selecciones (equipo y cuota por línea):", placeholder="Real Madrid 1.50", height=120)
-    source = st.radio("Analizar desde", ["Texto manual", "Foto revisada"], horizontal=True)
-    texto_para_analizar = texto_manual if source == "Texto manual" else texto_ocr
-    if texto_para_analizar:
-        partidos_ext = parse_ticket(texto_para_analizar)
-        if not partidos_ext:
-            st.info("No se reconocen selecciones válidas. Usa un nombre seguido de una cuota decimal mayor que 1.")
-        if partidos_ext:
-            cuota_acum, prob_comb = 1.0, 1.0
-            for p in partidos_ext:
-                cuota_acum *= p['cuota']
-                prob_comb *= (p['prob_real'] / 100.0)
-
-            ev = (cuota_acum * prob_comb) - 1.0
-            sharpe = calcular_sharpe_parlay(cuota_acum, prob_comb)
-            b_odds = cuota_acum - 1.0
-            kelly_pct = max(0.0, ((b_odds * prob_comb) - (1.0 - prob_comb)) / b_odds) if b_odds > 0 else 0.0
-            score = min(100, max(0, int((prob_comb * 60) + (max(0, ev) * 200) + (sharpe * 10))))
-
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Salud", f"{score}/100")
-            c2.metric("Cuota", f"@{round(cuota_acum, 2)}")
-            c3.metric("EV Neto", f"{'+' if ev > 0 else ''}{round(ev * 100, 1)}%")
-
-            st.markdown("### 🧮 Criterio de Kelly & Riesgo")
-            k1, k2 = st.columns(2)
-            k1.metric("Stake Sugerido", f"${round((kelly_pct * 0.25) * bankroll_total, 2)}")
-            k2.metric("Sharpe Ratio", f"{round(sharpe, 2)}")
-
-            res_mc = ejecutar_simulacion_montecarlo(partidos_ext)
-            st.markdown("### 🎲 Monte Carlo (10k simulaciones)")
-            m1, m2 = st.columns(2)
-            m1.metric("Acierto Pleno", f"{round(res_mc['pleno_acierto'], 1)}%")
-            m2.metric("Fallo por 1", f"{round(res_mc['fallo_por_uno'], 1)}%")
-
-            st.markdown("<div class='veredicto-box'>", unsafe_allow_html=True)
-            if ev > 0.02 and res_mc['pleno_acierto'] > 15.0:
-                st.markdown("### 🔥 Veredicto: Alto Valor (+EV)")
-                st.write("Excelente relación de riesgo/retorno matemática.")
-            elif res_mc['fallo_por_uno'] > 30.0:
-                st.markdown("### ⚠️ Veredicto: Riesgo 'Fallo por 1'")
-                st.write(f"Alta probabilidad (**{round(res_mc['fallo_por_uno'], 1)}%**) de perder por un solo evento. Considera sistemas de cobertura.")
-            else:
-                st.markdown("### 📉 Veredicto: Desfavorable (-EV)")
-                st.write("Margen de la casa muy alto. No recomendado.")
-            st.markdown("</div>", unsafe_allow_html=True)
+    render_verifier(ejecutar_simulacion_montecarlo)
 
 # ---------------------------------------------------------
 # VISTA 3: H2H
@@ -718,10 +652,10 @@ elif vista_seleccionada == "Alineaciones & Bajas":
 
 elif vista_seleccionada == "Soporte":
     st.title("Centro de ayuda")
-    st.markdown("1. Abre **Filtros de escaneo** en el menú lateral (☰ en celular).\n2. Elige torneos, mercados y casas; pulsa **Escanear Mercado**.\n3. Explora el Dashboard y añade selecciones desde Radar.\n4. Exporta la Bitácora para conservar tus registros.")
+    st.markdown("1. Abre **Filtros de escaneo** en el menú lateral (☰ en celular).\n2. Elige torneos, mercados y casas; pulsa **Escanear mercado**.\n3. Explora el Dashboard y añade selecciones desde Radar.\n4. Exporta la Bitácora para conservar tus registros.")
     st.subheader("Estado de configuración")
     st.dataframe(pd.DataFrame([{'Proveedor':name, 'Estado':'Clave configurada' if key else 'Sin clave'} for name,key in [('The Odds API',API_KEY),('API-Football',AF_API_KEY),('AllSports',ALLSPORTS_KEY),('SportAPI',SPORTAPI_KEY)]]), hide_index=True, width="stretch")
     st.caption("Una clave configurada no confirma conectividad, suscripción ni disponibilidad de cuotas. Las fuentes pueden devolver datos vacíos. API-Football consulta hasta tres páginas por liga para limitar consumo.")
 
 st.divider()
-st.caption("Analizador · Datos para comparar, contexto para decidir. Exporta tu bitácora para conservarla fuera de esta sesión.")
+st.caption("Analizador · Horarios de Ecuador")
