@@ -57,6 +57,16 @@ def apply_theme(light=False):
     .stTabs [data-baseweb="tab"] {{white-space:nowrap;min-height:44px;}}
     @media(max-width:768px) {{.block-container{{padding:1rem .85rem 3rem;}} .hero{{padding:1.25rem;}} .hero h1{{font-size:1.55rem;}} .hero:after{{opacity:.35;}} [data-testid="stHorizontalBlock"]{{flex-wrap:wrap;}} [data-testid="stColumn"]{{min-width:min(100%,240px);flex:1 1 240px;}} [data-testid="stMetric"]{{min-height:100px;}}}}
     @media(max-width:768px) {{.st-key-quicknav [data-testid="stColumn"]{{min-width:0;flex:1 1 0;}} .st-key-dashboard_metrics [data-testid="stColumn"]{{min-width:0;flex:1 1 42%;}} .st-key-dashboard_metrics [data-testid="stMetricValue"]{{font-size:1.5rem;}} .st-key-dashboard_metrics [data-testid="stMetric"]{{padding:.85rem;}}}}
+    .st-key-verifier_entry {{max-width:860px;}}
+    .st-key-verifier_metrics {{max-width:1060px;}}
+    [data-testid="stFileUploaderDropzone"] {{border:1px dashed {line};border-radius:12px;background:{card};}}
+    textarea {{line-height:1.55 !important;}}
+    @media(max-width:540px) {{
+        .st-key-quicknav [data-testid="stColumn"] {{flex:1 1 44%;}}
+        .st-key-verifier_metrics [data-testid="stColumn"] {{flex:1 1 44%;min-width:0;}}
+        .st-key-verifier_metrics [data-testid="stMetricValue"] {{font-size:1.45rem;}}
+        .match-header {{flex-wrap:wrap;}}
+    }}
     @media(prefers-reduced-motion:reduce) {{*{{transition:none !important;scroll-behavior:auto !important;}}}}
     </style>''',unsafe_allow_html=True)
 
@@ -68,8 +78,16 @@ def header():
 
 def quick_navigation():
     with st.container(key='quicknav'):
-        for col,label,view in zip(st.columns(3),['Resumen','Radar','Mi boleto'],['Dashboard','Radar Multi-Mercado','Generador Visual']):
-            col.button(label,on_click=go_to,args=(view,),width="stretch",key='quick_'+view)
+        destinations = [
+            ("Verificar", "Verificador & Monte Carlo"),
+            ("Resumen", "Dashboard"),
+            ("Radar", "Radar Multi-Mercado"),
+            ("Mi boleto", "Generador Visual"),
+        ]
+        for col, (label, view) in zip(st.columns(4), destinations):
+            active = st.session_state.navigation == view
+            col.button(label, on_click=go_to, args=(view,), width="stretch",
+                       type="primary" if active else "secondary", key="quick_" + view)
 
 
 def themed_chart(fig, key=None):
